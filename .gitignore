@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+*.log
+.vite/
+coverage/
+
+.pnpm-store/
+
+# Environment / credentials — never commit real keys.
+.env
+.env.*
+!.env.example

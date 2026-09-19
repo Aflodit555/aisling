@@ -1,0 +1,19 @@
+{
+  "name": "@aisling/core",
+  "version": "0.1.6",
+  "private": true,
+  "type": "module",
+  "description": "Framework-agnostic Aisling character runtime: Stimulus, Character, Capability, Provider, Output.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}

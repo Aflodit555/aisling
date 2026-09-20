@@ -22,6 +22,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
 
 import { createLocalStorageConfigStore } from '../config/local-storage-config-store'
+import { resolvePersistentStorage } from '../storage/desktop-storage'
 import {
   buildChatProvider,
   buildHearingProvider,
@@ -52,7 +53,7 @@ export interface TestSearchResult {
 }
 
 export const useSettingsStore = defineStore('settings', () => {
-  const configStore = createLocalStorageConfigStore()
+  const configStore = createLocalStorageConfigStore(resolvePersistentStorage())
 
   const config = ref<PlatformConfig>(createDefaultPlatformConfig())
   const loaded = ref(false)
@@ -167,9 +168,13 @@ export const useSettingsStore = defineStore('settings', () => {
     try {
       // Browser speech speaks directly; other providers return audio to play.
       const result = await provider.synthesize({ text: '你好，我是 Aisling。' })
+      if (result.audio) {
+        voiceMessage.value = 'Audio received. Playing…'
+        return { ok: true, message: voiceMessage.value, audio: result.audio }
+      }
       voiceState.value = 'connected'
       voiceMessage.value = 'Ready.'
-      return { ok: true, message: 'Ready.', audio: result.audio }
+      return { ok: true, message: voiceMessage.value }
     }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -177,6 +182,17 @@ export const useSettingsStore = defineStore('settings', () => {
       voiceMessage.value = message
       return { ok: false, message }
     }
+  }
+
+  function completeVoicePlayback(): void {
+    voiceState.value = 'connected'
+    voiceMessage.value = 'Ready. Audio playback completed.'
+  }
+
+  function failVoicePlayback(error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error)
+    voiceState.value = 'failed'
+    voiceMessage.value = `Audio playback failure: ${detail}`
   }
 
   async function testVision(next: VisionConfig, image: ImageInput): Promise<TestVisionResult> {
@@ -267,9 +283,11 @@ export const useSettingsStore = defineStore('settings', () => {
     config,
     connectionMessage,
     connectionState,
+    completeVoicePlayback,
     lastTranscript,
     load,
     loaded,
+    failVoicePlayback,
     modules,
     saveConsciousness,
     saveHearing,

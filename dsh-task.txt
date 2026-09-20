@@ -1,0 +1,393 @@
+工作目录：
+
+`D:\Project\demo\project_Aisling`
+
+请基于当前仓库真实代码继续推进 Project_Aisling。
+
+不要重新设计项目，不要另起一套 Desktop UI，也不要大规模重构已有 Runtime。
+
+## 本轮目标
+
+完成 **Electron Desktop 主线产品化的第一轮**。
+
+当前已经存在：
+
+* `apps/stage-web`
+* `apps/stage-desktop`
+* Electron BrowserWindow
+* preload bridge
+* `contextIsolation: true`
+* `sandbox: true`
+* `nodeIntegration: false`
+* Windows foreground app/title 获取
+* Autonomous Speak vertical slice
+* Conversation / Settings / Speech 等已有能力
+
+目前启动仍然需要分别运行：
+
+```bash
+pnpm dev
+pnpm dev:desktop
+```
+
+Electron 与 Browser 共用同一套 `stage-web` renderer。
+
+本轮不要继续停留在“Electron 壳可以打开”的状态，而是让：
+
+**Aisling Desktop 正式成为项目后续的主要运行入口。**
+
+但注意范围：
+
+> 本轮只做到“稳定主线宿主”。
+
+不要陷入 Electron 基础设施无限完善。
+
+下一阶段仍然要尽快进入 Live2D Renderer。
+
+---
+
+# 1. 先读取现状
+
+先实际检查：
+
+* 根目录 `package.json`
+* workspace 配置
+* `apps/stage-web`
+* `apps/stage-desktop`
+* Electron main / preload
+* Vite 启动逻辑
+* Stage 当前 API / relay / backend 依赖
+* Settings persistence
+* Conversation persistence
+* localStorage 使用位置
+* 当前 development / production 判断方式
+
+不要根据本提示词猜文件结构。
+
+先基于仓库真实实现确定最小修改方案，再开始修改。
+
+---
+
+# 2. 收束 Desktop 启动链路
+
+当前：
+
+```text
+pnpm dev
++
+pnpm dev:desktop
+```
+
+目标是在开发阶段至少形成一个明确的 Desktop 主入口，例如：
+
+```bash
+pnpm dev:desktop
+```
+
+或者仓库现有结构下更合理的等价命令。
+
+该命令应负责：
+
+```text
+启动 Desktop 所需 renderer/runtime
+→ 等待依赖 ready
+→ 启动 Electron
+→ 打开 Aisling Stage
+```
+
+不要要求开发者手动：
+
+1. 开一个终端运行 Vite
+2. 等待端口
+3. 再开第二个终端
+4. 启动 Electron
+
+需要有合理的：
+
+* child process 生命周期管理
+* ready 等待
+* Electron 退出后的开发进程清理
+* 启动失败日志
+
+不要靠固定 sleep 猜测 Vite 已启动。
+
+---
+
+# 3. 明确 Development / Desktop Runtime 边界
+
+整理当前 Electron 对 Stage 的加载方式。
+
+Development 可以继续使用 Vite dev server。
+
+但代码结构上应明确区分：
+
+```text
+development
+→ loadURL(dev server)
+
+desktop / packaged-ready path
+→ load local built renderer
+```
+
+本轮不要求真正发布 installer。
+
+但不能继续把 Electron 永久绑定在：
+
+```text
+localhost:5174
+```
+
+这样的开发假设上。
+
+至少把正式 Desktop 加载路径设计并落到代码中，使未来 `stage-web build` 可以直接被 Electron 承载。
+
+尽量复用现有 stage-web，不复制 renderer。
+
+---
+
+# 4. 处理 Desktop 数据生命周期
+
+重点检查：
+
+* Settings
+* Provider configuration
+* Conversations
+* 当前 localStorage
+
+当前 Browser 与 Electron 如果因为 origin 不同形成两份数据，需要处理。
+
+目标不是现在引入复杂数据库。
+
+目标是保证：
+
+> Aisling Desktop 成为主入口后，Settings 与 Conversation 有稳定、可解释的数据归属。
+
+优先采用当前架构下最小、低风险方案。
+
+可以：
+
+* 保持 renderer persistence，但统一 Desktop origin / storage path
+* 或建立非常薄的 Desktop persistence bridge
+
+具体选择必须根据现有实现判断。
+
+不要为了“架构漂亮”直接引入 SQLite、ORM 或复杂 repository layer。
+
+必须保证已有用户配置和 conversation 不被无意义破坏。
+
+如果涉及迁移，做最小兼容迁移。
+
+---
+
+# 5. 保持 Browser Stage
+
+Browser Stage 暂时不要删除。
+
+定位调整为：
+
+```text
+Electron Desktop
+= primary runtime
+
+Browser Stage
+= development / lightweight entry
+```
+
+两者继续复用：
+
+* Stage UI
+* Conversation UI
+* Settings
+* Character presentation renderer
+* Runtime-facing renderer code
+
+Electron main / preload 只负责桌面宿主和系统能力。
+
+不要把：
+
+* Character rendering
+* Live2D
+* UI state
+* Conversation rendering
+
+搬入 Electron main process。
+
+---
+
+# 6. 不要在本轮做
+
+以下内容全部延期：
+
+* 自动更新器
+* installer 深度定制
+* Windows code signing
+* 开机自启动
+* system tray 完整设计
+* 多窗口体系
+* crash reporter 平台
+* telemetry
+* SQLite 大迁移
+* Electron framework 重构
+* Live2D
+* Autonomous silence 重构
+* Interaction Policy 重构
+* ASR 修复
+* 新 Provider
+
+除非某项是本轮启动链路成立的硬阻塞，否则不要扩 scope。
+
+---
+
+# 7. 不得破坏现有能力
+
+修改后必须确认：
+
+* 普通聊天正常
+* Conversation persistence 正常
+* Multi-session 正常
+* Settings / Provider 配置正常
+* Speech 正常
+* Desktop bridge connected
+* foreground app/title 获取正常
+* Autonomous Speak On / Off 正常
+* Autonomous output 仍进入现有 Speech 链路
+* Browser Stage 至少仍可开发运行
+
+---
+
+# 8. 用户可观察结果
+
+本轮成功以后，重点不是代码多了什么模块，而是用户看到：
+
+```text
+启动 Aisling Desktop
+↓
+Stage 自动准备并打开
+↓
+原有 Settings / Conversation 可继续使用
+↓
+Desktop system capability 自动存在
+↓
+Aisling 可以长期以 Desktop App 作为主要运行环境
+```
+
+而不是：
+
+```text
+先理解 Vite
+→ 打开两个终端
+→ 手动启动两个服务
+→ 再得到一个 Electron 壳
+```
+
+---
+
+# 9. 人工验收标准
+
+至少提供以下人工测试步骤：
+
+### Test A — Desktop 单入口启动
+
+从项目根目录执行新的 Desktop 主入口命令。
+
+确认：
+
+* renderer/runtime 自动启动
+* Electron 自动出现
+* 不需要第二个人工终端步骤
+
+### Test B — Existing state
+
+进入 Settings / Conversation。
+
+确认：
+
+* Provider 设置仍存在
+* Conversation 能正常读取
+* 切换 session 正常
+
+### Test C — Normal chat
+
+发送普通消息。
+
+确认：
+
+```text
+User
+→ Consciousness
+→ CharacterOutput
+→ Stage
+```
+
+没有回归。
+
+### Test D — Speech
+
+验证已有 Test Voice 或正常回复 Speech。
+
+确认声音正常。
+
+### Test E — Desktop bridge
+
+确认：
+
+* Desktop bridge connected
+* foreground app/title 正常变化
+
+### Test F — Autonomous
+
+开启 Proactive Speak。
+
+确认原有 autonomous vertical slice 仍能工作。
+
+### Test G — Browser regression
+
+单独启动 Browser Stage。
+
+确认基础页面仍然能够作为开发入口运行。
+
+---
+
+# 10. 停止条件
+
+当以下条件成立后，本轮立即停止：
+
+```text
+Desktop = Aisling 稳定主入口
+开发启动 = 单命令
+renderer = 可以走 dev / built 两种加载路径
+Settings / Conversation 数据生命周期明确
+已有 Desktop capability 无回归
+Browser = 保留开发入口
+```
+
+不要继续追加 Electron 功能。
+
+下一阶段应进入：
+
+```text
+Live2D Renderer
+```
+
+把当前 Character placeholder 替换为真正的角色 renderer。
+
+---
+
+# 11. 最终输出
+
+修改完成后请返回精简报告：
+
+1. 实际读取到的旧结构
+2. 本轮采用的方案
+3. 修改文件
+4. Desktop 新启动方式
+5. Storage / Settings / Conversation 如何处理
+6. Development 与 Desktop runtime 如何区分
+7. 哪些功能明确延期
+8. 自动测试结果
+9. 我需要执行的人工验收步骤
+10. 是否已经达到“停止 Electron 产品化、进入 Live2D”的条件
+
+不要提交 GitHub。
+
+先完成修改与验证，等待人工验收。

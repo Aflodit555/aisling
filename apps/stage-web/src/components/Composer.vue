@@ -25,7 +25,7 @@ function submit(): void {
   <form class="composer" @submit.prevent="submit">
     <textarea
       v-model="draft"
-      rows="2"
+      rows="1"
       placeholder="Say something to Aisling…"
       :disabled="disabled"
       @keydown.enter.exact.prevent="submit"
@@ -48,14 +48,18 @@ textarea {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  padding: 12px 14px;
+  height: 44px;
+  min-height: 44px;
+  max-height: 44px;
+  overflow-y: auto;
+  padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: #161329;
   color: #e6e0f4;
   font: inherit;
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 22px;
 }
 
 textarea:focus {

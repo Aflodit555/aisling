@@ -7,6 +7,7 @@
 
 export type ChatProviderType = 'mock' | 'openai-compatible'
 export type SpeechProviderType = 'none' | 'browser' | 'alibaba'
+export type SpeechTransport = 'websocket' | 'http'
 export type HearingProviderType = 'none' | 'openai-compatible' | 'alibaba'
 export type VisionProviderType = 'none' | 'openai-compatible'
 export type WebSearchProviderType = 'none' | 'tavily'
@@ -24,7 +25,9 @@ export interface SpeechConfig {
   apiKey: string
   model: string
   voice: string
-  /** HTTP base URL for the Alibaba provider (workspace/user-specific). */
+  /** Alibaba realtime WebSocket or native HTTP transport. */
+  transport: SpeechTransport
+  /** Workspace/user-specific endpoint for the selected transport. */
   endpoint: string
 }
 
@@ -60,10 +63,11 @@ export interface PlatformConfig {
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
 export const DEFAULT_ALIBABA_TTS_MODEL = 'qwen-audio-3.0-tts-flash'
-export const DEFAULT_ALIBABA_TTS_VOICE = 'Cherry'
+export const DEFAULT_ALIBABA_TTS_VOICE = 'longanhuan_v3.6'
 export const DEFAULT_TRANSCRIPTION_MODEL = 'whisper-1'
 export const DEFAULT_VISION_MODEL = 'gpt-4o-mini'
 export const DEFAULT_ALIBABA_TTS_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1'
+export const DEFAULT_ALIBABA_TTS_WEBSOCKET_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference'
 export const DEFAULT_ALIBABA_ASR_MODEL = 'qwen-audio-3.0-asr-flash'
 
 export function createDefaultConsciousnessConfig(): ConsciousnessConfig {
@@ -78,7 +82,8 @@ export function createDefaultPlatformConfig(): PlatformConfig {
       apiKey: '',
       model: DEFAULT_ALIBABA_TTS_MODEL,
       voice: DEFAULT_ALIBABA_TTS_VOICE,
-      endpoint: DEFAULT_ALIBABA_TTS_BASE_URL,
+      transport: 'websocket',
+      endpoint: DEFAULT_ALIBABA_TTS_WEBSOCKET_URL,
     },
     hearing: {
       providerType: 'none',
@@ -118,6 +123,42 @@ export function validateAlibabaWorkspaceBaseUrl(value: string): string | undefin
   if (!/^https?:\/\//i.test(trimmed))
     return 'Enter a full HTTP(S) workspace API base URL, e.g. https://<workspace>.cn-beijing.maas.aliyuncs.com/api/v1'
 
+  return undefined
+}
+
+/** Validates the endpoint contract for the selected Alibaba TTS transport. */
+export function validateAlibabaTtsEndpoint(value: string, transport: SpeechTransport): string | undefined {
+  const trimmed = value.trim()
+  const label = transport === 'websocket' ? 'Realtime WebSocket Endpoint' : 'HTTP API Base URL'
+  if (!trimmed)
+    return `${label} is required.`
+
+  let url: URL
+  try {
+    url = new URL(trimmed)
+  }
+  catch {
+    return transport === 'websocket'
+      ? 'Enter a full wss:// endpoint, e.g. wss://<workspace>.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference'
+      : 'Enter a full HTTPS base URL, e.g. https://<workspace>.cn-beijing.maas.aliyuncs.com/api/v1'
+  }
+
+  if (url.username || url.password || url.search || url.hash)
+    return `${label} must not contain credentials, query parameters, or a fragment.`
+
+  const host = url.hostname.toLowerCase()
+  if (host !== 'aliyuncs.com' && !host.endsWith('.aliyuncs.com'))
+    return `${label} must use an aliyuncs.com host.`
+
+  const path = url.pathname.replace(/\/+$/, '')
+  if (transport === 'websocket') {
+    if (url.protocol !== 'wss:' || path !== '/api-ws/v1/inference')
+      return 'Realtime WebSocket Endpoint must use wss:// and end with /api-ws/v1/inference.'
+    return undefined
+  }
+
+  if (url.protocol !== 'https:' || path !== '/api/v1')
+    return 'HTTP API Base URL must use https:// and end with /api/v1.'
   return undefined
 }
 

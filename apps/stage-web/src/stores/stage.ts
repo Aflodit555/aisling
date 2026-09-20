@@ -1,6 +1,6 @@
 import type { CharacterOutput, ChatMessage, ImageInput, RuntimeEvent, Stimulus } from '@aisling/core'
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, reactive, ref, shallowRef } from 'vue'
 
 import { createWebVisualStimulus } from '../adapter/vision'
 import { createWebTextStimulus } from '../adapter/web'
@@ -11,6 +11,8 @@ import {
   type ConversationSession,
 } from '../conversation/conversation-store'
 import { createAislingRuntime } from '../runtime/aisling'
+import { createAutonomousController, createAutonomousState } from '../runtime/autonomous'
+import { resolvePersistentStorage } from '../storage/desktop-storage'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
 
@@ -35,6 +37,12 @@ export type PipelineEvent =
 const MAX_DEVTOOLS_EVENTS = 200
 const MODEL_CONTEXT_WINDOW = 40
 const MAX_SESSION_MESSAGES = 200
+
+export type DesktopBridgeState = 'connected' | 'unavailable'
+
+function hasDesktopBridge(): boolean {
+  return typeof window.aislingDesktop?.readActivity === 'function'
+}
 
 function historyToDisplay(history: readonly ChatMessage[]): DisplayMessage[] {
   const result: DisplayMessage[] = []
@@ -67,7 +75,7 @@ function stimulusToUserMessage(stimulus: Stimulus): { role: 'user'; content: str
 export const useStageStore = defineStore('stage', () => {
   const settings = useSettingsStore()
   const speech = useSpeechStore()
-  const conversationStore = createLocalStorageConversationStore()
+  const conversationStore = createLocalStorageConversationStore(resolvePersistentStorage())
 
   function ensureActiveSession(): ConversationSession {
     const sessions = conversationStore.list()
@@ -99,6 +107,39 @@ export const useStageStore = defineStore('stage', () => {
   const visionProcessing = ref(false)
   const events = ref<PipelineEvent[]>([])
   const lastTurn = shallowRef<{ stimulus: Stimulus; output: CharacterOutput } | undefined>()
+  const autonomous = reactive(createAutonomousState())
+  const desktopBridgeState = ref<DesktopBridgeState>(hasDesktopBridge() ? 'connected' : 'unavailable')
+  const desktopAvailable = computed(() => desktopBridgeState.value === 'connected')
+
+  function refreshDesktopBridgeStatus(): boolean {
+    const connected = hasDesktopBridge()
+    desktopBridgeState.value = connected ? 'connected' : 'unavailable'
+    if (!connected && autonomous.enabled)
+      autonomousController.setEnabled(false)
+    return connected
+  }
+
+  async function readDesktopActivity() {
+    if (!refreshDesktopBridgeStatus())
+      throw new Error('Desktop bridge is unavailable')
+    try {
+      return await window.aislingDesktop!.readActivity()
+    }
+    catch (error) {
+      desktopBridgeState.value = 'unavailable'
+      if (autonomous.enabled)
+        autonomousController.setEnabled(false)
+      throw error
+    }
+  }
+
+  const autonomousController = createAutonomousController({
+    state: autonomous,
+    readDesktop: readDesktopActivity,
+    isBusy: () => sending.value || visionProcessing.value || speech.speaking,
+    isReady: () => desktopAvailable.value && settings.loaded && Boolean(settings.activeChatProvider),
+    trigger: sendStimulus,
+  })
 
   runtime.onEvent((event) => {
     events.value = [...events.value, event].slice(-MAX_DEVTOOLS_EVENTS)
@@ -125,6 +166,8 @@ export const useStageStore = defineStore('stage', () => {
   const characterName = computed(() => runtime.character.name)
 
   function sendStimulus(stimulus: Stimulus): void {
+    if (stimulus.kind === 'user-text' || stimulus.kind === 'visual')
+      autonomousController.noteHumanInteraction()
     if (sending.value)
       return
 
@@ -144,6 +187,8 @@ export const useStageStore = defineStore('stage', () => {
     void runtime.ingest(stimulus).then((turn) => {
       if (turn.status === 'completed' && turn.output) {
         lastTurn.value = { stimulus: turn.stimulus, output: turn.output }
+        if (turn.stimulus.kind === 'autonomous' && !turn.output.text.trim())
+          return
         messages.value = [...messages.value, { role: 'assistant', content: turn.output.text }]
         sessionMessages.value = [...sessionMessages.value, { role: 'assistant', content: turn.output.text }]
         persistActiveSession()
@@ -157,6 +202,8 @@ export const useStageStore = defineStore('stage', () => {
       }
     }).finally(() => {
       sending.value = false
+      if (stimulus.kind === 'autonomous')
+        autonomousController.completed()
     })
   }
 
@@ -168,6 +215,9 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   async function sendImage(image: ImageInput, caption: string): Promise<void> {
+    autonomousController.noteHumanInteraction()
+    if (sending.value || visionProcessing.value)
+      return
     const provider = settings.activeVisionProvider
     if (!provider) {
       appendEvent({ type: 'vision:failed', error: 'Vision is not configured' })
@@ -193,6 +243,9 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   function switchSession(id: string): void {
+    autonomousController.noteHumanInteraction()
+    if (sending.value || visionProcessing.value)
+      return
     const session = conversationStore.get(id)
     if (!session)
       return
@@ -205,6 +258,9 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   function newConversation(): void {
+    autonomousController.noteHumanInteraction()
+    if (sending.value || visionProcessing.value)
+      return
     const session = conversationStore.create()
     activeSessionId.value = session.id
     sessionMessages.value = []
@@ -214,6 +270,9 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   function deleteSession(id: string): void {
+    autonomousController.noteHumanInteraction()
+    if (sending.value || visionProcessing.value)
+      return
     const wasActive = id === activeSessionId.value
     conversationStore.delete(id)
     sessionsList.value = conversationStore.list()
@@ -227,6 +286,14 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   return {
+    autonomous,
+    desktopBridgeState,
+    desktopAvailable,
+    refreshDesktopBridgeStatus,
+    tickAutonomous: autonomousController.tick,
+    noteHumanInteraction: autonomousController.noteHumanInteraction,
+    setAutonomousEnabled: (enabled: boolean) => autonomousController.setEnabled(refreshDesktopBridgeStatus() && enabled),
+    setAutonomousThreshold: autonomousController.setThreshold,
     activeSessionId,
     deleteSession,
     appendEvent,

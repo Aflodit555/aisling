@@ -30,14 +30,38 @@ verified end-to-end against the real provider.
 
 ## Quick start
 
-Prerequisites: Node.js and pnpm.
+Prerequisites: Node.js and pnpm (Node.js 22.12+ for the Desktop host).
 
 ```bash
 pnpm install
+pnpm dev:desktop
+```
+
+`pnpm dev:desktop` is the single Desktop entry: it starts the Stage renderer
+(Vite), waits until it is ready, launches Electron, and cleans the renderer
+process up when Electron exits. No second terminal is required.
+
+To run the Desktop against the **built** renderer instead of the dev server:
+
+```bash
+pnpm start:desktop
+```
+
+The plain browser Stage remains available for lightweight development:
+
+```bash
 pnpm dev
 ```
 
 Open <http://localhost:5174>.
+
+Configure providers inside the Electron window, then expand **Autonomous Speak**
+in the conversation dock. It is off by default; the threshold defaults to 90
+seconds with a 180-second cooldown. Desktop keyboard/mouse activity resets
+silence. The ordinary browser Stage cannot read desktop activity.
+
+See [Desktop host and data lifecycle](docs/desktop-host.md) and the
+[autonomous speaking vertical slice](docs/autonomous-speaking.md).
 
 Provider credentials are configured from the Settings UI — there is no `.env`
 setup, and keys are never required in source code or the terminal.
@@ -46,6 +70,7 @@ setup, and keys are never required in source code or the terminal.
 
 ```
 apps/stage-web   — Vue 3 + Vite Stage (/settings modules, /devtools)
+apps/stage-desktop — minimal Windows Electron host (foreground app/title + idle IPC)
 packages/core    — framework-agnostic runtime: Stimulus, Character, Capability,
                    Provider, Output, PlatformConfig/ConfigStore, capability
                    registry, tool domain, and chat/speech/hearing/vision/search providers
@@ -57,17 +82,21 @@ packages/core    — framework-agnostic runtime: Stimulus, Character, Capability
 - All module settings share one `PlatformConfig` and one `ConfigStore`
   (`packages/core/src/config.ts`,
   `apps/stage-web/src/config/local-storage-config-store.ts`).
-- API credentials configured in Settings are currently stored **locally in the
-  browser** (`localStorage`). Do **not** commit your own real credentials.
+- In the browser, credentials configured in Settings are stored in `localStorage`.
+  In Electron they are routed through a thin bridge to one stable file in the
+  Electron userData directory (`aisling-store.json`), so Desktop data is not tied
+  to the renderer origin. Do **not** commit your own real credentials.
 
 ## Commands
 
 ```bash
-pnpm install     # install workspace
-pnpm dev         # start the Stage dev server on http://localhost:5174
-pnpm typecheck   # tsc (core) + vue-tsc (app)
-pnpm test        # vitest (core)
-pnpm build       # vite build (app)
+pnpm install       # install workspace
+pnpm dev:desktop   # Desktop (primary): start renderer → wait ready → launch Electron
+pnpm start:desktop # Desktop against the built renderer (aisling://stage)
+pnpm dev           # browser Stage dev server on http://localhost:5174
+pnpm typecheck     # tsc (core) + vue-tsc (app) + Electron JS checkJs
+pnpm test          # vitest (core + Stage autonomous integration)
+pnpm build         # vite build (app)
 ```
 
 Aisling runs on a fixed port **5174** so it can run alongside AIRI (5173).

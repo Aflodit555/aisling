@@ -1,13 +1,33 @@
 <script setup lang="ts">
+import { nextTick, ref, watch } from 'vue'
+
 import type { DisplayMessage } from '../stores/stage'
 
-defineProps<{
+const props = defineProps<{
   messages: DisplayMessage[]
 }>()
+
+const container = ref<HTMLElement>()
+
+watch(
+  [
+    () => props.messages,
+    () => props.messages.length,
+    () => props.messages.at(-1)?.content,
+  ],
+  async () => {
+    await nextTick()
+    container.value?.scrollTo({
+      top: container.value.scrollHeight,
+      behavior: 'smooth',
+    })
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
-  <div class="messages">
+  <div ref="container" class="messages">
     <p v-if="messages.length === 0" class="empty">Aisling is waiting. Say hello.</p>
     <div
       v-for="(message, index) in messages"

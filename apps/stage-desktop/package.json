@@ -1,0 +1,18 @@
+{
+  "name": "@aisling/stage-desktop",
+  "version": "0.1.6",
+  "private": true,
+  "description": "Minimal Windows Electron host for the existing Web Stage.",
+  "main": "main.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "test:smoke": "electron smoke.cjs",
+    "test:smoke:prod": "electron prod-smoke.cjs",
+    "typecheck": "tsc --allowJs --checkJs --noEmit --skipLibCheck --target ES2022 --module commonjs main.cjs desktop-app.cjs preload.cjs desktop-activity.cjs desktop-protocol.cjs desktop-store.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "^44.4.3",
+    "typescript": "^5.7.2"
+  }
+}

@@ -46,7 +46,19 @@ export interface VisualStimulus extends StimulusBase<'visual'> {
 }
 
 /** Every stimulus the runtime can receive today. */
-export type Stimulus = UserTextStimulus | SystemStimulus | VisualStimulus
+export interface DesktopActivitySnapshot {
+  readonly app?: string
+  readonly title?: string
+  readonly focus?: string
+}
+
+/** Runtime observation, never a message authored by the user. */
+export interface AutonomousStimulus extends StimulusBase<'autonomous'> {
+  readonly activity: DesktopActivitySnapshot
+  readonly silenceSeconds: number
+}
+
+export type Stimulus = UserTextStimulus | SystemStimulus | VisualStimulus | AutonomousStimulus
 
 export interface CreateStimulusOptions {
   /** Creation timestamp; defaults to `Date.now()`. */
@@ -59,6 +71,19 @@ export interface CreateStimulusOptions {
 
 function defaultId(): string {
   return crypto.randomUUID()
+}
+
+export function createAutonomousStimulus(
+  input: { activity: DesktopActivitySnapshot; silenceSeconds: number } & CreateStimulusOptions,
+): AutonomousStimulus {
+  return {
+    id: input.id ?? defaultId(),
+    source: 'desktop-idle',
+    kind: 'autonomous',
+    at: input.at ?? Date.now(),
+    activity: input.activity,
+    silenceSeconds: input.silenceSeconds,
+  }
 }
 
 /** Creates a user-text stimulus. */

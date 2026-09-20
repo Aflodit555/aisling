@@ -1,11 +1,72 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import type { Plugin } from 'vite'
+import WebSocket, { type RawData } from 'ws'
+
+type SpeechTransport = 'websocket' | 'http'
+
+function buildRunTaskMessage(options: { taskId: string; model: string; voice: string }): Record<string, unknown> {
+  return {
+    header: { action: 'run-task', task_id: options.taskId, streaming: 'duplex' },
+    payload: {
+      task_group: 'audio',
+      task: 'tts',
+      function: 'SpeechSynthesizer',
+      model: options.model,
+      parameters: {
+        text_type: 'PlainText',
+        voice: options.voice,
+        format: 'mp3',
+        sample_rate: 22050,
+        volume: 50,
+        rate: 1,
+        pitch: 1,
+        enable_ssml: false,
+      },
+      input: {},
+    },
+  }
+}
+
+function buildContinueTaskMessage(taskId: string, text: string): Record<string, unknown> {
+  return {
+    header: { action: 'continue-task', task_id: taskId, streaming: 'duplex' },
+    payload: { input: { text } },
+  }
+}
+
+function buildFinishTaskMessage(taskId: string): Record<string, unknown> {
+  return {
+    header: { action: 'finish-task', task_id: taskId, streaming: 'duplex' },
+    payload: { input: {} },
+  }
+}
+
+function validateAlibabaTtsEndpoint(value: string, transport: SpeechTransport): string | undefined {
+  let url: URL
+  try {
+    url = new URL(value.trim())
+  }
+  catch {
+    return 'The endpoint is not a valid URL.'
+  }
+  if (url.username || url.password || url.search || url.hash)
+    return 'The endpoint must not contain credentials, query parameters, or a fragment.'
+  const host = url.hostname.toLowerCase()
+  if (host !== 'aliyuncs.com' && !host.endsWith('.aliyuncs.com'))
+    return 'The endpoint must use an aliyuncs.com host.'
+  const path = url.pathname.replace(/\/+$/, '')
+  if (transport === 'websocket' && (url.protocol !== 'wss:' || path !== '/api-ws/v1/inference'))
+    return 'Realtime WebSocket Endpoint must use wss:// and end with /api-ws/v1/inference.'
+  if (transport === 'http' && (url.protocol !== 'https:' || path !== '/api/v1'))
+    return 'HTTP API Base URL must use https:// and end with /api/v1.'
+  return undefined
+}
 
 /**
  * A minimal, provider-specific relay that runs inside the Vite dev/preview
- * server (`pnpm dev`). It performs the header-authenticated Alibaba calls
- * server-side (Native HTTP, not WebSocket) and returns audio/transcript to the
+ * server (`pnpm dev`). It performs header-authenticated Alibaba HTTP and
+ * realtime WebSocket calls server-side and returns audio/transcript to the
  * browser. It is transport/auth only — no runtime, no framework.
  */
 
@@ -44,6 +105,12 @@ function describeUpstreamError(status: number, rawText: string): string {
   return `Alibaba upstream error (HTTP ${status})${snippet ? `: ${snippet}` : ''}`
 }
 
+function describeAuthOrUpstreamError(status: number, rawText = ''): string {
+  if (status === 401 || status === 403)
+    return `Alibaba TTS authentication failed (HTTP ${status}). Check the API Key and workspace region.`
+  return describeUpstreamError(status, rawText)
+}
+
 /** Only http/https audio URLs on an Alibaba host are allowed (SSRF guard). */
 function isSafeAliyunAudioUrl(raw: string): boolean {
   try {
@@ -58,7 +125,166 @@ function isSafeAliyunAudioUrl(raw: string): boolean {
   }
 }
 
+function rawDataToBuffer(data: RawData): Buffer {
+  if (Array.isArray(data))
+    return Buffer.concat(data)
+  if (data instanceof ArrayBuffer)
+    return Buffer.from(data)
+  return Buffer.from(data)
+}
+
+function describeProviderFailure(header: Record<string, unknown>): string {
+  const code = String(header.error_code ?? 'unknown')
+  const message = String(header.error_message ?? 'Speech task failed')
+  if (/unsupported|not supported|invalid.*(?:model|voice)|model|voice|音色/i.test(`${code} ${message}`))
+    return `Unsupported Alibaba TTS model or voice (${code}): ${message}`
+  return `Alibaba TTS provider error (${code}): ${message}`
+}
+
+/** Genuine DashScope duplex TTS: header auth, task events, binary MP3 chunks. */
+function synthesizeAlibabaWebSocket(options: {
+  endpoint: string
+  apiKey: string
+  model: string
+  voice: string
+  text: string
+}): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const taskId = crypto.randomUUID()
+    const chunks: Buffer[] = []
+    let settled = false
+    const ws = new WebSocket(options.endpoint, {
+      headers: {
+        Authorization: `Bearer ${options.apiKey}`,
+        'X-DashScope-DataInspection': 'enable',
+      },
+    })
+    const timer = setTimeout(() => fail(new Error('Alibaba TTS WebSocket timed out.')), 30000)
+
+    function cleanup(): void {
+      clearTimeout(timer)
+      try {
+        ws.close()
+      }
+      catch { /* already closed */ }
+    }
+
+    function fail(error: Error): void {
+      if (settled)
+        return
+      settled = true
+      cleanup()
+      reject(error)
+    }
+
+    function succeed(): void {
+      if (settled)
+        return
+      const audio = Buffer.concat(chunks)
+      if (!audio.length) {
+        fail(new Error('Alibaba TTS provider returned no audio chunks.'))
+        return
+      }
+      settled = true
+      cleanup()
+      resolve(audio)
+    }
+
+    ws.on('open', () => {
+      ws.send(JSON.stringify(buildRunTaskMessage({
+        taskId,
+        model: options.model,
+        voice: options.voice,
+      })))
+    })
+
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) {
+        const chunk = rawDataToBuffer(data)
+        if (chunk.length)
+          chunks.push(chunk)
+        return
+      }
+
+      let message: { header?: Record<string, unknown>; payload?: Record<string, unknown> }
+      try {
+        message = JSON.parse(rawDataToBuffer(data).toString('utf8')) as typeof message
+      }
+      catch {
+        fail(new Error('Alibaba TTS WebSocket returned invalid JSON.'))
+        return
+      }
+
+      const header = message.header ?? {}
+      const event = String(header.event ?? '')
+      if (event === 'task-started') {
+        ws.send(JSON.stringify(buildContinueTaskMessage(taskId, options.text)))
+        ws.send(JSON.stringify(buildFinishTaskMessage(taskId)))
+      }
+      else if (event === 'task-finished') {
+        succeed()
+      }
+      else if (event === 'task-failed') {
+        fail(new Error(describeProviderFailure(header)))
+      }
+      else if (event === 'error') {
+        const detail = String(message.payload?.message ?? header.error_message ?? 'Unknown provider error')
+        fail(new Error(`Alibaba TTS provider error: ${detail}`))
+      }
+    })
+
+    ws.on('unexpected-response', (_request, response) => {
+      response.resume()
+      fail(new Error(describeAuthOrUpstreamError(response.statusCode ?? 502)))
+    })
+    ws.on('error', error => fail(new Error(`Alibaba TTS WebSocket failure: ${error.message}`)))
+    ws.on('close', (code, reason) => {
+      if (!settled)
+        fail(new Error(`Alibaba TTS WebSocket closed before completion (${code}${reason.length ? `: ${reason.toString()}` : ''}).`))
+    })
+  })
+}
+
 /** Alibaba Native HTTP TTS: SpeechSynthesizer → audio URL → download. */
+async function synthesizeAlibabaHttp(options: {
+  endpoint: string
+  apiKey: string
+  model: string
+  voice: string
+  text: string
+}): Promise<Buffer> {
+  const ttsUrl = `${options.endpoint.replace(/\/+$/, '')}/services/audio/tts/SpeechSynthesizer`
+  const upstream = await fetch(ttsUrl, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${options.apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: options.model, input: { text: options.text, voice: options.voice, format: 'wav' } }),
+  })
+
+  const rawText = await upstream.text().catch(() => '')
+  if (!upstream.ok)
+    throw new Error(describeAuthOrUpstreamError(upstream.status, rawText))
+
+  let envelope: { output?: { audio?: { url?: string } } }
+  try {
+    envelope = JSON.parse(rawText) as typeof envelope
+  }
+  catch {
+    throw new Error('Alibaba TTS returned invalid JSON.')
+  }
+
+  const audioUrl = envelope.output?.audio?.url
+  if (!audioUrl)
+    throw new Error('Alibaba TTS provider returned no audio URL.')
+  if (!isSafeAliyunAudioUrl(audioUrl))
+    throw new Error('Alibaba TTS returned an unsafe audio URL.')
+
+  const audioRes = await fetch(audioUrl)
+  if (!audioRes.ok)
+    throw new Error(`Alibaba TTS audio download failed (HTTP ${audioRes.status}).`)
+  return Buffer.from(await audioRes.arrayBuffer())
+}
+
+/** Dispatches Alibaba TTS to the explicitly selected upstream transport. */
 async function handleAlibabaTts(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== 'POST') {
     sendJson(res, 405, { error: 'method not allowed' })
@@ -71,53 +297,33 @@ async function handleAlibabaTts(req: IncomingMessage, res: ServerResponse): Prom
     const model = String(body.model ?? '')
     const voice = String(body.voice ?? '')
     const apiKey = String(body.apiKey ?? '')
+    const transport: SpeechTransport = body.transport === 'http' ? 'http' : 'websocket'
     if (!text || !endpoint || !model || !voice || !apiKey) {
       sendJson(res, 400, { error: 'missing text/endpoint/model/voice/apiKey' })
       return
     }
 
-    const ttsUrl = `${endpoint.replace(/\/+$/, '')}/services/audio/tts/SpeechSynthesizer`
-    const upstream = await fetch(ttsUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, input: { text, voice, format: 'wav' } }),
+    const endpointError = validateAlibabaTtsEndpoint(endpoint, transport)
+    if (endpointError) {
+      sendJson(res, 400, { error: `Invalid Alibaba TTS endpoint: ${endpointError}` })
+      return
+    }
+
+    const request = { text, endpoint, model, voice, apiKey }
+    const bytes = transport === 'websocket'
+      ? await synthesizeAlibabaWebSocket(request)
+      : await synthesizeAlibabaHttp(request)
+    sendJson(res, 200, {
+      audio: {
+        base64: bytes.toString('base64'),
+        mimeType: transport === 'websocket' ? 'audio/mpeg' : 'audio/wav',
+      },
     })
-
-    const rawText = await upstream.text().catch(() => '')
-    if (!upstream.ok) {
-      sendJson(res, upstream.status, { error: describeUpstreamError(upstream.status, rawText) })
-      return
-    }
-
-    let envelope: { output?: { audio?: { url?: string } } }
-    try {
-      envelope = JSON.parse(rawText) as typeof envelope
-    }
-    catch {
-      sendJson(res, 502, { error: 'Alibaba TTS returned invalid JSON' })
-      return
-    }
-
-    const audioUrl = envelope.output?.audio?.url
-    if (!audioUrl) {
-      sendJson(res, 502, { error: 'Alibaba TTS returned no audio URL' })
-      return
-    }
-    if (!isSafeAliyunAudioUrl(audioUrl)) {
-      sendJson(res, 502, { error: 'Alibaba TTS returned an unsafe audio URL' })
-      return
-    }
-
-    const audioRes = await fetch(audioUrl)
-    if (!audioRes.ok) {
-      sendJson(res, 502, { error: `Alibaba TTS audio download failed (HTTP ${audioRes.status})` })
-      return
-    }
-    const bytes = Buffer.from(await audioRes.arrayBuffer())
-    sendJson(res, 200, { audio: { base64: bytes.toString('base64'), mimeType: 'audio/wav' } })
   }
   catch (error) {
-    sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) })
+    const message = error instanceof Error ? error.message : String(error)
+    const status = message.includes('authentication failed') ? 401 : 502
+    sendJson(res, status, { error: message })
   }
 }
 

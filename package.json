@@ -7,6 +7,8 @@
   "packageManager": "pnpm@11.24.0",
   "scripts": {
     "dev": "pnpm --filter @aisling/stage-web dev",
+    "dev:desktop": "node scripts/dev-desktop.mjs",
+    "start:desktop": "node scripts/dev-desktop.mjs --prod",
     "build": "pnpm --filter @aisling/stage-web build",
     "preview": "pnpm --filter @aisling/stage-web preview",
     "typecheck": "pnpm -r run typecheck",

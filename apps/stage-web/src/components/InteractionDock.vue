@@ -7,6 +7,7 @@ import type { SelectedImage } from '../image/file'
 import type { DisplayMessage } from '../stores/stage'
 
 import Composer from './Composer.vue'
+import AutonomousControls from './AutonomousControls.vue'
 import ConversationBrow from './ConversationBrow.vue'
 import ImageInputButton from './ImageInput.vue'
 import MessageList from './MessageList.vue'
@@ -52,6 +53,8 @@ function onSend(text: string): void {
 
     <MessageList :messages="messages" />
 
+    <AutonomousControls />
+
     <div class="input-row">
       <ImageInputButton
         :image="selectedImage"
@@ -71,7 +74,7 @@ function onSend(text: string): void {
   flex-direction: column;
   gap: 12px;
   flex: 0 0 auto;
-  width: clamp(280px, 36vw, 400px);
+  width: clamp(392px, 45vw, 500px);
   min-width: 0;
   min-height: 0;
   overflow: hidden;

@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { DEFAULT_ALIBABA_TTS_BASE_URL, DEFAULT_ALIBABA_TTS_MODEL, DEFAULT_ALIBABA_TTS_VOICE, validateAlibabaWorkspaceBaseUrl, type SpeechConfig } from '@aisling/core'
+import {
+  DEFAULT_ALIBABA_TTS_BASE_URL,
+  DEFAULT_ALIBABA_TTS_MODEL,
+  DEFAULT_ALIBABA_TTS_VOICE,
+  DEFAULT_ALIBABA_TTS_WEBSOCKET_URL,
+  validateAlibabaTtsEndpoint,
+  type SpeechConfig,
+} from '@aisling/core'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
@@ -19,7 +26,9 @@ watch(() => settings.config.speech, (next) => {
 
 const isBrowser = computed(() => draft.providerType === 'browser')
 const isAlibaba = computed(() => draft.providerType === 'alibaba')
-const endpointError = computed(() => (isAlibaba.value ? validateAlibabaWorkspaceBaseUrl(draft.endpoint) : undefined))
+const endpointError = computed(() => (isAlibaba.value ? validateAlibabaTtsEndpoint(draft.endpoint, draft.transport) : undefined))
+const endpointLabel = computed(() => draft.transport === 'websocket' ? 'Realtime WebSocket Endpoint' : 'HTTP API Base URL')
+const endpointPlaceholder = computed(() => draft.transport === 'websocket' ? DEFAULT_ALIBABA_TTS_WEBSOCKET_URL : DEFAULT_ALIBABA_TTS_BASE_URL)
 
 const voices = ref<SpeechSynthesisVoice[]>(listBrowserVoices())
 
@@ -41,8 +50,22 @@ async function test(): Promise<void> {
   if (endpointError.value)
     return
   const result = await settings.testVoice({ ...draft })
-  if (result.ok && result.audio)
-    void playSpeechResult(result.audio)
+  if (result.ok && result.audio) {
+    try {
+      await playSpeechResult(result.audio)
+      settings.completeVoicePlayback()
+    }
+    catch (error) {
+      settings.failVoicePlayback(error)
+    }
+  }
+}
+
+function switchTransport(): void {
+  if (draft.transport === 'websocket' && !draft.endpoint.trim().startsWith('wss://'))
+    draft.endpoint = DEFAULT_ALIBABA_TTS_WEBSOCKET_URL
+  else if (draft.transport === 'http' && !draft.endpoint.trim().startsWith('http'))
+    draft.endpoint = DEFAULT_ALIBABA_TTS_BASE_URL
 }
 
 async function save(): Promise<void> {
@@ -78,9 +101,18 @@ async function save(): Promise<void> {
 
     <template v-if="isAlibaba">
       <label class="field">
-        <span class="label">Workspace API Base URL</span>
-        <input v-model="draft.endpoint" type="text" :placeholder="DEFAULT_ALIBABA_TTS_BASE_URL" />
-        <span class="hint">Example: https://‹workspace›.cn-beijing.maas.aliyuncs.com/api/v1</span>
+        <span class="label">Transport</span>
+        <select v-model="draft.transport" @change="switchTransport">
+          <option value="websocket">Realtime WebSocket</option>
+          <option value="http">HTTP</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="label">{{ endpointLabel }}</span>
+        <input v-model="draft.endpoint" type="text" :placeholder="endpointPlaceholder" />
+        <span v-if="draft.transport === 'websocket'" class="hint">Example: wss://‹workspace›.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference</span>
+        <span v-else class="hint">Example: https://‹workspace›.cn-beijing.maas.aliyuncs.com/api/v1</span>
         <span v-if="endpointError" class="error">{{ endpointError }}</span>
       </label>
 

@@ -7,6 +7,7 @@ export type {
   HearingConfig,
   PlatformConfig,
   SpeechConfig,
+  SpeechTransport,
   VisionConfig,
   WebSearchConfig,
 } from './config'
@@ -15,8 +16,10 @@ export {
   createDefaultPlatformConfig,
   createMemoryConfigStore,
   validateAlibabaWorkspaceBaseUrl,
+  validateAlibabaTtsEndpoint,
   DEFAULT_ALIBABA_ASR_MODEL,
   DEFAULT_ALIBABA_TTS_BASE_URL,
+  DEFAULT_ALIBABA_TTS_WEBSOCKET_URL,
   DEFAULT_ALIBABA_TTS_MODEL,
   DEFAULT_ALIBABA_TTS_VOICE,
   DEFAULT_OPENAI_BASE_URL,
@@ -57,8 +60,8 @@ export {
 } from './providers/openai-compatible-transcription-provider'
 export type { OpenAICompatibleVisionOptions } from './providers/openai-compatible-vision-provider'
 export { createOpenAICompatibleVisionProvider } from './providers/openai-compatible-vision-provider'
-export type { AlibabaSpeechProviderOptions, WebSocketLike } from './providers/alibaba-speech-provider'
-export { buildFinishTaskMessage, buildRunTaskMessage, createAlibabaSpeechProvider, pcmToWav } from './providers/alibaba-speech-provider'
+export type { AlibabaSpeechProviderOptions } from './providers/alibaba-speech-provider'
+export { buildContinueTaskMessage, buildFinishTaskMessage, buildRunTaskMessage, createAlibabaSpeechProvider, pcmToWav } from './providers/alibaba-speech-provider'
 export type { TavilyWebSearchOptions } from './providers/tavily-web-search-provider'
 export { createTavilyWebSearchProvider } from './providers/tavily-web-search-provider'
 export type { AlibabaAsrOptions } from './providers/alibaba-asr-provider'
@@ -75,6 +78,8 @@ export type {
 } from './runtime'
 export { createCharacterRuntime } from './runtime'
 export type {
+  AutonomousStimulus,
+  DesktopActivitySnapshot,
   CreateStimulusOptions,
   Stimulus,
   StimulusBase,
@@ -82,4 +87,4 @@ export type {
   UserTextStimulus,
   VisualStimulus,
 } from './stimulus'
-export { createSystemStimulus, createUserTextStimulus, createVisualStimulus } from './stimulus'
+export { createAutonomousStimulus, createSystemStimulus, createUserTextStimulus, createVisualStimulus } from './stimulus'

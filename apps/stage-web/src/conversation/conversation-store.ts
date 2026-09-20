@@ -1,5 +1,7 @@
 import type { ChatMessage } from '@aisling/core'
 
+import type { PersistentStorage } from '../storage/desktop-storage'
+
 export interface ConversationSession {
   id: string
   title: string
@@ -60,7 +62,7 @@ function normalizeSession(value: unknown): ConversationSession | undefined {
   }
 }
 
-export function createLocalStorageConversationStore(storage: Storage = window.localStorage): ConversationStore {
+export function createLocalStorageConversationStore(storage: PersistentStorage = window.localStorage): ConversationStore {
   function readState(): PersistedState {
     try {
       const raw = storage.getItem(KEY)

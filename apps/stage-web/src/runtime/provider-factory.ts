@@ -55,8 +55,7 @@ export function buildSpeechProvider(config: SpeechConfig): SpeechProvider | unde
       model: config.model,
       voice: config.voice,
       endpoint: config.endpoint,
-      // Browsers cannot set WebSocket Authorization headers; use the thin relay.
-      transport: 'relay',
+      transport: config.transport,
     })
   }
 

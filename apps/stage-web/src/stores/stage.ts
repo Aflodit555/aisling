@@ -41,7 +41,10 @@ const MAX_SESSION_MESSAGES = 200
 export type DesktopBridgeState = 'connected' | 'unavailable'
 
 function hasDesktopBridge(): boolean {
-  return typeof window.aislingDesktop?.readActivity === 'function'
+  const bridge = window.aislingDesktop
+  return typeof bridge?.setDesktopAwareness === 'function'
+    && typeof bridge.readDesktopContext === 'function'
+    && typeof bridge.judgeDesktopContext === 'function'
 }
 
 function historyToDisplay(history: readonly ChatMessage[]): DisplayMessage[] {
@@ -110,36 +113,57 @@ export const useStageStore = defineStore('stage', () => {
   const autonomous = reactive(createAutonomousState())
   const desktopBridgeState = ref<DesktopBridgeState>(hasDesktopBridge() ? 'connected' : 'unavailable')
   const desktopAvailable = computed(() => desktopBridgeState.value === 'connected')
+  let awarenessRevision = 0
 
   function refreshDesktopBridgeStatus(): boolean {
     const connected = hasDesktopBridge()
     desktopBridgeState.value = connected ? 'connected' : 'unavailable'
-    if (!connected && autonomous.enabled)
-      autonomousController.setEnabled(false)
     return connected
   }
 
-  async function readDesktopActivity() {
+  async function readDesktopContext() {
     if (!refreshDesktopBridgeStatus())
       throw new Error('Desktop bridge is unavailable')
-    try {
-      return await window.aislingDesktop!.readActivity()
-    }
-    catch (error) {
-      desktopBridgeState.value = 'unavailable'
-      if (autonomous.enabled)
-        autonomousController.setEnabled(false)
-      throw error
-    }
+    return window.aislingDesktop!.readDesktopContext()
+  }
+
+  async function judgeDesktopContext() {
+    if (!refreshDesktopBridgeStatus())
+      throw new Error('Desktop bridge is unavailable')
+    return window.aislingDesktop!.judgeDesktopContext()
   }
 
   const autonomousController = createAutonomousController({
     state: autonomous,
-    readDesktop: readDesktopActivity,
+    readDesktop: readDesktopContext,
+    judgeDesktop: judgeDesktopContext,
     isBusy: () => sending.value || visionProcessing.value || speech.speaking,
     isReady: () => desktopAvailable.value && settings.loaded && Boolean(settings.activeChatProvider),
+    getCooldownMs: () => settings.config.desktopAwareness.cooldownSeconds * 1000,
     trigger: sendStimulus,
   })
+
+  async function setDesktopAwarenessEnabled(enabled: boolean, persist = true): Promise<void> {
+    const ticket = ++awarenessRevision
+    if (!enabled || !refreshDesktopBridgeStatus())
+      autonomousController.setEnabled(false)
+    if (!desktopAvailable.value) {
+      if (persist)
+        await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled })
+      autonomous.error = 'Desktop Awareness is available in the Electron app only.'
+      return
+    }
+    // Start/stop IPC is issued before persistence so OFF cancels collection and
+    // the in-flight judge immediately instead of waiting on storage.
+    const [status] = await Promise.all([
+      window.aislingDesktop!.setDesktopAwareness(enabled),
+      persist ? settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled }) : Promise.resolve(),
+    ])
+    if (ticket !== awarenessRevision)
+      return
+    autonomousController.setEnabled(status.enabled)
+    autonomous.error = status.error ?? ''
+  }
 
   runtime.onEvent((event) => {
     events.value = [...events.value, event].slice(-MAX_DEVTOOLS_EVENTS)
@@ -292,8 +316,8 @@ export const useStageStore = defineStore('stage', () => {
     refreshDesktopBridgeStatus,
     tickAutonomous: autonomousController.tick,
     noteHumanInteraction: autonomousController.noteHumanInteraction,
-    setAutonomousEnabled: (enabled: boolean) => autonomousController.setEnabled(refreshDesktopBridgeStatus() && enabled),
-    setAutonomousThreshold: autonomousController.setThreshold,
+    restoreDesktopAwareness: () => setDesktopAwarenessEnabled(settings.config.desktopAwareness.enabled, false),
+    setDesktopAwarenessEnabled,
     activeSessionId,
     deleteSession,
     appendEvent,

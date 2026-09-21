@@ -1,105 +1,130 @@
 import { createAutonomousStimulus, type AutonomousStimulus, type DesktopActivitySnapshot } from '@aisling/core'
 
-export interface DesktopObservation {
-  activity: DesktopActivitySnapshot
-  idleSeconds: number
+export interface DesktopJudgeScores {
+  [name: string]: number | undefined
+  shouldInterrupt: number
+}
+
+export interface DesktopObserverStatus {
+  enabled: boolean
   available: boolean
+  context?: DesktopActivitySnapshot
   error?: string
+}
+
+export interface DesktopJudgeResult {
+  context: DesktopActivitySnapshot
+  scores: DesktopJudgeScores
 }
 
 export interface AutonomousState {
   enabled: boolean
-  silenceSeconds: number
-  thresholdSeconds: number
-  cooldownUntil: number
+  cooldownStartedAt: number | null
   lastAutonomousAt: number | null
-  latestActivity: DesktopActivitySnapshot
+  lastTrigger: string
+  latestContext?: DesktopActivitySnapshot
+  scores?: DesktopJudgeScores
+  judgeLatencyMs: number | null
   pending: boolean
   error: string
 }
 
-export const AUTONOMOUS_COOLDOWN_MS = 180_000
+export const DESKTOP_POLL_MS = 2_000
+export const SHOULD_INTERRUPT_THRESHOLD = 0.65
 
 export function createAutonomousState(): AutonomousState {
   return {
     enabled: false,
-    silenceSeconds: 0,
-    thresholdSeconds: 90,
-    cooldownUntil: 0,
+    cooldownStartedAt: null,
     lastAutonomousAt: null,
-    latestActivity: {},
+    lastTrigger: '',
+    judgeLatencyMs: null,
     pending: false,
     error: '',
   }
 }
 
-/** One deterministic gate. Polling never reserves the conversation or creates a message. */
+function contextSignature(context: DesktopActivitySnapshot): string {
+  const { focus } = context
+  return [focus.app, focus.title, focus.text.slice(0, 600), JSON.stringify(context.media)].join('\0')
+}
+
+/** Thin gate: changed content → one judge call → thresholds → existing runtime. */
 export function createAutonomousController(options: {
   state: AutonomousState
-  readDesktop: () => Promise<DesktopObservation>
+  readDesktop: () => Promise<DesktopObserverStatus>
+  judgeDesktop: () => Promise<DesktopJudgeResult>
   isBusy: () => boolean
   isReady: () => boolean
+  getCooldownMs: () => number
   trigger: (stimulus: AutonomousStimulus) => void
   now?: () => number
 }) {
   const { state } = options
   const now = options.now ?? Date.now
-  let lastHumanAt = now()
   let revision = 0
+  let lastJudgedSignature = ''
+  let lastTriggeredSignature = ''
 
   function noteHumanInteraction(): void {
-    lastHumanAt = now()
-    state.silenceSeconds = 0
-    revision++ // Invalidates an in-flight desktop read without blocking user input.
+    revision++
   }
 
   function setEnabled(enabled: boolean): void {
     state.enabled = enabled
-    noteHumanInteraction()
-    state.latestActivity = {}
-    state.error = ''
-  }
-
-  function setThreshold(seconds: number): void {
-    if (!Number.isFinite(seconds))
-      return
-    state.thresholdSeconds = Math.max(10, Math.min(600, Math.round(seconds)))
-    noteHumanInteraction()
+    revision++
+    if (!enabled) {
+      state.latestContext = undefined
+      state.scores = undefined
+      state.judgeLatencyMs = null
+      state.error = ''
+      lastJudgedSignature = ''
+    }
   }
 
   function completed(): void {
-    // A slow request must also leave a full quiet period after it settles.
-    state.cooldownUntil = now() + AUTONOMOUS_COOLDOWN_MS
+    state.cooldownStartedAt = now()
   }
 
   async function tick(): Promise<void> {
-    state.silenceSeconds = Math.max(0, Math.floor((now() - lastHumanAt) / 1000))
     if (!state.enabled || state.pending)
       return
     const ticket = revision
     state.pending = true
     try {
-      const observation = await options.readDesktop()
+      const snapshot = await options.readDesktop()
       if (!state.enabled || ticket !== revision)
         return
-      state.latestActivity = observation.activity
-      state.error = observation.error ?? ''
-      if (!observation.available || !Number.isFinite(observation.idleSeconds) || observation.idleSeconds < 0)
+      state.error = snapshot.error ?? ''
+      if (!snapshot.enabled || !snapshot.available || !snapshot.context)
         return
-      lastHumanAt = Math.max(lastHumanAt, now() - observation.idleSeconds * 1000)
-      state.silenceSeconds = Math.max(0, Math.floor((now() - lastHumanAt) / 1000))
-      if (!options.isReady() || options.isBusy()
-        || state.silenceSeconds < state.thresholdSeconds || now() < state.cooldownUntil)
+
+      state.latestContext = snapshot.context
+      let signature = contextSignature(snapshot.context)
+      if (signature !== lastJudgedSignature) {
+        const startedAt = now()
+        const judged = await options.judgeDesktop()
+        if (!state.enabled || ticket !== revision)
+          return
+        state.judgeLatencyMs = now() - startedAt
+        state.latestContext = judged.context
+        state.scores = judged.scores
+        signature = contextSignature(judged.context)
+        lastJudgedSignature = signature
+        state.error = ''
+      }
+
+      const scores = state.scores
+      if (!scores || signature === lastTriggeredSignature || !options.isReady() || options.isBusy()
+        || scores.shouldInterrupt < SHOULD_INTERRUPT_THRESHOLD
+        || (state.cooldownStartedAt !== null && now() < state.cooldownStartedAt + options.getCooldownMs()))
         return
 
       state.lastAutonomousAt = now()
-      state.cooldownUntil = now() + AUTONOMOUS_COOLDOWN_MS
-      // No await between the final gate and ingest: user turns own the same busy flag.
-      options.trigger(createAutonomousStimulus({
-        activity: { ...state.latestActivity },
-        silenceSeconds: state.silenceSeconds,
-        at: now(),
-      }))
+      state.lastTrigger = `should_interrupt ${scores.shouldInterrupt.toFixed(2)}`
+      state.cooldownStartedAt = now()
+      lastTriggeredSignature = signature
+      options.trigger(createAutonomousStimulus({ activity: judgedContext(state), at: now() }))
     }
     catch (error) {
       if (state.enabled && ticket === revision)
@@ -110,5 +135,11 @@ export function createAutonomousController(options: {
     }
   }
 
-  return { tick, noteHumanInteraction, setEnabled, setThreshold, completed }
+  return { tick, noteHumanInteraction, setEnabled, completed }
+}
+
+function judgedContext(state: AutonomousState): DesktopActivitySnapshot {
+  if (!state.latestContext)
+    throw new Error('Desktop context is unavailable.')
+  return state.latestContext
 }

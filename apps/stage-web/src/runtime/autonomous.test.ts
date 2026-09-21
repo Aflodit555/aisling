@@ -1,87 +1,77 @@
 import { describe, expect, it, vi } from 'vitest'
-import { AUTONOMOUS_COOLDOWN_MS, createAutonomousController, createAutonomousState, type DesktopObservation } from './autonomous'
+import { createAutonomousController, createAutonomousState, type DesktopObserverStatus } from './autonomous'
+
+const context = (title = 'main.ts'): NonNullable<DesktopObserverStatus['context']> => ({
+  idleSeconds: 0,
+  focus: { app: 'Code', title, text: 'const answer = 42' },
+  media: [], mic: [], headphones: '',
+})
 
 function setup() {
   let time = 0
   let busy = false
   let ready = true
+  let cooldownMs = 30_000
   const state = createAutonomousState()
-  const readDesktop = vi.fn(async (): Promise<DesktopObservation> => ({
-    activity: { app: 'Code', title: 'main.ts' }, idleSeconds: time / 1000, available: true,
+  const readDesktop = vi.fn(async () => ({ enabled: true, available: true, context: context() }))
+  const judgeDesktop = vi.fn(async () => ({
+    context: context(), scores: { shouldInterrupt: 0.9 },
   }))
   const trigger = vi.fn()
   const controller = createAutonomousController({
-    state, readDesktop, trigger, now: () => time, isBusy: () => busy, isReady: () => ready,
+    state, readDesktop, judgeDesktop, trigger, now: () => time, isBusy: () => busy, isReady: () => ready,
+    getCooldownMs: () => cooldownMs,
   })
-  return { state, readDesktop, trigger, controller,
-    time: (next: number) => { time = next }, busy: (next: boolean) => { busy = next }, ready: (next: boolean) => { ready = next } }
+  return { state, readDesktop, judgeDesktop, trigger, controller,
+    time: (next: number) => { time = next }, busy: (next: boolean) => { busy = next }, ready: (next: boolean) => { ready = next },
+    cooldown: (next: number) => { cooldownMs = next } }
 }
 
-describe('autonomous deterministic gate', () => {
-  it('does not poll or infer while disabled; polls below threshold without producing stimuli', async () => {
+describe('desktop awareness gate', () => {
+  it('does nothing while off, then judges changed content and triggers once', async () => {
     const h = setup()
-    h.time(100_000)
     await h.controller.tick()
     expect(h.readDesktop).not.toHaveBeenCalled()
     h.controller.setEnabled(true)
-    h.time(150_000)
     await h.controller.tick()
-    expect(h.state.latestActivity.app).toBe('Code')
-    expect(h.trigger).not.toHaveBeenCalled()
-    h.time(190_000)
-    await h.controller.tick()
+    expect(h.judgeDesktop).toHaveBeenCalledOnce()
     expect(h.trigger).toHaveBeenCalledOnce()
-    expect(h.trigger.mock.calls[0]![0]).toMatchObject({ kind: 'autonomous', silenceSeconds: 90 })
+    await h.controller.tick()
+    expect(h.judgeDesktop).toHaveBeenCalledOnce()
+    expect(h.trigger).toHaveBeenCalledOnce()
   })
 
-  it('keeps human silence unchanged after output and enforces cooldown after a slow response', async () => {
+  it('applies a changed 15s cooldown immediately to a new context', async () => {
     const h = setup()
     h.controller.setEnabled(true)
-    h.time(90_000)
     await h.controller.tick()
-    h.busy(true)
-    h.time(400_000)
-    await h.controller.tick()
-    expect(h.trigger).toHaveBeenCalledOnce()
-    h.busy(false)
+    h.time(1_000)
     h.controller.completed()
+    h.readDesktop.mockResolvedValue({ enabled: true, available: true, context: context('next.ts') })
+    h.judgeDesktop.mockResolvedValue({ context: context('next.ts'), scores: { shouldInterrupt: 0.9 } })
+    h.time(15_999)
+    h.cooldown(15_000)
     await h.controller.tick()
-    expect(h.state.silenceSeconds).toBe(400)
     expect(h.trigger).toHaveBeenCalledOnce()
-    h.time(400_000 + AUTONOMOUS_COOLDOWN_MS)
+    h.time(16_000)
     await h.controller.tick()
     expect(h.trigger).toHaveBeenCalledTimes(2)
   })
 
-  it.each(['human', 'disable', 'threshold'] as const)('cancels a pending observation on %s and never blocks human input', async (action) => {
+  it.each([[0.65, true], [0.64, false]])('gates should_interrupt=%s at the existing 0.65 threshold', async (shouldInterrupt, allowed) => {
     const h = setup()
+    h.judgeDesktop.mockResolvedValue({ context: context(), scores: { shouldInterrupt } })
     h.controller.setEnabled(true)
-    h.time(90_000)
-    let resolve!: (result: DesktopObservation) => void
-    h.readDesktop.mockImplementationOnce(() => new Promise(r => { resolve = r }))
-    const pending = h.controller.tick()
     await h.controller.tick()
-    expect(h.readDesktop).toHaveBeenCalledOnce()
-    if (action === 'human') h.controller.noteHumanInteraction()
-    if (action === 'disable') h.controller.setEnabled(false)
-    if (action === 'threshold') h.controller.setThreshold(120)
-    resolve({ activity: { app: 'Code' }, idleSeconds: 90, available: true })
-    await pending
-    expect(h.trigger).not.toHaveBeenCalled()
-    expect(h.state.pending).toBe(false)
+    expect(h.trigger).toHaveBeenCalledTimes(allowed ? 1 : 0)
   })
 
-  it('defers to desktop input, ongoing cognition/vision/speech and unavailable providers', async () => {
+  it('defers while the existing runtime is busy or unavailable', async () => {
     const h = setup()
     h.controller.setEnabled(true)
-    h.time(90_000)
-    h.readDesktop.mockResolvedValueOnce({ activity: { app: 'Code' }, idleSeconds: 2, available: true })
-    await h.controller.tick()
-    expect(h.state.silenceSeconds).toBe(2)
-    expect(h.trigger).not.toHaveBeenCalled()
-    h.time(190_000)
     h.busy(true)
     await h.controller.tick()
+    expect(h.trigger).not.toHaveBeenCalled()
     h.busy(false)
     h.ready(false)
     await h.controller.tick()
@@ -91,21 +81,19 @@ describe('autonomous deterministic gate', () => {
     expect(h.trigger).toHaveBeenCalledOnce()
   })
 
-  it('does not infer from failed reads, retries without stale activity, and clamps invalid thresholds', async () => {
+  it('invalidates an in-flight judge immediately when disabled', async () => {
     const h = setup()
     h.controller.setEnabled(true)
-    h.time(90_000)
-    h.readDesktop.mockRejectedValueOnce(new Error('IPC failed'))
-    await h.controller.tick()
-    expect(h.state.error).toBe('IPC failed')
-    h.readDesktop.mockResolvedValueOnce({ activity: {}, idleSeconds: 90, available: false })
-    await h.controller.tick()
+    let resolve!: () => void
+    h.judgeDesktop.mockImplementationOnce(() => new Promise(done => { resolve = () => done({
+      context: context(), scores: { shouldInterrupt: 1 },
+    }) }))
+    const pending = h.controller.tick()
+    await vi.waitFor(() => expect(h.judgeDesktop).toHaveBeenCalled())
+    h.controller.setEnabled(false)
+    resolve()
+    await pending
     expect(h.trigger).not.toHaveBeenCalled()
-    await h.controller.tick()
-    expect(h.trigger).toHaveBeenCalledOnce()
-    h.controller.setThreshold(NaN)
-    expect(h.state.thresholdSeconds).toBe(90)
-    h.controller.setThreshold(-1)
-    expect(h.state.thresholdSeconds).toBe(10)
+    expect(h.state.enabled).toBe(false)
   })
 })

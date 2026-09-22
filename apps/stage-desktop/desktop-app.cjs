@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, powerMonitor } = require('electron')
+const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('node:path')
-const { createActivityReader } = require('./desktop-activity.cjs')
+const { createDesktopObserver } = require('./desktop-activity.cjs')
+const { createTypeSafeJudge } = require('./desktop-judge.cjs')
 const {
   buildStageUrl,
   isBuiltRendererAvailable,
@@ -14,7 +15,10 @@ const { registerStorageIpc } = require('./desktop-store.cjs')
 registerStageScheme()
 
 const DEFAULT_STAGE_URL = 'http://localhost:5174'
-const readActivity = createActivityReader()
+const desktopObserver = createDesktopObserver()
+const semanticJudge = createTypeSafeJudge()
+/** @type {AbortController | undefined} */
+let judgeAbort
 /** @type {import('electron').BrowserWindow | undefined} */
 let mainWindow
 let ipcRegistered = false
@@ -87,6 +91,13 @@ function registerAppDiagnostics(diagnostics) {
     diagnostic(diagnostics, 'window-all-closed')
     app.quit()
   })
+  app.on('before-quit', stopDesktopAwareness)
+}
+
+function stopDesktopAwareness() {
+  judgeAbort?.abort()
+  judgeAbort = undefined
+  desktopObserver.stop()
 }
 
 /**
@@ -141,9 +152,9 @@ async function createWindow(options = {}) {
     }
     void contents.executeJavaScript(`({
       desktop: typeof window.aislingDesktop,
-      readActivity: typeof window.aislingDesktop?.readActivity,
+      readDesktopContext: typeof window.aislingDesktop?.readDesktopContext,
     })`, true).then((bridge) => {
-      diagnostic(diagnostics, `renderer bridge: ${bridge.desktop}, readActivity: ${bridge.readActivity}`)
+      diagnostic(diagnostics, `renderer bridge: ${bridge.desktop}, readDesktopContext: ${bridge.readDesktopContext}`)
     }).catch(error => console.error('[desktop] renderer bridge check failed:', describeError(error)))
   })
   contents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
@@ -179,6 +190,7 @@ async function createWindow(options = {}) {
   window.on('unresponsive', () => console.error('[desktop] window unresponsive'))
   window.on('closed', () => {
     diagnostic(diagnostics, 'window closed')
+    stopDesktopAwareness()
     if (mainWindow === window)
       mainWindow = undefined
   })
@@ -227,14 +239,39 @@ async function startDesktop(options = {}) {
   if (!ipcRegistered) {
     ipcRegistered = true
     const allowedOrigin = target.origin
-    ipcMain.handle('aisling:desktop-activity', async (event) => {
-      if (!mainWindow || event.sender !== mainWindow.webContents
-        || event.senderFrame !== mainWindow.webContents.mainFrame
-        || stageOriginOf(event.senderFrame.url) !== allowedOrigin)
-        throw new Error('Untrusted desktop activity request')
-
-      const snapshot = await readActivity()
-      return { ...snapshot, idleSeconds: powerMonitor.getSystemIdleTime() }
+    const trusted = event => Boolean(mainWindow && event.sender === mainWindow.webContents
+      && event.senderFrame === mainWindow.webContents.mainFrame
+      && stageOriginOf(event.senderFrame.url) === allowedOrigin)
+    ipcMain.handle('aisling:desktop-awareness:set', (event, enabled) => {
+      if (!trusted(event) || typeof enabled !== 'boolean')
+        throw new Error('Untrusted desktop awareness request')
+      if (!enabled) {
+        stopDesktopAwareness()
+        return desktopObserver.status()
+      }
+      return desktopObserver.start()
+    })
+    ipcMain.handle('aisling:desktop-awareness:read', (event) => {
+      if (!trusted(event))
+        throw new Error('Untrusted desktop awareness request')
+      return desktopObserver.status()
+    })
+    ipcMain.handle('aisling:desktop-awareness:judge', async (event) => {
+      if (!trusted(event))
+        throw new Error('Untrusted desktop awareness request')
+      const snapshot = desktopObserver.status()
+      if (!snapshot.enabled || !snapshot.context)
+        throw new Error(snapshot.error || 'Desktop observer has no current context.')
+      judgeAbort?.abort()
+      const abort = new AbortController()
+      judgeAbort = abort
+      try {
+        return { context: snapshot.context, scores: await semanticJudge.judge(snapshot.context, abort.signal) }
+      }
+      finally {
+        if (judgeAbort === abort)
+          judgeAbort = undefined
+      }
     })
   }
   return createWindow({ ...options, stageUrl: target.url })

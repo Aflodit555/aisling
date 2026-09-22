@@ -46,16 +46,29 @@ export interface VisualStimulus extends StimulusBase<'visual'> {
 }
 
 /** Every stimulus the runtime can receive today. */
+export interface DesktopFocusSnapshot {
+  readonly app: string
+  readonly title: string
+  readonly text: string
+}
+
+export interface DesktopMediaSnapshot {
+  readonly app: string
+  readonly title: string
+  readonly artist: string
+}
+
 export interface DesktopActivitySnapshot {
-  readonly app?: string
-  readonly title?: string
-  readonly focus?: string
+  readonly idleSeconds: number
+  readonly focus: DesktopFocusSnapshot
+  readonly media: readonly DesktopMediaSnapshot[]
+  readonly mic: readonly string[]
+  readonly headphones: string
 }
 
 /** Runtime observation, never a message authored by the user. */
 export interface AutonomousStimulus extends StimulusBase<'autonomous'> {
   readonly activity: DesktopActivitySnapshot
-  readonly silenceSeconds: number
 }
 
 export type Stimulus = UserTextStimulus | SystemStimulus | VisualStimulus | AutonomousStimulus
@@ -74,7 +87,7 @@ function defaultId(): string {
 }
 
 export function createAutonomousStimulus(
-  input: { activity: DesktopActivitySnapshot; silenceSeconds: number } & CreateStimulusOptions,
+  input: { activity: DesktopActivitySnapshot } & CreateStimulusOptions,
 ): AutonomousStimulus {
   return {
     id: input.id ?? defaultId(),
@@ -82,7 +95,6 @@ export function createAutonomousStimulus(
     kind: 'autonomous',
     at: input.at ?? Date.now(),
     activity: input.activity,
-    silenceSeconds: input.silenceSeconds,
   }
 }
 

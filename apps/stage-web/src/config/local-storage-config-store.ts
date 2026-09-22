@@ -29,13 +29,20 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
           // behavior for existing users while new configurations default to WS.
           const migratedTransport = storedSpeech?.transport
             ?? (storedSpeech?.endpoint?.startsWith('http://') || storedSpeech?.endpoint?.startsWith('https://') ? 'http' : defaults.speech.transport)
-          return {
+          const config = {
             consciousness: { ...defaults.consciousness, ...parsed.consciousness },
+            desktopAwareness: {
+              enabled: parsed.desktopAwareness?.enabled ?? defaults.desktopAwareness.enabled,
+              cooldownSeconds: parsed.desktopAwareness?.cooldownSeconds ?? defaults.desktopAwareness.cooldownSeconds,
+            },
             speech: { ...defaults.speech, ...parsed.speech, transport: migratedTransport },
             hearing: { ...defaults.hearing, ...parsed.hearing },
             vision: { ...defaults.vision, ...parsed.vision },
             webSearch: { ...defaults.webSearch, ...parsed.webSearch },
           }
+          if (Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds'))
+            storage.setItem(KEY, JSON.stringify(config))
+          return config
         }
 
         // v0.1.1 stored only the consciousness config under a different key.

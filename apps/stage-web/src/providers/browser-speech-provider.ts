@@ -42,6 +42,7 @@ export interface BrowserSpeechOptions {
 export function createBrowserSpeechProvider(options: BrowserSpeechOptions = {}): SpeechProvider {
   return {
     id: 'browser',
+    speaksDirectly: true,
 
     async synthesize(request: SpeechRequest): Promise<SpeechResult> {
       const synth = window.speechSynthesis

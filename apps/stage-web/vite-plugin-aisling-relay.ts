@@ -284,6 +284,154 @@ async function synthesizeAlibabaHttp(options: {
   return Buffer.from(await audioRes.arrayBuffer())
 }
 
+/**
+ * Streams the realtime DashScope WebSocket's binary MP3 chunks straight to the
+ * HTTP response as they arrive (chunked transfer). WebSocket message boundaries
+ * are forwarded verbatim — they are not assumed to be MP3 frame boundaries; the
+ * renderer appends them in order to a single MediaSource buffer.
+ */
+function streamAlibabaWebSocket(
+  res: ServerResponse,
+  options: { endpoint: string; apiKey: string; model: string; voice: string; text: string },
+): Promise<void> {
+  // This function owns the HTTP response end-to-end (success and error) and
+  // never rejects, so the caller must not try to write a second response.
+  return new Promise((resolve) => {
+    const taskId = crypto.randomUUID()
+    let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let ws: WebSocket
+
+    function cleanup(): void {
+      clearTimeout(timer)
+      try {
+        ws?.close()
+      }
+      catch { /* already closed */ }
+    }
+
+    /** Finalizes the response (JSON error or stream abort) and settles. */
+    function finish(error?: Error): void {
+      if (settled)
+        return
+      settled = true
+      cleanup()
+      if (error) {
+        if (!res.headersSent) {
+          res.writeHead(502, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: error.message }))
+        }
+        else {
+          res.destroy(error)
+        }
+      }
+      resolve()
+    }
+
+    function armTimer(): void {
+      clearTimeout(timer)
+      timer = setTimeout(() => finish(new Error('Alibaba TTS WebSocket timed out.')), 30000)
+    }
+
+    // Client aborted (e.g. renderer switched to a new speech session).
+    res.on('close', () => {
+      if (!settled) {
+        settled = true
+        cleanup()
+        resolve()
+      }
+    })
+
+    try {
+      ws = new WebSocket(options.endpoint, {
+        headers: {
+          Authorization: `Bearer ${options.apiKey}`,
+          'X-DashScope-DataInspection': 'enable',
+        },
+      })
+    }
+    catch (error) {
+      finish(error instanceof Error ? error : new Error(String(error)))
+      return
+    }
+
+    ws.on('open', () => {
+      armTimer()
+      ws.send(JSON.stringify(buildRunTaskMessage({
+        taskId,
+        model: options.model,
+        voice: options.voice,
+      })))
+    })
+
+    ws.on('message', (data, isBinary) => {
+      armTimer()
+      if (isBinary) {
+        const chunk = rawDataToBuffer(data)
+        if (chunk.length) {
+          if (!res.headersSent) {
+            res.writeHead(200, {
+              'Content-Type': 'audio/mpeg',
+              'Cache-Control': 'no-cache',
+            })
+          }
+          res.write(chunk)
+        }
+        return
+      }
+
+      let message: { header?: Record<string, unknown>; payload?: Record<string, unknown> }
+      try {
+        message = JSON.parse(rawDataToBuffer(data).toString('utf8')) as typeof message
+      }
+      catch {
+        finish(new Error('Alibaba TTS WebSocket returned invalid JSON.'))
+        return
+      }
+
+      const header = message.header ?? {}
+      const event = String(header.event ?? '')
+      if (event === 'task-started') {
+        ws.send(JSON.stringify(buildContinueTaskMessage(taskId, options.text)))
+        ws.send(JSON.stringify(buildFinishTaskMessage(taskId)))
+      }
+      else if (event === 'task-finished') {
+        if (settled)
+          return
+        // No binary chunks forwarded → explicit error instead of an empty 200
+        // that would leave the renderer waiting forever.
+        if (!res.headersSent) {
+          finish(new Error('Alibaba TTS provider returned no audio chunks.'))
+          return
+        }
+        settled = true
+        cleanup()
+        res.end()
+        resolve()
+      }
+      else if (event === 'task-failed') {
+        finish(new Error(describeProviderFailure(header)))
+      }
+      else if (event === 'error') {
+        const detail = String(message.payload?.message ?? header.error_message ?? 'Unknown provider error')
+        finish(new Error(`Alibaba TTS provider error: ${detail}`))
+      }
+    })
+
+    ws.on('unexpected-response', (_request, response) => {
+      response.resume()
+      finish(new Error(describeAuthOrUpstreamError(response.statusCode ?? 502)))
+    })
+    ws.on('error', error => finish(new Error(`Alibaba TTS WebSocket failure: ${error.message}`)))
+    ws.on('close', (code, reason) => {
+      if (!settled)
+        finish(new Error(`Alibaba TTS WebSocket closed before completion (${code}${reason.length ? `: ${reason.toString()}` : ''}).`))
+    })
+
+    armTimer()
+  })
+}
+
 /** Dispatches Alibaba TTS to the explicitly selected upstream transport. */
 async function handleAlibabaTts(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== 'POST') {
@@ -310,6 +458,13 @@ async function handleAlibabaTts(req: IncomingMessage, res: ServerResponse): Prom
     }
 
     const request = { text, endpoint, model, voice, apiKey }
+
+    // Streaming realtime path: binary MP3 chunks forwarded as they arrive.
+    if (body.stream === true && transport === 'websocket') {
+      await streamAlibabaWebSocket(res, request)
+      return
+    }
+
     const bytes = transport === 'websocket'
       ? await synthesizeAlibabaWebSocket(request)
       : await synthesizeAlibabaHttp(request)

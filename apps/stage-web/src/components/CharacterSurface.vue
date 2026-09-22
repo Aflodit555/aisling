@@ -1,18 +1,108 @@
 <script setup lang="ts">
-defineProps<{
+import { storeToRefs } from 'pinia'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+
+import type { ParameterSource } from '../live2d/parameter-controller'
+import {
+  CUBISM_CORE_URL,
+  LIVE2D_MODEL_URL,
+  MOUTH_OPEN_PARAMETER,
+  PARAMETER_SOURCE_PRIORITY,
+} from '../live2d/presentation'
+import { mapMouthOpenness } from '../live2d/mouth-visual-mapping'
+import { createMouthController } from '../presentation/mouth-controller'
+import { usePresentationStore } from '../stores/presentation'
+import { useSpeechStore } from '../stores/speech'
+import Live2DRenderer from './Live2DRenderer.vue'
+
+const props = defineProps<{
   name: string
   active: boolean
   speaking?: boolean
   searching?: boolean
   looking?: boolean
 }>()
+
+const { transform } = storeToRefs(usePresentationStore())
+const speech = useSpeechStore()
+const rendererState = ref<'loading' | 'ready' | 'error'>('loading')
+const rendererError = ref('')
+const driven = computed(() => props.active || props.speaking || props.searching || props.looking)
+
+// Application-layer parameter sources. The renderer owns a ParameterController
+// and applies these above the native model value after each model.update().
+const angle = ref(0)
+const mouthController = createMouthController()
+
+const manualSource: ParameterSource = {
+  id: 'manual-pose',
+  priority: PARAMETER_SOURCE_PRIORITY.manual,
+  targets: new Set(['ParamAngleX']),
+  sample: () => new Map([['ParamAngleX', angle.value]]),
+}
+
+const speechSource: ParameterSource = {
+  id: 'speech-mouth',
+  priority: PARAMETER_SOURCE_PRIORITY.speech,
+  targets: new Set([MOUTH_OPEN_PARAMETER]),
+  sample: ({ readBase, dtMs }) => {
+    const level = speech.readLevel()
+    const frame = mouthController.update({
+      speaking: speech.speaking,
+      level,
+      dtMs,
+      baseMouth: readBase(MOUTH_OPEN_PARAMETER),
+    })
+    return frame.ownsMouth
+      ? new Map([[MOUTH_OPEN_PARAMETER, mapMouthOpenness(frame.mouthOpen)]])
+      : undefined
+  },
+}
+
+const sources: ParameterSource[] = [manualSource, speechSource]
+let testTimer: ReturnType<typeof setTimeout> | undefined
+
+function applyPresentationState(): void {
+  angle.value = driven.value ? 12 : 0
+}
+
+function onReady(): void {
+  rendererState.value = 'ready'
+  applyPresentationState()
+}
+
+function onError(error: Error): void {
+  rendererState.value = 'error'
+  rendererError.value = error.message
+}
+
+function testMovement(): void {
+  clearTimeout(testTimer)
+  angle.value = -24
+  testTimer = setTimeout(applyPresentationState, 700)
+}
+
+watch(driven, applyPresentationState)
+onBeforeUnmount(() => clearTimeout(testTimer))
 </script>
 
 <template>
   <section class="surface">
-    <div class="presence" :class="{ 'is-active': active || speaking || searching || looking }">
-      <div class="halo" />
-      <div class="avatar">{{ name.slice(0, 1) }}</div>
+    <div class="presence" :class="{ 'is-active': driven, 'is-error': rendererState === 'error' }">
+      <Live2DRenderer
+        v-if="rendererState !== 'error'"
+        :model-src="LIVE2D_MODEL_URL"
+        :cubism-core-src="CUBISM_CORE_URL"
+        :transform="transform"
+        :sources="sources"
+        @ready="onReady"
+        @error="onError"
+      />
+      <template v-else>
+        <div class="halo" />
+        <div class="avatar">{{ name.slice(0, 1) }}</div>
+      </template>
+      <p v-if="rendererState === 'loading'" class="renderer-state">Loading character…</p>
     </div>
     <h1 class="name">{{ name }}</h1>
     <p class="status">
@@ -25,6 +115,12 @@ defineProps<{
             : active
               ? `${name} is thinking…`
               : `${name} is here.` }}
+    </p>
+    <button v-if="rendererState === 'ready'" class="drive-test" type="button" @click="testMovement">
+      Test movement
+    </button>
+    <p v-else-if="rendererState === 'error'" class="renderer-error" :title="rendererError">
+      Live2D unavailable · using fallback
     </p>
   </section>
 </template>
@@ -46,8 +142,15 @@ defineProps<{
   position: relative;
   display: grid;
   place-items: center;
+  width: min(100%, 520px);
+  height: min(68vh, 620px);
+  min-height: 280px;
+}
+
+.presence.is-error {
   width: 220px;
   height: 220px;
+  min-height: 220px;
 }
 
 .halo {
@@ -92,6 +195,32 @@ defineProps<{
   margin: 0;
   font-size: 14px;
   color: #9d94b8;
+}
+
+.renderer-state {
+  position: absolute;
+  margin: 0;
+  color: #9d94b8;
+  font-size: 13px;
+}
+
+.renderer-error {
+  margin: -10px 0 0;
+  color: #776f91;
+  font-size: 12px;
+}
+
+.drive-test {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #9d94b8;
+  cursor: pointer;
+}
+
+.drive-test:hover {
+  color: #cfc6ea;
 }
 
 @keyframes breathe {

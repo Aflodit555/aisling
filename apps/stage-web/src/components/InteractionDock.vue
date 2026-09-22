@@ -7,7 +7,7 @@ import type { SelectedImage } from '../image/file'
 import type { DisplayMessage } from '../stores/stage'
 
 import Composer from './Composer.vue'
-import AutonomousControls from './AutonomousControls.vue'
+import CharacterDisplayControl from './CharacterDisplayControl.vue'
 import ConversationBrow from './ConversationBrow.vue'
 import ImageInputButton from './ImageInput.vue'
 import MessageList from './MessageList.vue'
@@ -53,8 +53,6 @@ function onSend(text: string): void {
 
     <MessageList :messages="messages" />
 
-    <AutonomousControls />
-
     <div class="input-row">
       <ImageInputButton
         :image="selectedImage"
@@ -62,6 +60,7 @@ function onSend(text: string): void {
         @remove="selectedImage = undefined"
       />
       <MicButton @transcribed="emit('speech', $event)" />
+      <CharacterDisplayControl />
       <button type="button" class="new-btn" title="New conversation" @click="emit('new-conversation')">＋</button>
       <Composer :disabled="sending" @send="onSend" />
     </div>

@@ -4,6 +4,7 @@ import {
   testOpenAICompatibleConnection,
   type ChatProvider,
   type ConsciousnessConfig,
+  type DesktopAwarenessConfig,
   type HearingConfig,
   type HearingProvider,
   type ImageInput,
@@ -103,6 +104,17 @@ export const useSettingsStore = defineStore('settings', () => {
     applyConfig(config.value)
   }
 
+  async function saveDesktopAwareness(next: DesktopAwarenessConfig): Promise<void> {
+    const current = config.value.desktopAwareness
+    config.value = { ...config.value, desktopAwareness: {
+      enabled: Boolean(next.enabled),
+      cooldownSeconds: Number.isFinite(next.cooldownSeconds)
+        ? Math.max(10, Math.min(300, Math.round(next.cooldownSeconds / 5) * 5))
+        : current.cooldownSeconds,
+    } }
+    await persist()
+  }
+
   async function saveSpeech(next: SpeechConfig): Promise<void> {
     config.value = { ...config.value, speech: next }
     await persist()
@@ -144,6 +156,7 @@ export const useSettingsStore = defineStore('settings', () => {
       baseUrl: next.baseUrl,
       apiKey: next.apiKey,
       model: next.model,
+      temperature: next.temperature,
     })
     connectionState.value = result.ok ? 'connected' : 'failed'
     connectionMessage.value = result.ok ? 'Connected.' : (result.error ?? 'Connection failed.')
@@ -290,6 +303,7 @@ export const useSettingsStore = defineStore('settings', () => {
     failVoicePlayback,
     modules,
     saveConsciousness,
+    saveDesktopAwareness,
     saveHearing,
     saveSpeech,
     saveVision,

@@ -28,6 +28,39 @@ function setup() {
 }
 
 describe('desktop awareness gate', () => {
+  it.each(['mic', 'idle', 'text'] as const)('rejudges when only %s changes after a negative decision', async (field) => {
+    const h = setup()
+    const initial = { ...context(), focus: { ...context().focus, text: 'x'.repeat(600) + 'old' } }
+    h.readDesktop.mockResolvedValue({ enabled: true, available: true, context: initial })
+    h.judgeDesktop.mockResolvedValue({ context: initial, scores: { shouldInterrupt: 0.1 } })
+    h.controller.setEnabled(true)
+    await h.controller.tick()
+    const changed = {
+      ...initial,
+      mic: field === 'mic' ? ['Teams'] : initial.mic,
+      idleSeconds: field === 'idle' ? 120 : initial.idleSeconds,
+      focus: { ...initial.focus, text: field === 'text' ? 'x'.repeat(600) + 'new' : initial.focus.text },
+    }
+    h.readDesktop.mockResolvedValue({ enabled: true, available: true, context: changed })
+    h.judgeDesktop.mockResolvedValue({ context: changed, scores: { shouldInterrupt: 0.9 } })
+    await h.controller.tick()
+    expect(h.judgeDesktop).toHaveBeenCalledTimes(2)
+    expect(h.trigger).toHaveBeenCalledOnce()
+  })
+
+  it('surfaces judge errors, releases pending and retries unchanged context', async () => {
+    const h = setup()
+    h.judgeDesktop.mockRejectedValueOnce(new Error('judge timeout'))
+    h.controller.setEnabled(true)
+    await h.controller.tick()
+    expect(h.state.error).toBe('judge timeout')
+    expect(h.state.pending).toBe(false)
+    expect(h.trigger).not.toHaveBeenCalled()
+    await h.controller.tick()
+    expect(h.state.error).toBe('')
+    expect(h.trigger).toHaveBeenCalledOnce()
+  })
+
   it('does nothing while off, then judges changed content and triggers once', async () => {
     const h = setup()
     await h.controller.tick()

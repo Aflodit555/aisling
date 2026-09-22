@@ -17,6 +17,12 @@ export interface ConsciousnessConfig {
   baseUrl: string
   apiKey: string
   model: string
+  temperature: number
+}
+
+export interface DesktopAwarenessConfig {
+  enabled: boolean
+  cooldownSeconds: number
 }
 
 export interface SpeechConfig {
@@ -55,6 +61,7 @@ export interface WebSearchConfig {
 
 export interface PlatformConfig {
   consciousness: ConsciousnessConfig
+  desktopAwareness: DesktopAwarenessConfig
   speech: SpeechConfig
   hearing: HearingConfig
   vision: VisionConfig
@@ -71,12 +78,13 @@ export const DEFAULT_ALIBABA_TTS_WEBSOCKET_URL = 'wss://dashscope.aliyuncs.com/a
 export const DEFAULT_ALIBABA_ASR_MODEL = 'qwen-audio-3.0-asr-flash'
 
 export function createDefaultConsciousnessConfig(): ConsciousnessConfig {
-  return { providerType: 'mock', baseUrl: DEFAULT_OPENAI_BASE_URL, apiKey: '', model: '' }
+  return { providerType: 'mock', baseUrl: DEFAULT_OPENAI_BASE_URL, apiKey: '', model: '', temperature: 1 }
 }
 
 export function createDefaultPlatformConfig(): PlatformConfig {
   return {
     consciousness: createDefaultConsciousnessConfig(),
+    desktopAwareness: { enabled: false, cooldownSeconds: 30 },
     speech: {
       providerType: 'none',
       apiKey: '',

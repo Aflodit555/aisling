@@ -16,12 +16,15 @@ describe('autonomous runtime observation', () => {
     const eventTypes: string[] = []
     runtime.onEvent(event => eventTypes.push(event.type))
     const turn = await runtime.ingest(createAutonomousStimulus({
-      activity: { app: 'Code', title: 'main.ts - project_Aisling' }, silenceSeconds: 93,
+      activity: {
+        idleSeconds: 3,
+        focus: { app: 'Code', title: 'main.ts - project_Aisling', text: 'createCharacterRuntime' },
+        media: [], mic: [], headphones: '',
+      },
     }))
     const request = complete.mock.calls[0]![0]
     expect(request.messages.filter(message => message.role === 'user')).toEqual(history)
     expect(request.messages.at(-1)).toEqual({ role: 'system', content: expect.stringContaining('not a user message') })
-    expect(request.messages.at(-1)!.content).toContain('93 seconds')
     expect(request.messages.at(-1)!.content).toContain('main.ts - project_Aisling')
     expect(runtime.history).toEqual([...history, { role: 'assistant', content: turn.output!.text }])
     expect(eventTypes).toContain('output:produced')
@@ -38,7 +41,9 @@ describe('autonomous runtime observation', () => {
       character: createCharacter({ id: 'a', name: 'A', persona: '', capabilities: [] }),
       getChatProvider: () => ({ id: 'test', complete }),
     })
-    const stimulus = createAutonomousStimulus({ activity: { app: 'Code' }, silenceSeconds: 90 })
+    const stimulus = createAutonomousStimulus({
+      activity: { idleSeconds: 0, focus: { app: 'Code', title: '', text: '' }, media: [], mic: [], headphones: '' },
+    })
     expect((await runtime.ingest(stimulus)).status).toBe('completed')
     expect((await runtime.ingest(stimulus)).status).toBe('failed')
     expect(runtime.history).toEqual([])

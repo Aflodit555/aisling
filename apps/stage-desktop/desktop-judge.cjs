@@ -6,10 +6,10 @@ function createTypeSafeJudge(options = {}) {
   const questions = {
     should_interrupt: {
       type: 'noul',
-      instructions: 'Should Aisling interrupt the user and say something now?',
+      instructions: 'Would this be a natural moment for Aisling to make a brief unsolicited comment?',
       criteria: {
-        true: 'There is something sufficiently relevant, unusual, interesting, or useful to comment on, and interrupting now would not be disruptive.',
-        false: 'The screen contains routine or low-value activity, there is no meaningful reason to speak, or the user appears busy and interruption would be disruptive.',
+        true: 'The current context contains a concrete detail that gives Aisling a natural conversational opening. A brief reaction, observation, opinion, curiosity, or playful remark would feel appropriate. The moment does not need to be important or unusual.',
+        false: 'There is no concrete conversational hook, the context is repetitive or too thin to react to, or the user is clearly occupied in a way that would make speaking now intrusive.',
       },
     },
   }
@@ -29,22 +29,18 @@ function createTypeSafeJudge(options = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model: TYPESAFE_MODEL, state, questions }),
-      signal,
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(10_000)]),
     })
     if (!response.ok)
       throw new Error(`Desktop semantic judge failed (${response.status}).`)
     const data = await response.json()
-    const value = (name, field) => {
-      const raw = data.answers?.[name]?.[field]
-      const number = Array.isArray(raw)
-        ? raw.reduce((total, probability, level) => total + Number(probability) * level, 0)
-        : Number(raw)
-      if (!Number.isFinite(number))
-        throw new Error('Desktop semantic judge returned invalid data.')
-      return number
-    }
+    const answer = data?.answers?.should_interrupt
+    const probability = answer?.noul
+    if (answer?.type !== 'noul' || typeof probability !== 'number'
+      || !Number.isFinite(probability) || probability < 0 || probability > 1)
+      throw new Error('Desktop semantic judge returned invalid should_interrupt: expected noul probability in [0, 1].')
     return {
-      shouldInterrupt: value('should_interrupt', 'noul'),
+      shouldInterrupt: probability,
     }
   }
 

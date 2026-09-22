@@ -86,4 +86,83 @@ describe('alibaba (DashScope) speech provider', () => {
 
     await expect(provider.synthesize({ text: 'hi' })).rejects.toThrow('authentication failed')
   })
+
+  it('declares streaming capability only for the realtime WebSocket transport', () => {
+    const ws = createAlibabaSpeechProvider({
+      apiKey: 'k',
+      model: 'qwen-audio-3.0-tts-flash',
+      voice: 'longanhuan_v3.6',
+      endpoint: 'wss://workspace.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference',
+      transport: 'websocket',
+    })
+    expect(ws.stream?.descriptor).toEqual({ kind: 'encoded', mimeType: 'audio/mpeg' })
+    expect(typeof ws.stream?.stream).toBe('function')
+
+    // Native HTTP TTS returns a completed audio file → one-shot only, no stream.
+    const http = createAlibabaSpeechProvider({
+      apiKey: 'k',
+      model: 'qwen-audio-3.0-tts-flash',
+      voice: 'longanhuan_v3.6',
+      endpoint: 'https://workspace.cn-beijing.maas.aliyuncs.com/api/v1',
+      transport: 'http',
+    })
+    expect(http.stream).toBeUndefined()
+    expect(typeof http.synthesize).toBe('function')
+  })
+
+  it('streams relayed MP3 chunks through the stream capability and ends after the stream', async () => {
+    let sentBody: Record<string, unknown> | undefined
+    const provider = createAlibabaSpeechProvider({
+      apiKey: 'k',
+      model: 'qwen-audio-3.0-tts-flash',
+      voice: 'longanhuan_v3.6',
+      endpoint: 'wss://workspace.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference',
+      transport: 'websocket',
+      fetchImpl: async (_url, init) => {
+        sentBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2, 3]))
+            controller.enqueue(new Uint8Array([4, 5]))
+            controller.close()
+          },
+        })
+        return new Response(stream, { status: 200, headers: { 'Content-Type': 'audio/mpeg' } })
+      },
+    })
+
+    const events: string[] = []
+    const bytes: number[] = []
+    await provider.stream!.stream({ text: 'hello' }, {
+      onStart: () => events.push('start'),
+      onAudio: (chunk) => {
+        events.push('audio')
+        bytes.push(...Array.from(chunk))
+      },
+      onEnd: () => events.push('end'),
+    })
+
+    expect(sentBody).toMatchObject({ stream: true, transport: 'websocket', text: 'hello' })
+    expect(events).toEqual(['start', 'audio', 'audio', 'end'])
+    expect(bytes).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('routes a non-OK streaming response to onError', async () => {
+    const provider = createAlibabaSpeechProvider({
+      apiKey: 'k',
+      model: 'm',
+      voice: 'v',
+      endpoint: 'wss://workspace.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference',
+      transport: 'websocket',
+      fetchImpl: async () => new Response(JSON.stringify({ error: 'Alibaba TTS authentication failed (HTTP 401).' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    })
+
+    const error = await new Promise<Error>((resolve) => {
+      void provider.stream!.stream({ text: 'hi' }, { onError: resolve })
+    })
+    expect(error.message).toContain('authentication failed')
+  })
 })

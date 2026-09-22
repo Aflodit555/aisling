@@ -13,7 +13,10 @@ export function stopPlayback(): void {
  * produces audio; this module owns turning it into sound. Future renderers
  * (VTS, OBS, an external device) replace this without touching providers.
  */
-export function playSpeechResult(audio: SpeechAudio): Promise<void> {
+export function playSpeechResult(
+  audio: SpeechAudio,
+  hooks?: { onElement?: (element: HTMLAudioElement) => void },
+): Promise<void> {
   stopPlayback()
 
   return new Promise<void>((resolve, reject) => {
@@ -24,6 +27,7 @@ export function playSpeechResult(audio: SpeechAudio): Promise<void> {
 
     const element = new Audio(url)
     current = element
+    hooks?.onElement?.(element)
 
     const cleanup = () => {
       if (fromBytes)

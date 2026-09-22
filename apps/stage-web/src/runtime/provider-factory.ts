@@ -37,6 +37,7 @@ export function buildChatProvider(config: ConsciousnessConfig): ChatProvider | u
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       model: config.model,
+      temperature: config.temperature,
     })
   }
 

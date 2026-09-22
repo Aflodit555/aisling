@@ -27,12 +27,12 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     for (let attempt = 0; attempt < 100; attempt++) {
       const stage = document.querySelector('.stage')
       const bridge = window.aislingDesktop
-      if (stage && bridge && typeof bridge.readActivity === 'function' && bridge.storage) {
+      if (stage && bridge && typeof bridge.readDesktopContext === 'function' && bridge.storage) {
         bridge.storage.setItem('aisling.prod-smoke', 'hello')
         const stored = bridge.storage.getItem('aisling.prod-smoke')
         return {
           stageMounted: true,
-          bridge: typeof bridge.readActivity,
+          bridge: typeof bridge.readDesktopContext,
           storageGet: stored,
           nodeAccess: typeof window.require,
           origin: window.location.origin,
@@ -41,7 +41,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       }
       await new Promise(resolve => setTimeout(resolve, 50))
     }
-    return { stageMounted: false, bridge: typeof window.aislingDesktop?.readActivity, origin: window.location.origin }
+    return { stageMounted: false, bridge: typeof window.aislingDesktop?.readDesktopContext, origin: window.location.origin }
   })()`)
 
   assert.equal(result.stageMounted, true)

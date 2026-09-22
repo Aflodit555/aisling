@@ -6,3 +6,6 @@ allowBuilds:
   electron: true
   esbuild: false
   vue-demi: false
+
+patchedDependencies:
+  pixi-live2d-display@0.4.0: patches/pixi-live2d-display.patch

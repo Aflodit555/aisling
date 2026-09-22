@@ -1,8 +1,11 @@
 /// <reference types="vite/client" />
 
 interface Window {
+  Live2DCubismCore?: unknown
   aislingDesktop?: {
-    readActivity(): Promise<import('./runtime/autonomous').DesktopObservation>
+    setDesktopAwareness(enabled: boolean): Promise<import('./runtime/autonomous').DesktopObserverStatus>
+    readDesktopContext(): Promise<import('./runtime/autonomous').DesktopObserverStatus>
+    judgeDesktopContext(): Promise<import('./runtime/autonomous').DesktopJudgeResult>
     /** Minimal `localStorage`-shaped bridge backed by Electron userData. */
     storage?: Pick<Storage, 'getItem' | 'setItem'>
   }

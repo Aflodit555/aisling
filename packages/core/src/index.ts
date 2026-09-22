@@ -4,6 +4,7 @@ export { createCharacter, findChatCapability } from './character'
 export type {
   ConfigStore,
   ConsciousnessConfig,
+  DesktopAwarenessConfig,
   HearingConfig,
   PlatformConfig,
   SpeechConfig,
@@ -38,7 +39,17 @@ export type {
   ToolDefinition,
 } from './provider'
 export type { SearchResult, WebSearchProvider } from './search'
-export type { SpeechAudio, SpeechCapability, SpeechProvider, SpeechRequest, SpeechResult } from './speech'
+export type {
+  SpeechAudio,
+  SpeechCapability,
+  SpeechProvider,
+  SpeechRequest,
+  SpeechResult,
+  SpeechStreamCapability,
+  SpeechStreamDescriptor,
+  SpeechStreamKind,
+  SpeechStreamSink,
+} from './speech'
 export type { Tool, ToolCapability } from './tool'
 export { toToolDefinition } from './tool'
 export type { ImageInput, VisionCapability, VisionProvider, VisionRequest, VisualObservation } from './vision'
@@ -80,6 +91,8 @@ export { createCharacterRuntime } from './runtime'
 export type {
   AutonomousStimulus,
   DesktopActivitySnapshot,
+  DesktopFocusSnapshot,
+  DesktopMediaSnapshot,
   CreateStimulusOptions,
   Stimulus,
   StimulusBase,

@@ -1,6 +1,6 @@
 {
   "name": "project-aisling",
-  "version": "0.1.6",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "description": "Aisling — an AI Character Platform / Runtime. Phase 1: platform skeleton + minimal Stage + minimal real loop.",

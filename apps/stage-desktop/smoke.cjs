@@ -31,13 +31,13 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
   assert.equal(preferences.sandbox, true)
 
   const result = await win.webContents.executeJavaScript(`(async () => {
-    const { router } = await import('/src/router.ts')
+    const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router
     const { useStageStore } = await import('/src/stores/stage.ts')
     const { useSettingsStore } = await import('/src/stores/settings.ts')
     const stage = useStageStore()
     const settings = useSettingsStore()
     await settings.load()
-    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, cooldownSeconds: 15, maxBusyScore: 1.6 })
+    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, cooldownSeconds: 15 })
     const initiallyOff = !(await window.aislingDesktop.readDesktopContext()).enabled
     const calls = []
     settings.activeChatProvider = { id: 'smoke', complete: async request => {
@@ -51,7 +51,8 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
       if (native.available) break
       await new Promise(resolve => setTimeout(resolve, 500))
     }
-    await stage.tickAutonomous()
+    for (let attempt = 0; attempt < 40 && !calls.length; attempt++)
+      await new Promise(resolve => setTimeout(resolve, 250))
     for (let i = 0; i < 20; i++) await Promise.resolve()
     await settings.saveConsciousness({
       providerType: 'openai-compatible', baseUrl: 'https://example.invalid/v1', apiKey: 'smoke', model: 'smoke-model', temperature: 1.1,
@@ -66,7 +67,6 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     const uiOn = control?.querySelector('input[type=checkbox]')?.checked
     const temperature = control?.parentElement?.querySelector('input[type=range]')?.value
     const cooldownSetting = control?.querySelector('[aria-label="Desktop Awareness cooldown"]')?.value
-    const busySetting = control?.querySelector('[aria-label="Desktop Awareness max busy score"]')?.value
     const shouldInterrupt = stage.autonomous.scores?.shouldInterrupt
     const firstKind = stage.lastTurn?.stimulus.kind
     const hasContextPrompt = calls[0]?.messages.some(message => message.content?.includes('Current desktop context'))
@@ -83,7 +83,6 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
       callCount: calls.length,
       temperature,
       cooldownSetting,
-      busySetting,
       persistedOn: settings.config.desktopAwareness.enabled,
     }
   })()`)
@@ -116,7 +115,6 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
   assert.equal(result.callCount, 1)
   assert.equal(result.temperature, '1.1')
   assert.equal(result.cooldownSetting, '15')
-  assert.equal(result.busySetting, '1.6')
   assert.equal(result.persistedOn, true)
 
   await new Promise((resolve) => {
@@ -124,7 +122,7 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     win.webContents.reload()
   })
   const restored = await win.webContents.executeJavaScript(`(async () => {
-    const { router } = await import('/src/router.ts')
+    const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router
     const { useStageStore } = await import('/src/stores/stage.ts')
     const { useSettingsStore } = await import('/src/stores/settings.ts')
     const stage = useStageStore()
@@ -134,7 +132,6 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     const restored = stage.autonomous.enabled && settings.config.desktopAwareness.enabled
     const temperature = settings.config.consciousness.temperature
     const cooldownSeconds = settings.config.desktopAwareness.cooldownSeconds
-    const maxBusyScore = settings.config.desktopAwareness.maxBusyScore
     await stage.setDesktopAwarenessEnabled(false)
     await router.push('/settings/consciousness')
     await new Promise(resolve => setTimeout(resolve, 100))
@@ -144,7 +141,6 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
       restored,
       temperature,
       cooldownSeconds,
-      maxBusyScore,
       stopped: !(await window.aislingDesktop.readDesktopContext()).enabled,
       persistedOff: !settings.config.desktopAwareness.enabled,
     }
@@ -152,7 +148,6 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
   assert.equal(restored.restored, true)
   assert.equal(restored.temperature, 1.1)
   assert.equal(restored.cooldownSeconds, 15)
-  assert.equal(restored.maxBusyScore, 1.6)
   assert.equal(restored.stopped, true)
   assert.equal(restored.persistedOff, true)
 

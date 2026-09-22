@@ -30,6 +30,7 @@ describe('openai-compatible provider', () => {
       baseUrl: 'https://api.example.com/v1/',
       apiKey: 'sk-key',
       model: 'gpt-x',
+      temperature: 0.9,
       fetchImpl,
     })
 
@@ -41,8 +42,9 @@ describe('openai-compatible provider', () => {
     const headers = captured.init?.headers as Record<string, string>
     expect(headers.Authorization).toBe('Bearer sk-key')
 
-    const body = JSON.parse(captured.init?.body as string) as { model: string; messages: unknown[] }
+    const body = JSON.parse(captured.init?.body as string) as { model: string; messages: unknown[]; temperature: number }
     expect(body.model).toBe('gpt-x')
+    expect(body.temperature).toBe(0.9)
     expect(body.messages).toEqual([{ role: 'user', content: 'hello' }])
   })
 
@@ -59,6 +61,13 @@ describe('openai-compatible provider', () => {
       status: 401,
       message: expect.stringContaining('Authentication failed'),
     })
+  })
+
+  it('forwards a 1.1 temperature unchanged', async () => {
+    const { fetchImpl, captured } = await captureFetch(() => jsonResponse({ choices: [{ message: { content: 'ok' } }] }))
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://x/v1', apiKey: 'k', model: 'm', temperature: 1.1, fetchImpl })
+    await provider.complete({ messages: [] })
+    expect(JSON.parse(captured.init?.body as string).temperature).toBe(1.1)
   })
 
   it('reports connection success and failure', async () => {

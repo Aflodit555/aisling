@@ -1,0 +1,3 @@
+[submodule "external/kernel_c"]
+	path = external/kernel_c
+	url = https://github.com/P3lerA/kernel_c.git

@@ -23,6 +23,7 @@ function test(): void {
 }
 
 async function save(): Promise<void> {
+  draft.temperature = Math.max(0, Math.min(2, Number(draft.temperature)))
   await settings.saveConsciousness({ ...draft })
   flashSaved()
 }
@@ -54,6 +55,12 @@ async function save(): Promise<void> {
       <label class="field">
         <span class="label">Model</span>
         <input v-model="draft.model" type="text" placeholder="gpt-4o-mini" />
+      </label>
+
+      <label class="field">
+        <span class="label">Temperature: {{ draft.temperature.toFixed(1) }}</span>
+        <input v-model.number="draft.temperature" type="range" min="0" max="2" step="0.1" />
+        <span class="hint">Higher values are more varied; 1.0 preserves the previous default behavior.</span>
       </label>
     </template>
 

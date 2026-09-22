@@ -107,52 +107,135 @@ export function createAlibabaSpeechProvider(options: AlibabaSpeechProviderOption
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   const transport = options.transport ?? 'websocket'
 
-  return {
-    id: 'alibaba',
+  async function synthesizeOnce(request: SpeechRequest): Promise<SpeechResult> {
+    const text = sanitizeText(request.text)
+    if (!text)
+      throw new Error('Speech text is empty')
 
-    async synthesize(request: SpeechRequest): Promise<SpeechResult> {
-      const text = sanitizeText(request.text)
-      if (!text)
-        throw new Error('Speech text is empty')
+    let response: Response
+    try {
+      response = await fetchImpl(relayUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          endpoint: options.endpoint,
+          model: options.model,
+          voice: options.voice,
+          apiKey: options.apiKey,
+          transport,
+        }),
+      })
+    }
+    catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new Error(`Could not reach the speech relay (${detail})`)
+    }
 
-      let response: Response
-      try {
-        response = await fetchImpl(relayUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text,
-            endpoint: options.endpoint,
-            model: options.model,
-            voice: options.voice,
-            apiKey: options.apiKey,
-            transport,
-          }),
-        })
-      }
-      catch (error) {
-        const detail = error instanceof Error ? error.message : String(error)
-        throw new Error(`Could not reach the speech relay (${detail})`)
-      }
+    let data: { audio?: { base64?: string; mimeType?: string }; error?: string }
+    try {
+      data = await response.json() as typeof data
+    }
+    catch {
+      throw new Error(`Speech relay returned an invalid response (HTTP ${response.status})`)
+    }
+    if (!response.ok || data.error)
+      throw new Error(data.error ?? `Speech relay error (HTTP ${response.status})`)
 
-      let data: { audio?: { base64?: string; mimeType?: string }; error?: string }
-      try {
-        data = await response.json() as typeof data
-      }
-      catch {
-        throw new Error(`Speech relay returned an invalid response (HTTP ${response.status})`)
-      }
-      if (!response.ok || data.error)
-        throw new Error(data.error ?? `Speech relay error (HTTP ${response.status})`)
+    const base64 = data.audio?.base64
+    if (!base64)
+      throw new Error('Speech relay returned no audio')
 
-      const base64 = data.audio?.base64
-      if (!base64)
-        throw new Error('Speech relay returned no audio')
-
-      const bytes = decodeBase64(base64)
-      const audioData = new ArrayBuffer(bytes.length)
-      new Uint8Array(audioData).set(bytes)
-      return { audio: { kind: 'bytes', data: audioData, mimeType: data.audio?.mimeType ?? 'audio/mpeg' } }
-    },
+    const bytes = decodeBase64(base64)
+    const audioData = new ArrayBuffer(bytes.length)
+    new Uint8Array(audioData).set(bytes)
+    return { audio: { kind: 'bytes', data: audioData, mimeType: data.audio?.mimeType ?? 'audio/mpeg' } }
   }
+
+  const provider: SpeechProvider = {
+    id: 'alibaba',
+    synthesize: synthesizeOnce,
+  }
+
+  // Only the realtime WebSocket transport can stream; native HTTP TTS returns a
+  // completed audio file, so it keeps using the one-shot `synthesize` path. The
+  // stream descriptor advertises "continuous encoded byte stream of audio/mpeg"
+  // — the Speech Runtime never reads this; the playback layer matches on it.
+  if (transport === 'websocket') {
+    provider.stream = {
+      descriptor: { kind: 'encoded', mimeType: 'audio/mpeg' },
+      stream: async (request, sink) => {
+        const text = sanitizeText(request.text)
+        if (!text) {
+          sink.onError?.(new Error('Speech text is empty'))
+          return
+        }
+
+        let response: Response
+        try {
+          response = await fetchImpl(relayUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text,
+              endpoint: options.endpoint,
+              model: options.model,
+              voice: options.voice,
+              apiKey: options.apiKey,
+              transport,
+              stream: true,
+            }),
+          })
+        }
+        catch (error) {
+          const detail = error instanceof Error ? error.message : String(error)
+          sink.onError?.(new Error(`Could not reach the speech relay (${detail})`))
+          return
+        }
+
+        if (!response.ok || !response.body) {
+          let detail = `Speech relay error (HTTP ${response.status})`
+          try {
+            const data = await response.json() as { error?: string }
+            if (data.error)
+              detail = data.error
+          }
+          catch { /* non-JSON error body */ }
+          sink.onError?.(new Error(detail))
+          return
+        }
+
+        // Streams MP3 bytes as the relay forwards them from the realtime
+        // DashScope WebSocket. `sink.onEnd` fires when the provider has finished
+        // producing (the HTTP stream ends) — deliberately distinct from playback
+        // finished.
+        const reader = response.body.getReader()
+        let started = false
+        try {
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done)
+              break
+            if (value && value.byteLength > 0) {
+              if (!started) {
+                started = true
+                sink.onStart?.()
+              }
+              sink.onAudio?.(value)
+            }
+          }
+          if (!started) {
+            sink.onError?.(new Error('Speech relay returned no audio'))
+            return
+          }
+          sink.onEnd?.()
+        }
+        catch (error) {
+          sink.onError?.(error instanceof Error ? error : new Error(String(error)))
+        }
+      },
+    }
+  }
+
+  return provider
 }

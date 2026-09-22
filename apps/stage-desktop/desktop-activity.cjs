@@ -1,51 +1,96 @@
-const { execFile } = require('node:child_process')
+const { spawn } = require('node:child_process')
 const path = require('node:path')
-const { readFileSync } = require('node:fs')
-const { promisify } = require('node:util')
-const execFileAsync = promisify(execFile)
+const readline = require('node:readline')
 
-/** @typedef {{ activity: { app?: string, title?: string }, available: boolean, error?: string }} ActivityResult */
+const KERNEL_POLL_SECONDS = '2'
 
-/** Cached and single-flight: renderer polling cannot launch overlapping processes. */
-function createActivityReader() {
-  /** @type {ActivityResult} */
-  let cached = { activity: {}, available: false }
-  let expiresAt = 0
-  /** @type {Promise<ActivityResult> | undefined} */
-  let pending
-
-  /** @returns {Promise<ActivityResult>} */
-  async function sample() {
-    if (process.platform !== 'win32')
-      return { activity: {}, available: false, error: 'Foreground activity currently supports Windows only.' }
-    try {
-      const executable = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
-      const { stdout } = await execFileAsync(executable, [
-        // A fixed bundled command, with no renderer/user arguments or interpolation.
-        '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', readFileSync(path.join(__dirname, 'foreground.ps1'), 'utf8'),
-      ], { windowsHide: true, timeout: 4000, maxBuffer: 16 * 1024, encoding: 'utf8' })
-      const data = JSON.parse(stdout.replace(/^\uFEFF/, '').trim())
-      const activity = {
-        app: typeof data.app === 'string' ? data.app.slice(0, 120) : '',
-        title: typeof data.title === 'string' ? data.title.slice(0, 300) : '',
-      }
-      return { activity, available: Boolean(activity.app || activity.title) }
-    }
-    catch {
-      return { activity: {}, available: false, error: 'Foreground activity unavailable. Check Windows PowerShell permissions.' }
-    }
-  }
-
-  return async function readActivity() {
-    if (pending) return pending
-    if (Date.now() < expiresAt) return cached
-    pending = sample().then((result) => {
-      cached = result
-      expiresAt = Date.now() + 5000
-      return result
-    }).finally(() => { pending = undefined })
-    return pending
+/** Keep the native wire format out of the renderer and cap every text field. */
+function normalizeKernelState(value) {
+  const state = value && typeof value === 'object' ? value : {}
+  const focus = state.focus && typeof state.focus === 'object' ? state.focus : {}
+  const text = (input, cap) => typeof input === 'string' ? input.slice(0, cap) : ''
+  const list = (input, cap = 12) => Array.isArray(input) ? input.slice(0, cap) : []
+  return {
+    idleSeconds: Number.isFinite(state.idle_s) && state.idle_s >= 0 ? state.idle_s : 0,
+    focus: {
+      app: text(focus.app, 120),
+      title: text(focus.title, 300),
+      text: text(focus.text, 2000),
+    },
+    media: list(state.media).map(item => ({
+      app: text(item?.app, 120),
+      title: text(item?.title, 300),
+      artist: text(item?.artist, 200),
+    })),
+    mic: list(state.mic).map(item => text(item, 120)).filter(Boolean),
+    headphones: text(state.headphones, 200),
   }
 }
 
-module.exports = { createActivityReader }
+function createDesktopObserver(options = {}) {
+  const executable = options.executable ?? path.join(__dirname, '..', '..', 'external', 'kernel_c', 'build', 'Release', 'kernel.exe')
+  const spawnImpl = options.spawnImpl ?? spawn
+  let child
+  let lines
+  let latest
+  let error = ''
+  let stopping = false
+
+  function start() {
+    if (child)
+      return status()
+    stopping = false
+    error = ''
+    latest = undefined
+    try {
+      child = spawnImpl(executable, [KERNEL_POLL_SECONDS], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      lines = readline.createInterface({ input: child.stdout })
+      lines.on('line', (line) => {
+        try {
+          latest = normalizeKernelState(JSON.parse(line))
+          error = ''
+        }
+        catch {
+          error = 'Desktop observer returned invalid data.'
+        }
+      })
+      child.once('error', () => { error = 'Desktop observer unavailable.' })
+      child.once('exit', (code) => {
+        lines?.close()
+        lines = undefined
+        child = undefined
+        if (!stopping)
+          error = `Desktop observer stopped unexpectedly${code === null ? '.' : ` (exit ${code}).`}`
+      })
+    }
+    catch {
+      child = undefined
+      error = 'Desktop observer unavailable.'
+    }
+    return status()
+  }
+
+  function stop() {
+    stopping = true
+    lines?.close()
+    lines = undefined
+    if (child) {
+      child.kill()
+      child = undefined
+    }
+    latest = undefined
+    error = ''
+    return status()
+  }
+
+  function status() {
+    return { enabled: Boolean(child), available: Boolean(latest), context: latest, error }
+  }
+
+  return { start, stop, status }
+}
+
+module.exports = { createDesktopObserver, normalizeKernelState }

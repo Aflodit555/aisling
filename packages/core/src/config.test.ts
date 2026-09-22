@@ -6,12 +6,14 @@ describe('config store', () => {
   it('starts with the default platform config', async () => {
     const store = createMemoryConfigStore()
     expect(await store.get()).toEqual(createDefaultPlatformConfig())
+    expect((await store.get()).desktopAwareness).toEqual({ enabled: false, cooldownSeconds: 30 })
   })
 
   it('persists a full platform config', async () => {
     const store = createMemoryConfigStore()
     const next = {
-      consciousness: { providerType: 'openai-compatible', baseUrl: 'https://x/v1', apiKey: 'ck', model: 'm' },
+      consciousness: { providerType: 'openai-compatible', baseUrl: 'https://x/v1', apiKey: 'ck', model: 'm', temperature: 1.1 },
+      desktopAwareness: { enabled: true, cooldownSeconds: 15 },
       speech: { providerType: 'alibaba', apiKey: 'sk', model: 'qwen-audio-3.0-tts-flash', voice: 'longanhuan_v3.6', transport: 'websocket', endpoint: 'wss://x.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference' },
       hearing: { providerType: 'openai-compatible', baseUrl: 'https://x/v1', apiKey: 'hk', model: 'whisper-1' },
       vision: { providerType: 'openai-compatible', baseUrl: 'https://x/v1', apiKey: 'vk', model: 'gpt-4o-mini' },

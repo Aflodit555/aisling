@@ -1,0 +1,69 @@
+diff --git a/dist/cubism4.es.js b/dist/cubism4.es.js
+index 78a3e24..fb6aab8 100644
+--- a/dist/cubism4.es.js
++++ b/dist/cubism4.es.js
+@@ -1090,7 +1090,7 @@ class CubismModel {
+     return this._model.drawables.ids[drawableIndex];
+   }
+   getDrawableRenderOrders() {
+-    return this._model.drawables.renderOrders;
++    return this._model.getRenderOrders ? this._model.getRenderOrders() : this._model.drawables.renderOrders;
+   }
+   getDrawableTextureIndices(drawableIndex) {
+     return this._model.drawables.textureIndices[drawableIndex];
+@@ -3460,7 +3460,7 @@ class CubismRenderer_WebGL extends CubismRenderer {
+     super();
+     this._clippingContextBufferForMask = null;
+     this._clippingContextBufferForDraw = null;
+-    this._clippingManager = new CubismClippingManager_WebGL();
++    this._clippingManager = null;
+     this.firstDraw = true;
+     this._textures = {};
+     this._sortedDrawableIndexList = [];
+@@ -3498,8 +3498,10 @@ class CubismRenderer_WebGL extends CubismRenderer {
+   release() {
+     var _a, _b, _c;
+     const self = this;
+-    this._clippingManager.release();
+-    self._clippingManager = void 0;
++    if (this._clippingManager) {
++      this._clippingManager.release();
++      self._clippingManager = void 0;
++    }
+     (_a = this.gl) == null ? void 0 : _a.deleteBuffer(this._bufferData.vertex);
+     this._bufferData.vertex = null;
+     (_b = this.gl) == null ? void 0 : _b.deleteBuffer(this._bufferData.uv);
+diff --git a/dist/cubism4.js b/dist/cubism4.js
+index 52210af..a2a2259 100644
+--- a/dist/cubism4.js
++++ b/dist/cubism4.js
+@@ -1090,7 +1090,7 @@
+       return this._model.drawables.ids[drawableIndex];
+     }
+     getDrawableRenderOrders() {
+-      return this._model.drawables.renderOrders;
++      return this._model.getRenderOrders ? this._model.getRenderOrders() : this._model.drawables.renderOrders;
+     }
+     getDrawableTextureIndices(drawableIndex) {
+       return this._model.drawables.textureIndices[drawableIndex];
+@@ -3460,7 +3460,7 @@
+       super();
+       this._clippingContextBufferForMask = null;
+       this._clippingContextBufferForDraw = null;
+-      this._clippingManager = new CubismClippingManager_WebGL();
++      this._clippingManager = null;
+       this.firstDraw = true;
+       this._textures = {};
+       this._sortedDrawableIndexList = [];
+@@ -3499,7 +3499,9 @@
+       var _a, _b, _c;
+       const self2 = this;
+-      this._clippingManager.release();
+-      self2._clippingManager = void 0;
++      if (this._clippingManager) {
++        this._clippingManager.release();
++        self2._clippingManager = void 0;
++      }
+       (_a = this.gl) == null ? void 0 : _a.deleteBuffer(this._bufferData.vertex);
+       this._bufferData.vertex = null;
+       (_b = this.gl) == null ? void 0 : _b.deleteBuffer(this._bufferData.uv);

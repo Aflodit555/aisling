@@ -12,6 +12,8 @@ export interface OpenAICompatibleProviderOptions {
   baseUrl: string
   apiKey: string
   model: string
+  /** Sampling temperature. OpenAI-compatible APIs conventionally accept 0–2. */
+  temperature?: number
   /** Injectable fetch for tests; defaults to `globalThis.fetch`. */
   fetchImpl?: typeof fetch
 }
@@ -83,6 +85,8 @@ export async function openAIChatCompletion(
     messages: request.messages.map(toWireMessage),
     stream: false,
   }
+  if (Number.isFinite(options.temperature))
+    body.temperature = Math.max(0, Math.min(2, options.temperature!))
   if (request.tools && request.tools.length > 0)
     body.tools = toWireTools(request.tools)
 

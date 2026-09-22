@@ -1,7 +1,6 @@
 import { createAutonomousStimulus, type AutonomousStimulus, type DesktopActivitySnapshot } from '@aisling/core'
 
 export interface DesktopJudgeScores {
-  [name: string]: number | undefined
   shouldInterrupt: number
 }
 
@@ -46,7 +45,7 @@ export function createAutonomousState(): AutonomousState {
 
 function contextSignature(context: DesktopActivitySnapshot): string {
   const { focus } = context
-  return [focus.app, focus.title, focus.text.slice(0, 600), JSON.stringify(context.media)].join('\0')
+  return JSON.stringify([focus.app, focus.title, focus.text, context.media, context.mic, context.idleSeconds])
 }
 
 /** Thin gate: changed content → one judge call → thresholds → existing runtime. */

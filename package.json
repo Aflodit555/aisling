@@ -3,7 +3,7 @@
   "version": "0.2.7",
   "private": true,
   "type": "module",
-  "description": "Aisling â€?an AI Character Platform / Runtime. Phase 1: platform skeleton + minimal Stage + minimal real loop.",
+  "description": "Aisling â€” an AI Character Platform / Runtime. Phase 1: platform skeleton + minimal Stage + minimal real loop.",
   "packageManager": "pnpm@11.24.0",
   "scripts": {
     "dev": "pnpm --filter @aisling/stage-web dev",

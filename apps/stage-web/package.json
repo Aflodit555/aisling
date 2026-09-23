@@ -3,7 +3,7 @@
   "version": "0.2.7",
   "private": true,
   "type": "module",
-  "description": "Aisling Web Stage â€?a minimal Stage-first frontend over the Aisling character runtime.",
+  "description": "Aisling Web Stage â€” a minimal Stage-first frontend over the Aisling character runtime.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

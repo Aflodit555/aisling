@@ -12,3 +12,9 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Local agent / task scratch files
+dsh-task.txt
+codex-task.txt
+.agent-work/
+.local/

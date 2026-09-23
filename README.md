@@ -8,7 +8,7 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 [AIRI](https://github.com/moeru-ai/airi) as an engineering reference. Aisling is
 **not** an AIRI fork and has no official relationship with either project.
 
-> **Current version:** v0.2.6 · **Status:** early development. The architecture
+> **Current version:** v0.2.7 · **Status:** early development. The architecture
 > and public APIs may still change.
 
 ## What exists today

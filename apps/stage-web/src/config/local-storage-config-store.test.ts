@@ -9,7 +9,7 @@ it('removes obsolete awareness settings from memory and persistence on load', as
   } })
   const store = createLocalStorageConfigStore({ getItem: () => raw, setItem: (_key, value) => { raw = value } })
   const loaded = await store.get()
-  expect(loaded.desktopAwareness).toEqual({ enabled: true, cooldownSeconds: 15 })
+  expect(loaded.desktopAwareness).toEqual({ enabled: true, cooldownSeconds: 15, jevApiKey: '' })
   expect(JSON.parse(raw)).toEqual(loaded)
   expect(loaded.consciousness).toEqual(config.consciousness)
 })

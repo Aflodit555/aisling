@@ -52,7 +52,7 @@ describe('Stage desktop awareness integration', () => {
     expect(synthesize).toHaveBeenCalledTimes(speechEnabled ? 1 : 0)
     expect(settings.config.desktopAwareness.enabled).toBe(true)
     expect(stage.lastTurn!.stimulus.kind).toBe('autonomous')
-    expect(complete.mock.calls[0]![0].messages.at(-1)!.content).toContain('const answer = 42')
+    expect(complete.mock.calls[0]![0].messages.at(-2)!.content).toContain('const answer = 42')
   })
 
   it('stops immediately and invalidates an in-flight judge', async () => {

@@ -45,6 +45,25 @@ function isValidKey(key) {
   return typeof key === 'string' && key.length > 0 && key.length <= 256
 }
 
+/**
+ * Reads the renderer's saved platform config (`aisling.config.v1`) straight from
+ * the same JSON file the storage bridge writes, so the main process can use
+ * renderer-persisted settings (e.g. the Jev API Key) without an IPC round-trip.
+ * @returns {Record<string, unknown> | null}
+ */
+function readStoredConfig() {
+  const raw = readStore()['aisling.config.v1']
+  if (typeof raw !== 'string')
+    return null
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  }
+  catch {
+    return null
+  }
+}
+
 let registered = false
 
 function registerStorageIpc() {
@@ -73,4 +92,4 @@ function registerStorageIpc() {
   })
 }
 
-module.exports = { CHANNELS, registerStorageIpc }
+module.exports = { CHANNELS, registerStorageIpc, readStoredConfig }

@@ -18,6 +18,8 @@ const link = computed(() => {
     return '/settings/vision'
   if (props.module.kind === 'web-search')
     return '/settings/web-search'
+  if (props.module.kind === 'desktop-awareness')
+    return '/settings/desktop-awareness'
   return ''
 })
 

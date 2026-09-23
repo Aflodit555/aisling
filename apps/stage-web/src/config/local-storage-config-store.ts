@@ -34,13 +34,16 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             desktopAwareness: {
               enabled: parsed.desktopAwareness?.enabled ?? defaults.desktopAwareness.enabled,
               cooldownSeconds: parsed.desktopAwareness?.cooldownSeconds ?? defaults.desktopAwareness.cooldownSeconds,
+              jevApiKey: typeof parsed.desktopAwareness?.jevApiKey === 'string'
+                ? parsed.desktopAwareness.jevApiKey
+                : defaults.desktopAwareness.jevApiKey,
             },
             speech: { ...defaults.speech, ...parsed.speech, transport: migratedTransport },
             hearing: { ...defaults.hearing, ...parsed.hearing },
             vision: { ...defaults.vision, ...parsed.vision },
             webSearch: { ...defaults.webSearch, ...parsed.webSearch },
           }
-          if (Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds'))
+          if (Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey'))
             storage.setItem(KEY, JSON.stringify(config))
           return config
         }

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import ConsciousnessForm from '../../components/settings/ConsciousnessForm.vue'
-import AutonomousControls from '../../components/AutonomousControls.vue'
 </script>
 
 <template>
@@ -9,7 +8,6 @@ import AutonomousControls from '../../components/AutonomousControls.vue'
     <p class="subtitle">Choose which model service Aisling uses to think and reply.</p>
 
     <ConsciousnessForm />
-    <AutonomousControls />
   </div>
 </template>
 

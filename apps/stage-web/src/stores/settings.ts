@@ -111,6 +111,7 @@ export const useSettingsStore = defineStore('settings', () => {
       cooldownSeconds: Number.isFinite(next.cooldownSeconds)
         ? Math.max(10, Math.min(300, Math.round(next.cooldownSeconds / 5) * 5))
         : current.cooldownSeconds,
+      jevApiKey: typeof next.jevApiKey === 'string' ? next.jevApiKey : current.jevApiKey,
     } }
     await persist()
   }

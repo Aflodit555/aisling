@@ -133,6 +133,18 @@ export const useStageStore = defineStore('stage', () => {
     return window.aislingDesktop!.judgeDesktopContext()
   }
 
+  /** Tests the TypeSafe / Jev API with the given key (no autonomous trigger). */
+  async function testDesktopAwareness(apiKey: string): Promise<{ ok: boolean; message: string }> {
+    if (!refreshDesktopBridgeStatus() || typeof window.aislingDesktop?.testDesktopAwareness !== 'function')
+      return { ok: false, message: 'Desktop Awareness is available in the Electron app only.' }
+    try {
+      return await window.aislingDesktop.testDesktopAwareness(apiKey)
+    }
+    catch (error) {
+      return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
   const autonomousController = createAutonomousController({
     state: autonomous,
     readDesktop: readDesktopContext,
@@ -318,6 +330,7 @@ export const useStageStore = defineStore('stage', () => {
     noteHumanInteraction: autonomousController.noteHumanInteraction,
     restoreDesktopAwareness: () => setDesktopAwarenessEnabled(settings.config.desktopAwareness.enabled, false),
     setDesktopAwarenessEnabled,
+    testDesktopAwareness,
     activeSessionId,
     deleteSession,
     appendEvent,

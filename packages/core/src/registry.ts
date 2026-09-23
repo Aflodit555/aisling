@@ -7,11 +7,11 @@ import type { PlatformConfig } from './config'
  * read-only projection over `PlatformConfig`, not a plugin SDK.
  */
 
-export type CapabilityKind = 'consciousness' | 'speech' | 'hearing' | 'vision' | 'web-search'
+export type CapabilityKind = 'consciousness' | 'speech' | 'hearing' | 'vision' | 'web-search' | 'desktop-awareness'
 
 export type CapabilityStatus = 'ready' | 'not-configured' | 'not-available'
 
-export type CapabilityCategory = '认知/生成' | '输出/表达' | '感知输入' | '视觉感知' | '工具/外部能力'
+export type CapabilityCategory = '认知/生成' | '输出/表达' | '感知输入' | '视觉感知' | '工具/外部能力' | '桌面感知'
 
 export interface CapabilityModule {
   readonly kind: CapabilityKind
@@ -60,6 +60,10 @@ function isWebSearchReady(config: PlatformConfig): boolean {
   return config.webSearch.providerType === 'tavily' && hasText(config.webSearch.apiKey)
 }
 
+function isDesktopAwarenessReady(config: PlatformConfig): boolean {
+  return hasText(config.desktopAwareness.jevApiKey)
+}
+
 /** Builds the module registry view for the given platform configuration. */
 export function describeCapabilityModules(config: PlatformConfig): CapabilityModule[] {
   return [
@@ -102,6 +106,14 @@ export function describeCapabilityModules(config: PlatformConfig): CapabilityMod
       category: '工具/外部能力',
       providerId: providerId(config.webSearch.providerType),
       status: isWebSearchReady(config) ? 'ready' : 'not-configured',
+    },
+    {
+      kind: 'desktop-awareness',
+      name: 'Desktop Awareness',
+      description: 'How Aisling observes your current desktop context.',
+      category: '桌面感知',
+      providerId: 'jev',
+      status: isDesktopAwarenessReady(config) ? 'ready' : 'not-configured',
     },
   ]
 }

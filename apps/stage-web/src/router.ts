@@ -15,6 +15,7 @@ export const router = createRouter({
         { path: 'hearing', name: 'settings-hearing', component: () => import('./pages/settings/hearing.vue') },
         { path: 'vision', name: 'settings-vision', component: () => import('./pages/settings/vision.vue') },
         { path: 'web-search', name: 'settings-web-search', component: () => import('./pages/settings/web-search.vue') },
+        { path: 'desktop-awareness', name: 'settings-desktop-awareness', component: () => import('./pages/settings/desktop-awareness.vue') },
       ],
     },
   ],

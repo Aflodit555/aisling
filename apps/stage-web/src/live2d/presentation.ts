@@ -1,5 +1,5 @@
 export const LIVE2D_MODEL_URL = import.meta.env.VITE_LIVE2D_MODEL_URL?.trim()
-  || '/live2d/aisling/aisling.model3.json'
+  || '/live2d/mao/mao_pro.model3.json'
 
 export const CUBISM_CORE_URL = import.meta.env.VITE_CUBISM_CORE_URL?.trim()
   || '/live2d/live2dcubismcore.min.js'

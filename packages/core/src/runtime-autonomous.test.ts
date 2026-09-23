@@ -25,13 +25,13 @@ describe('autonomous runtime observation', () => {
     const request = complete.mock.calls[0]![0]
     expect(request.messages.filter(message => message.role === 'user')).toEqual(history)
     expect(request.messages.at(-1)).toEqual({ role: 'system', content: expect.stringContaining('not a user message') })
-    expect(request.messages.at(-1)!.content).toContain('main.ts - project_Aisling')
+    expect(request.messages.at(-2)!.content).toContain('main.ts - project_Aisling')
     expect(runtime.history).toEqual([...history, { role: 'assistant', content: turn.output!.text }])
     expect(eventTypes).toContain('output:produced')
     expect(eventTypes).toContain('turn:completed')
 
     await runtime.ingest(createUserTextStimulus({ source: 'web', text: 'Thanks!' }))
-    expect(complete.mock.calls[1]![0].messages.some(message => message.content?.includes('Autonomous observation'))).toBe(false)
+    expect(complete.mock.calls[1]![0].messages.some(message => message.content?.includes('Desktop-triggered'))).toBe(false)
     expect(runtime.history.at(-2)).toEqual({ role: 'user', content: 'Thanks!' })
   })
 

@@ -57,7 +57,15 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     await settings.saveConsciousness({
       providerType: 'openai-compatible', baseUrl: 'https://example.invalid/v1', apiKey: 'smoke', model: 'smoke-model', temperature: 1.1,
     })
+    // Temperature slider lives on the Consciousness page.
     await router.push('/settings/consciousness')
+    let temperature
+    for (let attempt = 0; attempt < 50 && !temperature; attempt++) {
+      temperature = document.querySelector('.consciousness input[type=range]')?.value
+      if (!temperature) await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    // Desktop Awareness toggle + cooldown live on their own module page.
+    await router.push('/settings/desktop-awareness')
     let control
     for (let attempt = 0; attempt < 50 && !control; attempt++) {
       control = document.querySelector('.desktop-awareness')
@@ -65,7 +73,6 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     }
     if (!control) throw new Error('Desktop Awareness settings did not render at ' + location.pathname + ': ' + document.body.innerText.slice(0, 300))
     const uiOn = control?.querySelector('input[type=checkbox]')?.checked
-    const temperature = control?.parentElement?.querySelector('input[type=range]')?.value
     const cooldownSetting = control?.querySelector('[aria-label="Desktop Awareness cooldown"]')?.value
     const shouldInterrupt = stage.autonomous.scores?.shouldInterrupt
     const firstKind = stage.lastTurn?.stimulus.kind
@@ -103,10 +110,10 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
   assert.deepEqual(judgeRequest.questions, {
     should_interrupt: {
       type: 'noul',
-      instructions: 'Should Aisling interrupt the user and say something now?',
+      instructions: 'Would this be a natural moment for Aisling to make a brief unsolicited comment?',
       criteria: {
-        true: 'There is something sufficiently relevant, unusual, interesting, or useful to comment on, and interrupting now would not be disruptive.',
-        false: 'The screen contains routine or low-value activity, there is no meaningful reason to speak, or the user appears busy and interruption would be disruptive.',
+        true: 'The current context contains a concrete detail that gives Aisling a natural conversational opening. A brief reaction, observation, opinion, curiosity, or playful remark would feel appropriate. The moment does not need to be important or unusual.',
+        false: 'There is no concrete conversational hook, the context is repetitive or too thin to react to, or the user is clearly occupied in a way that would make speaking now intrusive.',
       },
     },
   })

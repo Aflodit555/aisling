@@ -8,7 +8,7 @@ const {
   registerStageScheme,
   registerStageProtocol,
 } = require('./desktop-protocol.cjs')
-const { registerStorageIpc } = require('./desktop-store.cjs')
+const { registerStorageIpc, readStoredConfig } = require('./desktop-store.cjs')
 
 // Must run before app.whenReady(): this makes `aisling://` a standard, secure
 // origin so the built renderer keeps working localStorage + history routing.
@@ -19,6 +19,23 @@ const desktopObserver = createDesktopObserver()
 const semanticJudge = createTypeSafeJudge()
 /** @type {AbortController | undefined} */
 let judgeAbort
+
+/**
+ * Resolves the Jev API key: the frontend-saved config wins, then the
+ * `TYPESAFE_API_KEY` environment variable as a fallback. The saved value is
+ * never written back to the environment and never logged.
+ * @returns {string}
+ */
+function resolveJevApiKey() {
+  const config = readStoredConfig()
+  const awareness = config && typeof config.desktopAwareness === 'object'
+    ? /** @type {Record<string, unknown>} */ (config.desktopAwareness)
+    : undefined
+  const saved = awareness ? awareness.jevApiKey : undefined
+  if (typeof saved === 'string' && saved.trim())
+    return saved.trim()
+  return process.env.TYPESAFE_API_KEY || ''
+}
 /** @type {import('electron').BrowserWindow | undefined} */
 let mainWindow
 let ipcRegistered = false
@@ -251,9 +268,19 @@ async function startDesktop(options = {}) {
       }
       return desktopObserver.start()
     })
-    ipcMain.handle('aisling:desktop-awareness:read', (event) => {
+    ipcMain.handle('aisling:desktop-awareness:read', async (event) => {
       if (!trusted(event))
         throw new Error('Untrusted desktop awareness request')
+      const current = desktopObserver.status()
+      if (current.enabled) {
+        // On-demand: ask the long-running kernel for an immediate snapshot of
+        // the cached foreground window instead of only serving the last timer poll.
+        // A failed request falls back to the last known status (never throws).
+        try {
+          await desktopObserver.request()
+        }
+        catch { /* keep the last known status */ }
+      }
       return desktopObserver.status()
     })
     ipcMain.handle('aisling:desktop-awareness:judge', async (event) => {
@@ -262,16 +289,27 @@ async function startDesktop(options = {}) {
       const snapshot = desktopObserver.status()
       if (!snapshot.enabled || !snapshot.context)
         throw new Error(snapshot.error || 'Desktop observer has no current context.')
+      const apiKey = resolveJevApiKey()
+      if (!apiKey)
+        throw new Error('Desktop semantic judge unavailable: no Jev API Key configured.')
       judgeAbort?.abort()
       const abort = new AbortController()
       judgeAbort = abort
       try {
-        return { context: snapshot.context, scores: await semanticJudge.judge(snapshot.context, abort.signal) }
+        return { context: snapshot.context, scores: await semanticJudge.judge(snapshot.context, abort.signal, apiKey) }
       }
       finally {
         if (judgeAbort === abort)
           judgeAbort = undefined
       }
+    })
+    ipcMain.handle('aisling:desktop-awareness:test', async (event, apiKey) => {
+      if (!trusted(event))
+        throw new Error('Untrusted desktop awareness request')
+      const key = typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : resolveJevApiKey()
+      if (!key)
+        throw new Error('No Jev API Key configured. Configure it or set TYPESAFE_API_KEY.')
+      return semanticJudge.test(key)
     })
   }
   return createWindow({ ...options, stageUrl: target.url })

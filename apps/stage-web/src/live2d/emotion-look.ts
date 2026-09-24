@@ -10,7 +10,7 @@
  *   exp_02  eyes closed in a smile                          → joy
  *   exp_05  brows knit and lowered, mouth corners down      → sad
  *   exp_08  narrowed eyes, pouting mouth                    → angry
- *   exp_07  eyes wide, pupils shrunk, brows up, mouth down  → surprised
+ *   exp_07  eyes wide, pupils shrunk, mouth down (a shocked face) → surprised (alarm; a happy surprise is joy)
  *   exp_06  blush, brows knit                               → shy
  * Unused: exp_01 (all-zero reset, i.e. neutral), exp_03 (plain closed eyes),
  * exp_04 (wide sparkling smile — the same emotion as exp_02 at another

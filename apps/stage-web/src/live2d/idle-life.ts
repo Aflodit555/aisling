@@ -9,7 +9,8 @@
  *   - slow posture shifts: body lean and head tilt drifting to new rest points.
  * Everything except blinking is an additive offset on the motion's value, so
  * the Idle motion keeps playing underneath. While a gesture motion plays, the
- * gesture owns the eyes (its authored blinks and eye shapes pass through).
+ * gesture owns the eyes (its authored blinks and eye shapes pass through); the
+ * hand-over eases over EYE_HANDOVER_MS both ways so the eyes never snap.
  */
 
 import type { ParameterSource } from './parameter-controller'
@@ -37,6 +38,8 @@ const BLINK_CLOSE_MS = 80
 const BLINK_HOLD_MS = 50
 const BLINK_OPEN_MS = 150
 const BLINK_MS = BLINK_CLOSE_MS + BLINK_HOLD_MS + BLINK_OPEN_MS
+/** At least the longest gesture fade-in (Mao: 0.5 s). */
+const EYE_HANDOVER_MS = 500
 
 /** Exponential approach with time constant `tau` (frame-rate independent). */
 function approach(current: number, goal: number, dtMs: number, tau: number): number {
@@ -64,6 +67,8 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
   let nextBlinkMs = between(1_500, 4_000)
   let blinkT = -1
   let secondBlink = false
+  // 1 while idle life owns the eyes, 0 while a gesture does.
+  let eyeOwnership = 1
 
   // Gaze fixation target and smoothed eye/head positions.
   let nextGazeMs = between(1_200, 3_500)
@@ -138,9 +143,13 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
         [BODY_Z, readBase(BODY_Z) + posture.sway],
       ])
       // Replace the Idle motion's baked blink (never close below fully open), then blink on our schedule.
-      if (!options.isGesture()) {
-        for (const id of eyeIds)
-          claims.set(id, Math.max(readBase(id), 1) * openness)
+      const step = dtMs / EYE_HANDOVER_MS
+      eyeOwnership = options.isGesture() ? Math.max(0, eyeOwnership - step) : Math.min(1, eyeOwnership + step)
+      if (eyeOwnership > 0) {
+        for (const id of eyeIds) {
+          const base = readBase(id)
+          claims.set(id, base + (Math.max(base, 1) * openness - base) * eyeOwnership)
+        }
       }
       return claims
     },

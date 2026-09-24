@@ -469,9 +469,10 @@ async function startDesktop(options = {}) {
       const turns = normalizeConversation(conversation)
       if (!turns.length)
         throw new Error('No conversation to judge.')
+      // No key is the default setup, not an error: the character simply stays neutral.
       const apiKey = resolveJevApiKey()
       if (!apiKey)
-        throw new Error('Emotion judge unavailable: no Jev API Key configured.')
+        return null
       // The desktop is only included while the user has Desktop Awareness on.
       const snapshot = desktopObserver.status()
       const desktop = snapshot.enabled ? snapshot.context : undefined
@@ -480,6 +481,12 @@ async function startDesktop(options = {}) {
       emotionAbort = abort
       try {
         return await semanticJudge.judgeEmotion({ conversation: turns, desktop }, abort.signal, apiKey)
+      }
+      catch (error) {
+        // A newer reply superseded this request; its verdict is the one that matters.
+        if (emotionAbort !== abort && abort.signal.aborted)
+          return null
+        throw error
       }
       finally {
         if (emotionAbort === abort)

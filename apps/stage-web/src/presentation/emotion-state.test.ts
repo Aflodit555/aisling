@@ -102,4 +102,29 @@ describe('emotion state', () => {
     expect(state.offer(sample('joy', 3, 3), 0)).toBe('entered')
     expect(state.target).toBe(1)
   })
+
+  it('a calm reply ends the hold the same way whatever label Jev picked', () => {
+    for (const label of ['joy', 'sad'] as const) {
+      const state = createEmotionState()
+      state.offer(sample('joy', 0.8), 0)
+      run(state, 16, 2_000)
+      expect(state.offer(sample(label, 0), 2_000)).toBe('rejected')
+      expect(state.active).toBe('joy')
+      run(state, 2_016, 2_000 + EMOTION_TUNING.halfLifeMs)
+      expect(state.target).toBeCloseTo(0.4, 2)
+    }
+  })
+
+  it('a rejected newer reply is not held by speaking, and a full-strength one always switches', () => {
+    const state = createEmotionState()
+    state.offer(sample('joy', 0.9), 0)
+    run(state, 16, 1_000, 16, true)
+    expect(state.offer(sample('sad', 0.8), 1_000)).toBe('rejected') // 0.8 < 0.9 + margin
+    run(state, 1_016, 1_000 + EMOTION_TUNING.halfLifeMs, 16, true) // speaking the new reply
+    expect(state.target).toBeCloseTo(0.45, 2)
+    expect(state.offer(sample('angry', 1), 5_000)).toBe('entered')
+    const high = createEmotionState()
+    high.offer(sample('joy', 1), 0)
+    expect(high.offer(sample('sad', 1), 100)).toBe('entered')
+  })
 })

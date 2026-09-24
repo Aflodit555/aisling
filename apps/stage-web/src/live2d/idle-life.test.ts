@@ -46,9 +46,13 @@ describe('idle life', () => {
     expect(Math.max(...wide)).toBeCloseTo(1.2)
   })
 
-  it('leaves the eyes to a gesture motion', () => {
-    const out = frames({ gesture: true, seconds: 10 })
-    expect(out.every(f => !f.has('ParamEyeLOpen'))).toBe(true)
+  it('hands the eyes to a gesture motion gradually', () => {
+    const out = frames({ gesture: true, seconds: 10, base: { ParamEyeLOpen: 0 } })
+    const eyes = out.map(f => f.get('ParamEyeLOpen'))
+    // Eased over the hand-over instead of snapping to the gesture's closed eyes.
+    expect(eyes[0]).toBeGreaterThan(0.9)
+    expect(eyes[15]).toBeGreaterThan(0.4)
+    expect(out.slice(40).every(f => !f.has('ParamEyeLOpen'))).toBe(true)
   })
 
   it('moves gaze, head and posture additively within subtle bounds', () => {

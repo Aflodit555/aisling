@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Live2DModel as Live2DModelType } from 'pixi-live2d-display/cubism4'
+import type { Cubism4InternalModel, Live2DModel as Live2DModelType } from 'pixi-live2d-display/cubism4'
 
 import { Application, Ticker, UPDATE_PRIORITY } from 'pixi.js'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -170,6 +170,9 @@ async function mountRenderer(): Promise<void> {
     }
 
     model = loaded
+    // Idle life owns blinking. The native blinker only runs on the one-frame gap
+    // between motions and would overwrite the layers' eyes there (a visible flash).
+    ;(model.internalModel as Cubism4InternalModel).eyeBlink = undefined
     model.internalModel.on('beforeMotionUpdate', restoreLayers)
     model.internalModel.on('afterMotionUpdate', applyLayers)
     modelSize = { width: model.width, height: model.height }

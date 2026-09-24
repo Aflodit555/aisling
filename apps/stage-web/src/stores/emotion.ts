@@ -61,9 +61,12 @@ export const useEmotionStore = defineStore('emotion', () => {
       const result = await bridge.judgeEmotion(turns)
       if (ticket !== revision)
         return
+      error.value = ''
+      // null: no Jev key configured, or superseded by a newer reply.
+      if (!result)
+        return
       if (!isEmotion(result.emotion))
         throw new Error(`Unknown emotion "${String(result.emotion)}".`)
-      error.value = ''
       offer({ emotion: result.emotion, confidence: result.confidence, intensity: result.intensity })
     }
     catch (cause) {

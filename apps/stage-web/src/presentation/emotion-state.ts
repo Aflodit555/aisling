@@ -7,11 +7,16 @@
  * reports intensity and confidence; their product is the only evidence value
  * this module thresholds, once:
  *
+ *   strength < ENTER    no emotion in this reply, whatever the label
  *   neutral → emotion   strength ≥ ENTER
- *   emotion → other     strength ≥ current level + SWITCH_MARGIN (hysteresis)
+ *   emotion → other     strength ≥ current level + SWITCH_MARGIN (hysteresis, capped at 1)
  *   same emotion        refreshes the level and the hold
  *   after the hold      the level halves every HALF_LIFE_MS       (decay)
  *   level < EXIT        back to neutral                           (EXIT < ENTER)
+ *
+ * Samples arrive once per reply, so a rejected sample still says the shown
+ * emotion is no longer current: it ends the hold (including the speaking hold)
+ * and the emotion starts to decay, instead of lasting through the new reply.
  *
  * Shown weights ease toward their goals (fast rise, slower fall), so a switch
  * cross-fades one expression into the next. Time is absolute (ms), so callers
@@ -66,11 +71,13 @@ export function createEmotionState(start = 0): EmotionState {
   let active: Emotion | null = null
   let target = 0
   let heldUntil = start
+  // False once a newer reply did not support the shown emotion: speaking no longer holds it.
+  let holdable = true
   let last = start
 
   function update(now: number, holding = false): EmotionWeights {
     const dt = Math.max(0, now - last)
-    if (holding && active)
+    if (holding && active && holdable)
       heldUntil = Math.max(heldUntil, now)
     const decayMs = now - Math.max(heldUntil, last)
     if (active && decayMs > 0)
@@ -93,13 +100,17 @@ export function createEmotionState(start = 0): EmotionState {
     const strength = clamp01(sample.intensity) * clamp01(sample.confidence)
     // Compare with the current evidence level, not the eased weight: right after
     // an entry the weight still lags, and a weaker sample must not slip in.
-    if (sample.emotion !== active && (strength < t.enter || strength < (active ? target : 0) + t.switchMargin))
+    const switching = sample.emotion !== active
+    if (strength < t.enter || (switching && strength < Math.min(1, (active ? target : 0) + t.switchMargin))) {
+      heldUntil = Math.min(heldUntil, now)
+      holdable = false
       return 'rejected'
-    const entered = sample.emotion !== active
+    }
     active = sample.emotion
     target = strength
     heldUntil = now + t.holdMs
-    return entered ? 'entered' : 'refreshed'
+    holdable = true
+    return switching ? 'entered' : 'refreshed'
   }
 
   return {

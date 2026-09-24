@@ -4,12 +4,22 @@ process.env.AISLING_STAGE_URL = 'http://localhost:5174'
 process.env.TYPESAFE_API_KEY = 'smoke'
 const NativeResponse = Response
 let judgeRequest
+let emotionRequest
 globalThis.fetch = async (_url, options) => {
-  judgeRequest = JSON.parse(options.body)
+  const request = JSON.parse(options.body)
+  // The emotion judge shares the endpoint; keep its request apart from the awareness judge's.
+  const isEmotion = 'emotion' in request.questions
+  if (isEmotion)
+    emotionRequest = request
+  else
+    judgeRequest = request
   return new NativeResponse(JSON.stringify({
-  answers: {
-    should_interrupt: { type: 'noul', noul: 0.9 },
-  },
+  answers: isEmotion
+    ? {
+        emotion: { type: 'choice', choice: 'joy', confidence: 0.9, probabilities: {} },
+        intensity: { type: 'score', score: 2, confidence: 0.9, probabilities: {} },
+      }
+    : { should_interrupt: { type: 'noul', noul: 0.9 } },
   }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
@@ -124,6 +134,11 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
   assert.equal(result.temperature, '1.1')
   assert.equal(result.cooldownSetting, '15')
   assert.equal(result.persistedOn, true)
+  // The autonomous reply is also read by the emotion judge (same endpoint, its own request).
+  for (let attempt = 0; attempt < 50 && !emotionRequest; attempt++)
+    await new Promise(resolve => setTimeout(resolve, 100))
+  assert.deepEqual(Object.keys(emotionRequest.questions), ['emotion', 'intensity'])
+  assert.equal(emotionRequest.state.conversation.at(-1).speaker, 'aisling')
 
   await new Promise((resolve) => {
     contents.once('did-finish-load', resolve)

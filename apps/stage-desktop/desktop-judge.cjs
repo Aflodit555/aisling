@@ -10,10 +10,10 @@ const emotionQuestions = {
     type: 'choice',
     instructions: 'Which emotion would Aisling visibly show right now? Judge mainly from her latest message in the conversation; earlier messages and the desktop are background.',
     criteria: {
-      joy: 'Happy, amused, pleased, affectionate, playful or excited.',
+      joy: 'Happy, amused, pleased, affectionate, playful, excited or pleasantly surprised.',
       sad: 'Sad, disappointed, apologetic, lonely or worried.',
       angry: 'Annoyed, irritated, indignant, sulking or pouting.',
-      surprised: 'Surprised, startled, shocked, alarmed or scared.',
+      surprised: 'An unpleasant or alarming surprise: shocked, startled, alarmed or scared. A happy surprise is joy.',
       shy: 'Embarrassed, flustered, bashful or shy, e.g. after a compliment or teasing.',
     },
   },

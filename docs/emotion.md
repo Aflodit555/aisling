@@ -40,7 +40,7 @@ category: it is intensity 0, and the state the character returns to on its own.
 | joy       | `exp_02`       | eyes closed in a smile                      | head tilt, sway gesture `mtn_03` when strong |
 | sad       | `exp_05`       | brows knit and lowered, mouth corners down  | head and gaze down |
 | angry     | `exp_08`       | narrowed eyes, pouting mouth                | head and gaze turned away |
-| surprised | `exp_07`       | eyes wide, pupils shrunk                    | head up, slight lean back |
+| surprised | `exp_07`       | eyes wide, pupils shrunk (shocked)          | head up, slight lean back; an alarming surprise — a happy one is joy |
 | shy       | `exp_06`       | blush, brows knit                           | gaze down and aside |
 
 Unused on purpose: `exp_01` (all-zero reset = neutral), `exp_03` (plain closed
@@ -52,24 +52,31 @@ effects, not emotions.
 only while Desktop Awareness is on, the focused app/title, a capped slice of
 screen text and media. It answers two questions in one request:
 `emotion` (choice over the five categories, with its confidence) and
-`intensity` (score 0–3: none / slight / clear / strong). It needs the Jev API
-key from the Desktop Awareness settings, and runs in the desktop app only.
+`intensity` (score 0–3: none / slight / clear / strong). The score's own
+confidence is not used: its expected value already weighs the uncertainty. It
+needs the Jev API key from the Desktop Awareness settings (without one the
+character stays neutral) and runs in the desktop app only.
 
 **State machine** (`src/presentation/emotion-state.ts`). The only evidence value
 is `strength = intensity × confidence`, thresholded once:
 
 | rule                                                    | value            |
 | ------------------------------------------------------- | ---------------- |
+| no emotion in this reply, whatever the label            | strength < 0.20  |
 | enter an emotion from neutral                           | strength ≥ 0.20  |
-| switch to another emotion                               | ≥ current + 0.15 |
+| switch to another emotion                               | ≥ min(1, current + 0.15) |
 | same emotion again                                      | refresh level and hold |
-| hold after the last evidence (and while speaking)       | 6 s              |
+| hold after the last evidence, or until speech ends      | 6 s              |
 | then decay                                              | half-life 4 s    |
 | back to neutral                                         | level < 0.05     |
 | shown weight easing                                     | rise 350 ms, fall 900 ms |
 
-A strong reply (strength ≈ 0.6) returns to neutral about 20 s after Aisling
-stops speaking. Switching cross-fades, because the weights ease independently.
+Evidence comes once per reply, so a reply that does not support the shown
+emotion (calm, or a different emotion that is not strong enough to switch)
+ends its hold at once and it starts to decay. A strong emotion (strength ≈ 0.6)
+reaches neutral about 14 s after its hold ends — the hold being 6 s after Jev's
+verdict or the end of Aisling's speech, whichever is later. Switching
+cross-fades, because the weights ease independently.
 
 **Look** (`src/live2d/emotion-look.ts`) blends each emotion's expression with
 Cubism's own Add / Multiply / Overwrite rules at the emotion's weight, adds the

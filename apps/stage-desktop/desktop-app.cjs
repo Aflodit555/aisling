@@ -1,4 +1,4 @@
-const { app, BaseWindow, WebContentsView, Menu, ipcMain, screen } = require('electron')
+const { app, BaseWindow, WebContentsView, Menu, ipcMain, nativeTheme, screen } = require('electron')
 const path = require('node:path')
 const { createDesktopObserver } = require('./desktop-activity.cjs')
 const { createTypeSafeJudge } = require('./desktop-judge.cjs')
@@ -36,6 +36,10 @@ function resolveJevApiKey() {
     return saved.trim()
   return process.env.TYPESAFE_API_KEY || ''
 }
+
+// Matches the renderer's paper/ink --bg so the window does not flash before the Stage paints.
+const stageBackground = () => nativeTheme.shouldUseDarkColors ? '#0F0F1A' : '#F4ECD8'
+
 /** @type {import('electron').BaseWindow | undefined} */
 let mainWindow
 /** @type {import('electron').BaseWindow | undefined} */
@@ -236,7 +240,7 @@ function returnToStage() {
   if (desktopWindow && !desktopWindow.isDestroyed())
     desktopWindow.contentView.removeChildView(stageView)
   mainWindow.contentView.addChildView(stageView)
-  stageView.setBackgroundColor('#0d0b16')
+  stageView.setBackgroundColor(stageBackground())
   resizeView(mainWindow)
   mode = 'stage'
   stageView.webContents.send('aisling:mode', mode)
@@ -278,14 +282,14 @@ async function createWindow(options = {}) {
     minHeight: 560,
     center: true,
     title: 'Aisling',
-    backgroundColor: '#0d0b16',
+    backgroundColor: stageBackground(),
   })
   const window = mainWindow
   stageView = new WebContentsView({ webPreferences: {
     preload: preloadPath, contextIsolation: true, nodeIntegration: false,
     sandbox: true, backgroundThrottling: false,
   } })
-  stageView.setBackgroundColor('#0d0b16')
+  stageView.setBackgroundColor(stageBackground())
   window.contentView.addChildView(stageView)
   resizeView(window)
   window.on('resize', () => resizeView(window))

@@ -5,6 +5,7 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useSpeechStore } from '../stores/speech'
 import { useStageStore } from '../stores/stage'
 import CharacterSurface from './CharacterSurface.vue'
+import Icon from './Icon.vue'
 
 const stage = useStageStore()
 const { speaking } = storeToRefs(useSpeechStore())
@@ -88,7 +89,7 @@ onUnmounted(() => {
     <p v-if="bubble" ref="bubbleElement" data-desktop-hit class="bubble">{{ bubble }}</p>
     <form v-if="inputVisible" data-desktop-hit class="desktop-composer" @submit.prevent="submit">
       <input v-model="draft" aria-label="给 Aisling 发消息" placeholder="说点什么…" :disabled="stage.sending" @keydown.esc="inputVisible = false">
-      <button type="submit" :disabled="!draft.trim() || stage.sending" aria-label="发送消息">↑</button>
+      <button type="submit" :disabled="!draft.trim() || stage.sending" aria-label="发送消息"><Icon name="send" :size="16" /></button>
     </form>
     <button v-if="returnVisible" data-desktop-hit class="return-button" type="button" @click="returnToStage">
       返回主窗口
@@ -97,16 +98,24 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.desktop-surface { position: relative; width: 100%; height: 100%; overflow: hidden; background: transparent; }
-.character { position: absolute; inset: 0; transform: translateY(100%); pointer-events: none; }
-.character.entered { animation: rise 850ms both; }
-.character-hit { position: absolute; left: 3%; width: 94%; top: 8%; bottom: 0; cursor: pointer; clip-path: polygon(30% 0, 70% 0, 85% 15%, 75% 35%, 87% 60%, 85% 100%, 15% 100%, 13% 60%, 25% 35%, 15% 15%); }
-.bubble { position: absolute; top: 14px; left: 7%; width: max-content; max-width: 86%; max-height: 35%; overflow: auto; margin: 0; padding: 10px 15px; border-radius: 17px; background: #fff; color: #302a3a; font-size: 14px; line-height: 1.45; white-space: pre-wrap; box-shadow: 0 4px 18px #0003; overflow-wrap: anywhere; user-select: text; }
-.desktop-composer { position: absolute; left: 50%; width: 67.5%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 5px 7px 5px 14px; border-radius: 999px; background: #fff; color: #24202d; box-shadow: 0 4px 18px #0004; }
-.desktop-composer input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: inherit; font: inherit; font-size: 14px; }
-.desktop-composer button { width: 29px; height: 29px; border: 0; border-radius: 50%; background: #6754ac; color: #fff; cursor: pointer; }
-.desktop-composer button:disabled { opacity: .45; cursor: default; }
-.return-button { position: absolute; top: 120px; right: 28px; padding: 7px 11px; border: 1px solid #ffffffa6; border-radius: 999px; background: #2a243bd9; color: #fff; font: inherit; font-size: 12px; cursor: pointer; }
-@keyframes rise { 0% { transform: translateY(100%); } 72% { transform: translateY(-18px); } 100% { transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .character.entered { animation-duration: 1ms; } }
+.desktop-surface { position: relative; width: 100%; height: 100%; overflow: hidden; background: transparent }
+.character { position: absolute; inset: 0; transform: translateY(100%); pointer-events: none }
+.character.entered { animation: rise 850ms both }
+.character-hit { position: absolute; left: 3%; width: 94%; top: 8%; bottom: 0; cursor: pointer; clip-path: polygon(30% 0, 70% 0, 85% 15%, 75% 35%, 87% 60%, 85% 100%, 15% 100%, 13% 60%, 25% 35%, 15% 15%) }
+/* Floats over an arbitrary desktop, so these three keep a soft shadow the rest of the app never uses. */
+.bubble { position: absolute; top: 14px; left: 7%; width: max-content; max-width: 86%; max-height: 35%; overflow: auto; padding: .5rem .9rem; border: 1px solid var(--rule); border-radius: 8px; background: var(--bg); color: var(--fg); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; box-shadow: 0 4px 18px rgb(0 0 0 / .18); animation: fade .2s var(--ease) }
+.desktop-composer { position: absolute; left: 50%; width: 67.5%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: .5rem; padding: .25rem .3rem .25rem 1rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--bg); color: var(--fg); box-shadow: 0 4px 18px rgb(0 0 0 / .18); transition: border-color .15s }
+.desktop-composer:hover, .desktop-composer:focus-within { border-color: var(--muted) }
+.desktop-composer input { flex: 1; min-width: 0; padding: .25rem 0; border: 0; outline: none; background: none; color: inherit; font: inherit }
+.desktop-composer input::placeholder { color: var(--muted) }
+.desktop-composer button { flex: none; width: 1.75rem; height: 1.75rem; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 50%; background: var(--tonal); color: var(--fg); transition: background .15s, transform .1s }
+.desktop-composer button:hover { background: var(--tonal-strong) }
+.desktop-composer button:active { transform: scale(.94) }
+.desktop-composer button:disabled { opacity: .45; cursor: default; transform: none; background: var(--tonal) }
+.return-button { position: absolute; top: 120px; right: 28px; padding: .4rem .9rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: .85rem; box-shadow: 0 4px 18px rgb(0 0 0 / .18); transition: background .15s, transform .1s }
+.return-button:hover { background: var(--tonal) }
+.return-button:active { transform: scale(.97) }
+@keyframes rise { 0% { transform: translateY(100%) } 72% { transform: translateY(-18px) } 100% { transform: translateY(0) } }
+@keyframes fade { from { opacity: 0 } }
+@media (prefers-reduced-motion: reduce) { .character.entered { animation-duration: 1ms } }
 </style>

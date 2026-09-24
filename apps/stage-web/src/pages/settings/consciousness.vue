@@ -4,28 +4,9 @@ import ConsciousnessForm from '../../components/settings/ConsciousnessForm.vue'
 
 <template>
   <div class="consciousness">
-    <h1 class="title">Consciousness</h1>
-    <p class="subtitle">Choose which model service Aisling uses to think and reply.</p>
+    <h2 class="page-title">Consciousness</h2>
+    <p class="page-sub">Choose which model service Aisling uses to think and reply.</p>
 
     <ConsciousnessForm />
   </div>
 </template>
-
-<style scoped>
-.consciousness {
-  max-width: 560px;
-}
-
-.title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 500;
-  color: #efeaf8;
-}
-
-.subtitle {
-  margin: 6px 0 22px;
-  font-size: 14px;
-  color: #9d94b8;
-}
-</style>

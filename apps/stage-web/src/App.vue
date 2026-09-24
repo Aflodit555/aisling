@@ -5,6 +5,7 @@ import { RouterView } from 'vue-router'
 import { useSettingsStore } from './stores/settings'
 import { DESKTOP_POLL_MS } from './runtime/autonomous'
 import { useStageStore } from './stores/stage'
+import AppHeader from './components/AppHeader.vue'
 import DesktopSurface from './components/DesktopSurface.vue'
 
 const settings = useSettingsStore()
@@ -49,5 +50,12 @@ onUnmounted(() => {
 
 <template>
   <DesktopSurface v-if="mode === 'desktop'" />
-  <RouterView v-else />
+  <template v-else>
+    <AppHeader />
+    <RouterView v-slot="{ Component }">
+      <Transition name="page" mode="out-in">
+        <component :is="Component" />
+      </Transition>
+    </RouterView>
+  </template>
 </template>

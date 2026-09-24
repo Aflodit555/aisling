@@ -44,69 +44,12 @@ watch(
 </template>
 
 <style scoped>
-.messages {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 4px 2px;
-  min-height: 0;
-  min-width: 0;
-}
-
-.empty {
-  margin: auto;
-  color: #9d94b8;
-  font-size: 14px;
-}
-
-.message {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 100%;
-}
-
-.message.is-user {
-  align-items: flex-end;
-}
-
-.message.is-assistant {
-  align-items: flex-start;
-}
-
-.message.is-error {
-  align-items: flex-start;
-}
-
-.role {
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #8f87ad;
-}
-
-.content {
-  margin: 0;
-  padding: 10px 14px;
-  border-radius: 12px;
-  font-size: 15px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: #1c1930;
-  color: #e6e0f4;
-}
-
-.message.is-user .content {
-  background: #372e5e;
-  color: #f0ecfa;
-}
-
-.message.is-error .content {
-  background: rgba(244, 113, 113, 0.12);
-  color: #f6c2c2;
-}
+.messages { display: flex; flex: 1; flex-direction: column; gap: 1rem; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; padding: .25rem 0 }
+.empty { margin: auto; color: var(--muted) }
+.message { display: flex; flex-direction: column; align-items: flex-start; gap: .25rem; max-width: 100%; animation: rise .3s var(--ease) both }
+.message.is-user { align-items: flex-end }
+.role { font-size: .75rem; font-weight: 500; color: var(--muted) }
+.content { padding: .5rem .9rem; border-radius: 8px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--surface); border: 1px solid var(--rule) }
+.is-user .content { background: var(--tonal); border-color: transparent }
+.is-error .content { background: color-mix(in srgb, var(--danger) 12%, var(--bg)); border-color: transparent; color: var(--danger) }
 </style>

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 
 import { readImageFile, validateImageFile, type SelectedImage } from '../image/file'
+import Icon from './Icon.vue'
 
 defineProps<{ image: SelectedImage | undefined }>()
 
@@ -37,69 +38,29 @@ async function onChange(event: Event): Promise<void> {
 <template>
   <div class="image-input">
     <input ref="input" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onChange" />
-    <button type="button" class="btn" title="Attach an image" @click="pick">🖼️</button>
-
     <div v-if="image" class="preview">
       <img :src="image.previewUrl" alt="attachment" />
-      <button type="button" class="remove" title="Remove image" @click="emit('remove')">×</button>
+      <button type="button" class="remove" title="Remove image" aria-label="Remove image" @click="emit('remove')">
+        <Icon name="close" :size="12" />
+      </button>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
+
+    <button type="button" class="icon-btn" title="Attach an image" aria-label="Attach an image" @click="pick">
+      <Icon name="image" />
+    </button>
   </div>
 </template>
 
 <style scoped>
-.image-input {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.btn {
-  flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #1c1930;
-  color: #e6e0f4;
-  font-size: 16px;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-
-.preview {
-  position: relative;
-  display: inline-block;
-  width: fit-content;
-}
-
-.preview img {
-  max-width: 160px;
-  max-height: 120px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.remove {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: none;
-  background: #6d5ac4;
-  color: #fff;
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.error {
-  margin: 0;
-  font-size: 12px;
-  color: #f6c2c2;
-}
+/* Column that grows upward from the button: the row keeps its bottom line and the message list gives up the height.
+   Width stays one button wide; the preview and error overflow into the empty space above the other round buttons. */
+.image-input { display: flex; flex-direction: column; align-items: flex-start; gap: .5rem; flex: none; width: 2.5rem }
+.preview { position: relative; width: max-content; animation: rise .2s var(--ease) }
+.preview img { display: block; max-width: 160px; max-height: 120px; border: 1px solid var(--rule); border-radius: 6px }
+.remove { position: absolute; top: -.5rem; right: -.5rem; width: 1.5rem; height: 1.5rem; display: flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--rule); border-radius: 50%; background: var(--bg); color: var(--fg); transition: background .15s, transform .1s }
+.remove:hover { background: var(--tonal) }
+.remove:active { transform: scale(.94) }
+.error { width: max-content; max-width: 20rem; font-size: .75rem; color: var(--danger) }
 </style>

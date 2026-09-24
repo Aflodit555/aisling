@@ -110,7 +110,7 @@ onBeforeUnmount(() => clearTimeout(testTimer))
       </template>
       <p v-if="rendererState === 'loading'" class="renderer-state">Loading character…</p>
     </div>
-    <h1 v-if="!desktop" class="name">{{ name }}</h1>
+    <h2 v-if="!desktop" class="name">{{ name }}</h2>
     <p v-if="!desktop" class="status">
       {{ looking
         ? `${name} is looking…`
@@ -122,7 +122,7 @@ onBeforeUnmount(() => clearTimeout(testTimer))
               ? `${name} is thinking…`
               : `${name} is here.` }}
     </p>
-    <button v-if="rendererState === 'ready' && !desktop" class="drive-test" type="button" @click="testMovement">
+    <button v-if="rendererState === 'ready' && !desktop" class="btn drive-test" type="button" @click="testMovement">
       Test movement
     </button>
     <p v-else-if="rendererState === 'error' && !desktop" class="renderer-error" :title="rendererError">
@@ -132,116 +132,24 @@ onBeforeUnmount(() => clearTimeout(testTimer))
 </template>
 
 <style scoped>
-.surface {
-  position: relative;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  padding: 48px 24px;
-  min-width: 0;
-}
+.surface { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; min-width: 0; padding: 0 1.5rem 1.5rem }
 
 .surface.desktop { width: 100%; height: 100%; padding: 0; overflow: visible; }
 .surface.desktop .presence { width: 100%; height: 100%; min-height: 0; }
 .surface.desktop .presence.is-error { width: 100%; height: 100%; }
 .surface.desktop .renderer-state { display: none; }
 
-.presence {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: min(100%, 520px);
-  height: min(68vh, 620px);
-  min-height: 280px;
-}
+.presence { position: relative; display: grid; place-items: center; width: min(100%, 520px); height: min(64vh, 600px); min-height: 280px }
+.presence.is-error { width: 220px; height: 220px; min-height: 220px }
+.halo { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--link) 40%, transparent), transparent 70%); transition: transform .6s var(--ease), opacity .6s var(--ease) }
+.presence.is-active .halo { transform: scale(1.12); animation: breathe 2.2s ease-in-out infinite }
+.avatar { position: relative; display: grid; place-items: center; width: 120px; height: 120px; border-radius: 50%; background: var(--surface); border: 1px solid var(--rule); font: 600 3.25rem var(--display); user-select: none }
 
-.presence.is-error {
-  width: 220px;
-  height: 220px;
-  min-height: 220px;
-}
+.name { margin-top: 1rem; font-size: 1.5rem; font-weight: 700 }
+.status, .renderer-state, .renderer-error { color: var(--muted) }
+.renderer-state { position: absolute; font-size: .85rem }
+.renderer-error { margin-top: .75rem; font-size: .85rem }
+.drive-test { margin-top: .75rem }
 
-.halo {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at 50% 42%, rgba(167, 139, 250, 0.55), rgba(167, 139, 250, 0.08) 60%, transparent 72%);
-  filter: blur(2px);
-  transition: transform 0.6s ease, opacity 0.6s ease;
-}
-
-.presence.is-active .halo {
-  transform: scale(1.12);
-  animation: breathe 2.2s ease-in-out infinite;
-}
-
-.avatar {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  background: linear-gradient(150deg, #1e1b2e, #2a2440);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
-  color: #e6e0f4;
-  font-size: 52px;
-  font-weight: 500;
-  user-select: none;
-}
-
-.name {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: #efeaf8;
-}
-
-.status {
-  margin: 0;
-  font-size: 14px;
-  color: #9d94b8;
-}
-
-.renderer-state {
-  position: absolute;
-  margin: 0;
-  color: #9d94b8;
-  font-size: 13px;
-}
-
-.renderer-error {
-  margin: -10px 0 0;
-  color: #776f91;
-  font-size: 12px;
-}
-
-.drive-test {
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 999px;
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #9d94b8;
-  cursor: pointer;
-}
-
-.drive-test:hover {
-  color: #cfc6ea;
-}
-
-@keyframes breathe {
-  0%, 100% {
-    transform: scale(1.08);
-    opacity: 0.85;
-  }
-  50% {
-    transform: scale(1.18);
-    opacity: 1;
-  }
-}
+@keyframes breathe { 0%, 100% { transform: scale(1.06); opacity: .85 } 50% { transform: scale(1.14); opacity: 1 } }
 </style>

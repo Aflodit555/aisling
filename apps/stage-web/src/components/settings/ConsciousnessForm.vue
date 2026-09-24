@@ -31,7 +31,7 @@ async function save(): Promise<void> {
 
 <template>
   <form class="form" @submit.prevent="save">
-    <label class="field">
+    <label class="field" style="--i: 0">
       <span class="label">Provider Type</span>
       <select v-model="draft.providerType">
         <option value="mock">Mock (test)</option>
@@ -40,24 +40,24 @@ async function save(): Promise<void> {
     </label>
 
     <template v-if="isOpenAI">
-      <label class="field">
+      <label class="field" style="--i: 1">
         <span class="label">Base URL</span>
         <input v-model="draft.baseUrl" type="text" :placeholder="DEFAULT_OPENAI_BASE_URL" />
         <span class="hint">Leave as-is for OpenAI; change it for a compatible service.</span>
       </label>
 
-      <label class="field">
+      <label class="field" style="--i: 2">
         <span class="label">API Key</span>
         <input v-model="draft.apiKey" type="password" placeholder="sk-…" autocomplete="off" />
         <span class="hint">Kept in this browser only. Never committed to git.</span>
       </label>
 
-      <label class="field">
+      <label class="field" style="--i: 3">
         <span class="label">Model</span>
         <input v-model="draft.model" type="text" placeholder="gpt-4o-mini" />
       </label>
 
-      <label class="field">
+      <label class="field" style="--i: 4">
         <span class="label">Temperature: {{ draft.temperature.toFixed(1) }}</span>
         <input v-model.number="draft.temperature" type="range" min="0" max="2" step="0.1" />
         <span class="hint">Higher values are more varied; 1.0 preserves the previous default behavior.</span>
@@ -67,13 +67,13 @@ async function save(): Promise<void> {
     <div class="actions">
       <button
         type="button"
-        class="secondary"
+        class="btn"
         :disabled="connectionState === 'connecting'"
         @click="test"
       >
         {{ connectionState === 'connecting' ? 'Connecting…' : 'Test Connection' }}
       </button>
-      <button type="submit" class="primary">Save</button>
+      <button type="submit" class="btn primary">Save</button>
     </div>
 
     <p v-if="connectionMessage" class="status" :class="connectionState">{{ connectionMessage }}</p>
@@ -82,94 +82,6 @@ async function save(): Promise<void> {
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 440px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.label {
-  font-size: 13px;
-  color: #9d94b8;
-}
-
-input,
-select {
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #161329;
-  color: #e6e0f4;
-  font: inherit;
-  font-size: 14px;
-}
-
-input:focus,
-select:focus {
-  outline: none;
-  border-color: rgba(167, 139, 250, 0.6);
-}
-
-.hint {
-  font-size: 12px;
-  color: #6f6889;
-}
-
-.actions {
-  display: flex;
-  gap: 10px;
-}
-
-button {
-  padding: 9px 18px;
-  border: none;
-  border-radius: 10px;
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.primary {
-  background: #6d5ac4;
-  color: #fff;
-}
-
-.secondary {
-  background: rgba(255, 255, 255, 0.06);
-  color: #e6e0f4;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.status {
-  margin: 0;
-  font-size: 13px;
-}
-
-.status.connected {
-  color: #a7e6b4;
-}
-
-.status.failed {
-  color: #f6c2c2;
-}
-
-.status.connecting {
-  color: #f0cf8a;
-}
-
-.status.saved {
-  color: #a7e6b4;
-}
+input[type="range"] { width: 100%; margin: 0 }
+.status { overflow-wrap: anywhere }
 </style>

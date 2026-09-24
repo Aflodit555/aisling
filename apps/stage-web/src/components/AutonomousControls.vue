@@ -31,11 +31,10 @@ function saveCooldown(event: Event): void {
   <section class="desktop-awareness">
     <div class="heading">
       <div>
-        <h2>Desktop Awareness</h2>
+        <h3>Desktop Awareness</h3>
         <p>Desktop-only. Sends current context to a lightweight semantic judge before Aisling may speak.</p>
       </div>
       <input
-        class="toggle"
         type="checkbox"
         :checked="stage.autonomous.enabled"
         :disabled="!stage.desktopAvailable"
@@ -50,19 +49,19 @@ function saveCooldown(event: Event): void {
     <p v-if="!stage.desktopAvailable" class="unavailable-hint">
       Desktop Awareness is unavailable in browser-only mode.
     </p>
-    <div class="awareness-settings">
-      <label>
-        <span>Cooldown</span>
-        <strong>{{ settings.config.desktopAwareness.cooldownSeconds }} s</strong>
+    <div class="form">
+      <label class="field">
+        <span class="label">Cooldown</span>
         <input
           type="range" min="10" max="300" step="5"
           :value="settings.config.desktopAwareness.cooldownSeconds"
           aria-label="Desktop Awareness cooldown"
           @input="saveCooldown"
         >
+        <strong>{{ settings.config.desktopAwareness.cooldownSeconds }} s</strong>
       </label>
     </div>
-    <h3>Debug</h3>
+    <h3 class="debug-title">Debug</h3>
     <dl v-if="stage.desktopAvailable">
       <dt>App</dt><dd>{{ stage.autonomous.latestContext?.focus.app || '—' }}</dd>
       <dt>Title</dt><dd>{{ stage.autonomous.latestContext?.focus.title || '—' }}</dd>
@@ -76,27 +75,23 @@ function saveCooldown(event: Event): void {
 </template>
 
 <style scoped>
-.desktop-awareness { max-width: 440px; margin-top: 26px; padding-top: 22px; border-top: 1px solid rgba(255, 255, 255, 0.08); color: #9d94b8; font-size: 13px; }
-.heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-h2 { margin: 0; color: #efeaf8; font-size: 16px; font-weight: 500; }
-p { margin: 6px 0; line-height: 1.5; }
-.bridge-status { display: flex; align-items: center; gap: 6px; margin-top: 14px; color: #cfc6ea; }
-.bridge-dot { width: 7px; height: 7px; border-radius: 50%; background: #6f6889; }
-.bridge-status.is-connected .bridge-dot { background: #69c89a; box-shadow: 0 0 8px rgba(105, 200, 154, 0.45); }
-.toggle { position: relative; flex: 0 0 auto; width: 36px; height: 20px; margin: 1px 0 0; appearance: none; border: 1px solid #4b435f; border-radius: 999px; background: #211d32; cursor: pointer; }
-.toggle::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #a49bb8; transition: transform 120ms ease; }
-.toggle:checked { border-color: #8f76e8; background: #6d5ac4; }
-.toggle:checked::after { transform: translateX(16px); background: #fff; }
-.toggle:focus-visible { outline: 2px solid #a78bfa; outline-offset: 2px; }
-.toggle:disabled { cursor: not-allowed; opacity: 0.5; }
-.unavailable-hint { color: #8f87ad; }
-.awareness-settings { display: grid; gap: 14px; margin: 18px 0; }
-.awareness-settings label { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; }
-.awareness-settings strong { color: #cfc6ea; font-weight: 500; }
-.awareness-settings input { grid-column: 1 / -1; width: 100%; margin: 0; }
-h3 { margin: 18px 0 10px; color: #cfc6ea; font-size: 13px; font-weight: 500; }
-dl { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 5px 10px; margin: 14px 0 0; }
-dt { color: #736b8d; }
-dd { margin: 0; color: #cfc6ea; overflow-wrap: anywhere; }
-.error { color: #f6c2c2; }
+.desktop-awareness { margin-top: 2rem }
+.heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem }
+h3 { font-family: var(--display); font-size: 1rem; font-weight: 600 }
+.heading p, .unavailable-hint { color: var(--muted); font-size: .85rem }
+.heading input { margin: .2rem 1rem 0 0 }
+.bridge-status { display: flex; align-items: center; gap: .5rem; margin-top: .75rem; color: var(--muted); font-size: .85rem }
+.bridge-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor }
+.is-connected .bridge-dot { background: var(--link); border-color: var(--link) }
+.form { margin-top: .75rem }
+.form .field { grid-template-columns: 10rem minmax(0, 1fr) auto }
+.form .field > strong { grid-column: 3; min-width: 3rem; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums }
+input[type="range"] { width: 100%; margin: 0 }
+.debug-title { margin: 1.5rem 0 .5rem; color: var(--muted); font-family: inherit; font-size: .85rem; font-weight: 500 }
+dl { display: grid; grid-template-columns: 10rem minmax(0, 1fr); font-family: var(--mono); font-size: .85rem }
+dt, dd { padding: .4rem 0 }
+dt { color: var(--muted); padding-right: 1rem }
+dd { overflow-wrap: anywhere }
+:is(dt, dd):nth-child(n+3) { border-top: 1px solid var(--rule) }
+.error { margin-top: .75rem; color: var(--danger); font-size: .85rem; overflow-wrap: anywhere }
 </style>

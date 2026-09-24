@@ -4,6 +4,7 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { CHARACTER_DISPLAY_LIMITS, type CharacterDisplayTransform } from '../live2d/presentation'
 import { usePresentationStore } from '../stores/presentation'
+import Icon from './Icon.vue'
 
 const presentation = usePresentationStore()
 const { transform } = storeToRefs(presentation)
@@ -38,20 +39,16 @@ onBeforeUnmount(() => {
   <div ref="root" class="character-control">
     <button
       type="button"
-      class="trigger"
+      class="icon-btn"
       title="Character display"
       aria-label="Character display"
       :aria-expanded="open"
       @click="open = !open"
     >
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M8 3H4v4M16 3h4v4M8 21H4v-4M16 21h4v-4" />
-        <circle cx="12" cy="9" r="3" />
-        <path d="M7.5 18c.5-3 2-4.5 4.5-4.5s4 1.5 4.5 4.5" />
-      </svg>
+      <Icon name="character" :size="20" />
     </button>
 
-    <section v-if="open" class="popover" aria-label="Character display controls">
+    <section v-if="open" class="pop panel" aria-label="Character display controls">
       <header>Character</header>
 
       <label>
@@ -91,99 +88,17 @@ onBeforeUnmount(() => {
         <output>{{ transform.offsetY }}</output>
       </label>
 
-      <button type="button" class="reset" @click="presentation.resetTransform()">Reset</button>
+      <button type="button" class="btn reset" @click="presentation.resetTransform()">Reset</button>
     </section>
   </div>
 </template>
 
 <style scoped>
-.character-control {
-  position: relative;
-  flex: 0 0 auto;
-}
-
-.trigger {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 50%;
-  background: #1c1930;
-  color: #e6e0f4;
-  font-size: 20px;
-  cursor: pointer;
-}
-
-.trigger:hover,
-.trigger[aria-expanded="true"] {
-  border-color: rgba(167, 139, 250, 0.55);
-  color: #c9b8f2;
-}
-
-.trigger svg {
-  width: 20px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.5;
-}
-
-.popover {
-  position: absolute;
-  z-index: 10;
-  right: 0;
-  bottom: calc(100% + 10px);
-  width: 270px;
-  padding: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 14px;
-  background: rgba(22, 19, 41, 0.98);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
-}
-
-header {
-  margin-bottom: 12px;
-  color: #efeaf8;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-label {
-  display: grid;
-  grid-template-columns: 70px 1fr 34px;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  color: #a9a0c3;
-  font-size: 11px;
-}
-
-input {
-  width: 100%;
-  accent-color: #806bd7;
-}
-
-output {
-  color: #cbc3df;
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-}
-
-.reset {
-  margin-top: 10px;
-  padding: 5px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #aaa1c3;
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.reset:hover {
-  color: #e6e0f4;
-}
+.character-control { position: relative; flex: none }
+.panel { position: absolute; z-index: 10; left: 0; bottom: calc(100% + .5rem); width: 17rem; padding: .75rem 1rem; display: flex; flex-direction: column; gap: .25rem }
+header { margin-bottom: .25rem; font-size: .85rem; font-weight: 500 }
+label { display: grid; grid-template-columns: 5rem minmax(0, 1fr) 2.5rem; align-items: center; gap: .5rem; min-height: 2rem; color: var(--muted); font-size: .85rem }
+input { width: 100%; margin: 0 }
+output { color: var(--fg); text-align: right; font-variant-numeric: tabular-nums }
+.reset { align-self: flex-start; margin-top: .5rem }
 </style>

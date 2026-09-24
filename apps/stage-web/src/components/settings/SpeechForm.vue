@@ -78,7 +78,7 @@ async function save(): Promise<void> {
 
 <template>
   <form class="form" @submit.prevent="save">
-    <label class="field">
+    <label class="field" style="--i: 0">
       <span class="label">Provider</span>
       <select v-model="draft.providerType">
         <option value="none">None (text only)</option>
@@ -88,7 +88,7 @@ async function save(): Promise<void> {
     </label>
 
     <template v-if="isBrowser">
-      <label class="field">
+      <label class="field" style="--i: 1">
         <span class="label">Voice</span>
         <select v-model="draft.voice">
           <option v-for="voice in voices" :key="voice.voiceURI" :value="voice.name">
@@ -100,7 +100,7 @@ async function save(): Promise<void> {
     </template>
 
     <template v-if="isAlibaba">
-      <label class="field">
+      <label class="field" style="--i: 1">
         <span class="label">Transport</span>
         <select v-model="draft.transport" @change="switchTransport">
           <option value="websocket">Realtime WebSocket</option>
@@ -108,26 +108,26 @@ async function save(): Promise<void> {
         </select>
       </label>
 
-      <label class="field">
+      <label class="field long-label" style="--i: 2">
         <span class="label">{{ endpointLabel }}</span>
         <input v-model="draft.endpoint" type="text" :placeholder="endpointPlaceholder" />
-        <span v-if="draft.transport === 'websocket'" class="hint">Example: wss://‹workspace›.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference</span>
-        <span v-else class="hint">Example: https://‹workspace›.cn-beijing.maas.aliyuncs.com/api/v1</span>
+        <span v-if="draft.transport === 'websocket'" class="hint">Example: <code>wss://‹workspace›.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference</code></span>
+        <span v-else class="hint">Example: <code>https://‹workspace›.cn-beijing.maas.aliyuncs.com/api/v1</code></span>
         <span v-if="endpointError" class="error">{{ endpointError }}</span>
       </label>
 
-      <label class="field">
+      <label class="field" style="--i: 3">
         <span class="label">API Key</span>
         <input v-model="draft.apiKey" type="password" placeholder="sk-…" autocomplete="off" />
         <span class="hint">Kept in this browser only. Never committed to git.</span>
       </label>
 
-      <label class="field">
+      <label class="field" style="--i: 4">
         <span class="label">Model</span>
         <input v-model="draft.model" type="text" :placeholder="DEFAULT_ALIBABA_TTS_MODEL" />
       </label>
 
-      <label class="field">
+      <label class="field" style="--i: 5">
         <span class="label">Voice</span>
         <input v-model="draft.voice" type="text" :placeholder="DEFAULT_ALIBABA_TTS_VOICE" />
       </label>
@@ -136,13 +136,13 @@ async function save(): Promise<void> {
     <div class="actions">
       <button
         type="button"
-        class="secondary"
+        class="btn"
         :disabled="voiceState === 'connecting'"
         @click="test"
       >
         {{ voiceState === 'connecting' ? 'Synthesizing…' : 'Test Voice' }}
       </button>
-      <button type="submit" class="primary">Save</button>
+      <button type="submit" class="btn primary">Save</button>
     </div>
 
     <p v-if="voiceMessage" class="status" :class="voiceState">{{ voiceMessage }}</p>
@@ -151,99 +151,9 @@ async function save(): Promise<void> {
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 440px;
-}
-
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.label {
-  font-size: 13px;
-  color: #9d94b8;
-}
-
-input,
-select {
-  padding: 10px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: #161329;
-  color: #e6e0f4;
-  font: inherit;
-  font-size: 14px;
-}
-
-input:focus,
-select:focus {
-  outline: none;
-  border-color: rgba(167, 139, 250, 0.6);
-}
-
-.hint {
-  font-size: 12px;
-  color: #6f6889;
-}
-
-.error {
-  font-size: 12px;
-  color: #f6c2c2;
-}
-
-.actions {
-  display: flex;
-  gap: 10px;
-}
-
-button {
-  padding: 9px 18px;
-  border: none;
-  border-radius: 10px;
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.primary {
-  background: #6d5ac4;
-  color: #fff;
-}
-
-.secondary {
-  background: rgba(255, 255, 255, 0.06);
-  color: #e6e0f4;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.status {
-  margin: 0;
-  font-size: 13px;
-}
-
-.status.connected {
-  color: #a7e6b4;
-}
-
-.status.failed {
-  color: #f6c2c2;
-}
-
-.status.connecting {
-  color: #f0cf8a;
-}
-
-.status.saved-state {
-  color: #a7e6b4;
-}
+.hint, .error, .status { overflow-wrap: anywhere }
+.error { font-size: .85rem }
+code { font-family: var(--mono) }
+/* A wrapped label spans the hint row too, so the hint stays tucked under its input. */
+.long-label > .label { grid-row: span 2; align-self: start; padding-top: calc(.4rem + 1px) }
 </style>

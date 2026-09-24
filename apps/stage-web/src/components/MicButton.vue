@@ -3,6 +3,7 @@ import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
 
 import { useHearingStore } from '../stores/hearing'
+import Icon from './Icon.vue'
 
 const hearing = useHearingStore()
 const { recording, recognizing, error } = storeToRefs(hearing)
@@ -42,56 +43,21 @@ async function toggle(): Promise<void> {
   <div class="mic-wrap">
     <button
       type="button"
-      class="mic"
-      :class="{ 'is-recording': recording, 'is-recognizing': recognizing }"
+      class="icon-btn mic"
+      :class="{ 'is-recording': recording, on: recognizing }"
       :title="error || (recording ? 'Stop and send' : 'Speak to Aisling')"
+      :aria-label="recording ? 'Stop and send' : 'Speak to Aisling'"
       @click="toggle"
     >
-      {{ recognizing ? '…' : recording ? '■' : '🎤' }}
+      <Icon :name="recognizing ? 'dots' : recording ? 'stop' : 'mic'" />
     </button>
     <p v-if="shortError" class="error">{{ shortError }}</p>
   </div>
 </template>
 
 <style scoped>
-.mic-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: center;
-}
-
-.mic {
-  flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #1c1930;
-  color: #e6e0f4;
-  font-size: 16px;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-
-.mic.is-recording {
-  border-color: rgba(244, 113, 113, 0.5);
-  color: #f6c2c2;
-}
-
-.mic.is-recognizing {
-  border-color: rgba(167, 139, 250, 0.5);
-  color: #c9b8f2;
-}
-
-.error {
-  margin: 0;
-  max-width: 96px;
-  font-size: 10px;
-  color: #f6c2c2;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+/* The error hangs below the button so the FAB row stays aligned; the image error sits above the row, so the two never meet. */
+.mic-wrap { position: relative; flex: none }
+.mic.is-recording { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent) }
+.error { position: absolute; top: calc(100% + .25rem); left: 0; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; font-size: .75rem; color: var(--danger); white-space: nowrap; pointer-events: none }
 </style>

@@ -27,86 +27,25 @@ const configurable = computed(() => link.value !== '')
 </script>
 
 <template>
-  <article class="card">
-    <div class="head">
-      <h2 class="name">{{ module.name }}</h2>
-      <StatusBadge :status="module.status" />
+  <component :is="configurable ? RouterLink : 'div'" class="module" :to="configurable ? link : undefined">
+    <div class="text">
+      <div><h3 class="name">{{ module.name }}</h3><span class="category">{{ module.category }}</span></div>
+      <p class="description">{{ module.description }}</p>
     </div>
-    <p class="category">{{ module.category }}</p>
-    <p class="description">{{ module.description }}</p>
-
-    <div class="foot">
-      <RouterLink v-if="configurable" class="configure" :to="link">Configure</RouterLink>
-      <span v-else class="muted">No provider yet</span>
+    <div class="meta">
+      <StatusBadge :status="module.status" />
       <span v-if="module.providerId" class="provider">via {{ module.providerId }}</span>
     </div>
-  </article>
+  </component>
 </template>
 
 <style scoped>
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 12px;
-  background: rgba(13, 11, 22, 0.55);
-}
-
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.name {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 500;
-  color: #efeaf8;
-}
-
-.category {
-  margin: 0;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #6f6889;
-}
-
-.description {
-  margin: 0;
-  font-size: 14px;
-  color: #9d94b8;
-  line-height: 1.5;
-}
-
-.foot {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-top: 4px;
-}
-
-.configure {
-  font-size: 13px;
-  color: #c9b8f2;
-  text-decoration: none;
-}
-
-.configure:hover {
-  color: #e6e0f4;
-}
-
-.muted {
-  font-size: 13px;
-  color: #5f5878;
-}
-
-.provider {
-  font-size: 12px;
-  color: #6f6889;
-}
+.module { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; min-height: 3.25rem; padding: .75rem 1rem .75rem 1.25rem; background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; animation: rise .3s var(--ease) both; animation-delay: calc(var(--i, 0) * 25ms); transition: background .15s }
+a.module:hover { background: var(--hover) }
+.text { min-width: 0 }
+.name { display: inline; font-size: 1em; font-weight: 500 }
+.category { margin-left: .5rem; color: var(--muted); font-size: .75rem }
+.description { color: var(--muted); font-size: .85rem }
+.meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: .1rem }
+.provider { color: var(--muted); font-size: .85rem }
 </style>

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import type { ConversationSession } from '../conversation/conversation-store'
+import Icon from './Icon.vue'
 
 const props = defineProps<{
   sessions: ConversationSession[]
@@ -40,12 +41,12 @@ function formatTime(timestamp: number): string {
 
 <template>
   <div ref="root" class="brow">
-    <button type="button" class="trigger" @click="open = !open">
+    <button type="button" class="trigger" :aria-expanded="open" @click="open = !open">
       <span class="title">{{ activeTitle }}</span>
-      <span class="caret">▾</span>
+      <Icon name="chevron" :size="16" />
     </button>
 
-    <div v-if="open" class="popover">
+    <div v-if="open" class="pop menu">
       <div
         v-for="session in sessions"
         :key="session.id"
@@ -59,9 +60,10 @@ function formatTime(timestamp: number): string {
           type="button"
           class="delete"
           title="Delete conversation"
+          aria-label="Delete conversation"
           @click.stop="emit('delete', session.id)"
         >
-          🗑
+          <Icon name="trash" :size="15" />
         </button>
       </div>
     </div>
@@ -69,105 +71,20 @@ function formatTime(timestamp: number): string {
 </template>
 
 <style scoped>
-.brow {
-  position: relative;
-}
-
-.trigger {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 8px;
-  background: transparent;
-  color: #9d94b8;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.trigger:hover {
-  color: #cfc6ea;
-}
-
-.title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-
-.caret {
-  font-size: 11px;
-}
-
-.popover {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  max-height: min(60vh, 400px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  background: #161329;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-}
-
-.item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.item:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.item.active {
-  background: rgba(167, 139, 250, 0.12);
-}
-
-.item-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #e6e0f4;
-  font-size: 13px;
-}
-
-.time {
-  font-size: 11px;
-  color: #6f6889;
-}
-
-.delete {
-  border: none;
-  background: transparent;
-  color: #6f6889;
-  font-size: 13px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.item:hover .delete {
-  opacity: 1;
-}
-
-.delete:hover {
-  color: #f6c2c2;
-}
+.brow { position: relative }
+.trigger { display: flex; align-items: center; gap: .25rem; max-width: 100%; padding: .4rem .5rem; margin-left: -.5rem; border: none; border-radius: 4px; background: none; color: var(--muted); font-weight: 500; transition: color .15s }
+/* The trigger sits flush with the dock's clipped top edge: draw the ring inside it. */
+.trigger:focus-visible { outline-offset: -2px }
+.trigger:hover, .trigger[aria-expanded="true"] { color: var(--fg) }
+.trigger svg { flex: none }
+.title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; display: flex; flex-direction: column; max-height: min(60vh, 400px); overflow: hidden auto; padding: .25rem }
+.item { display: flex; align-items: center; gap: .75rem; padding: .5rem .75rem; border-radius: 6px; cursor: pointer; transition: background .15s }
+.item:hover { background: var(--hover) }
+.item.active { background: var(--tonal) }
+.item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.time { flex: none; color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums }
+.delete { flex: none; width: 1.75rem; height: 1.75rem; margin: -.25rem 0; display: flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 4px; background: none; color: var(--muted); opacity: 0; transition: opacity .15s, background .15s, color .15s }
+.item:hover .delete, .delete:focus-visible { opacity: 1 }
+.delete:hover { color: var(--fg); background: var(--hover) }
 </style>

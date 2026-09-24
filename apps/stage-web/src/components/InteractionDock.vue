@@ -7,6 +7,7 @@ import type { SelectedImage } from '../image/file'
 import type { DisplayMessage } from '../stores/stage'
 
 import Composer from './Composer.vue'
+import Icon from './Icon.vue'
 import CharacterDisplayControl from './CharacterDisplayControl.vue'
 import ConversationBrow from './ConversationBrow.vue'
 import ImageInputButton from './ImageInput.vue'
@@ -61,44 +62,15 @@ function onSend(text: string): void {
       />
       <MicButton @transcribed="emit('speech', $event)" />
       <CharacterDisplayControl />
-      <button type="button" class="new-btn" title="New conversation" @click="emit('new-conversation')">＋</button>
+      <button type="button" class="icon-btn" title="New conversation" aria-label="New conversation" @click="emit('new-conversation')">
+        <Icon name="plus" />
+      </button>
       <Composer :disabled="sending" @send="onSend" />
     </div>
   </aside>
 </template>
 
 <style scoped>
-.dock {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 0 0 auto;
-  width: clamp(392px, 45vw, 500px);
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  padding: 16px 20px 20px;
-  background: rgba(13, 11, 22, 0.55);
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-}
-
-.new-btn {
-  flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: #1c1930;
-  color: #e6e0f4;
-  font-size: 18px;
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
+.dock { display: flex; flex-direction: column; flex: none; gap: .75rem; width: clamp(392px, 45vw, 500px); min-width: 0; min-height: 0; overflow: hidden; padding: 0 1.5rem 1.5rem }
+.input-row { display: flex; align-items: flex-end; gap: .5rem }
 </style>

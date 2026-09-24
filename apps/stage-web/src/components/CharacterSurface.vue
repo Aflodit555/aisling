@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 
+import { createEmotionLayer, GESTURE_MIN_STRENGTH, MAO_LOOKS } from '../live2d/emotion-look'
+import { createIdleLife } from '../live2d/idle-life'
 import type { ParameterSource } from '../live2d/parameter-controller'
 import {
   CUBISM_CORE_URL,
@@ -10,7 +12,9 @@ import {
   PARAMETER_SOURCE_PRIORITY,
 } from '../live2d/presentation'
 import { mapMouthOpenness } from '../live2d/mouth-visual-mapping'
+import type { Live2DRig } from '../live2d/rig'
 import { createMouthController } from '../presentation/mouth-controller'
+import { useEmotionStore } from '../stores/emotion'
 import { usePresentationStore } from '../stores/presentation'
 import { useSpeechStore } from '../stores/speech'
 import Live2DRenderer from './Live2DRenderer.vue'
@@ -28,48 +32,75 @@ const emit = defineEmits<{ ready: []; error: [] }>()
 const { transform } = storeToRefs(usePresentationStore())
 const desktopTransform = { scale: 1.2, offsetX: 0, offsetY: 0 }
 const speech = useSpeechStore()
+const emotion = useEmotionStore()
 const rendererState = ref<'loading' | 'ready' | 'error'>('loading')
 const rendererError = ref('')
 const driven = computed(() => props.active || props.speaking || props.searching || props.looking)
 
-// Application-layer parameter sources. The renderer owns a ParameterController
-// and applies these above the native model value after each model.update().
+// Application-layer parameter sources, applied by the renderer right after the
+// native motion update, lowest priority first (see parameter-controller).
 const angle = ref(0)
 const mouthController = createMouthController()
 
+// Head turn while Aisling is busy, eased and added on top of whatever moves below.
+let manualAngle = 0
 const manualSource: ParameterSource = {
   id: 'manual-pose',
   priority: PARAMETER_SOURCE_PRIORITY.manual,
   targets: new Set(['ParamAngleX']),
-  sample: () => new Map([['ParamAngleX', angle.value]]),
-}
-
-const speechSource: ParameterSource = {
-  id: 'speech-mouth',
-  priority: PARAMETER_SOURCE_PRIORITY.speech,
-  targets: new Set([MOUTH_OPEN_PARAMETER]),
   sample: ({ readBase, dtMs }) => {
-    const level = speech.readLevel()
-    const frame = mouthController.update({
-      speaking: speech.speaking,
-      level,
-      dtMs,
-      baseMouth: readBase(MOUTH_OPEN_PARAMETER),
-    })
-    return frame.ownsMouth
-      ? new Map([[MOUTH_OPEN_PARAMETER, mapMouthOpenness(frame.mouthOpen)]])
-      : undefined
+    manualAngle += (angle.value - manualAngle) * (1 - Math.exp(-dtMs / 250))
+    return new Map([['ParamAngleX', readBase('ParamAngleX') + manualAngle]])
   },
 }
 
-const sources: ParameterSource[] = [manualSource, speechSource]
+function createSpeechSource(mouth: string): ParameterSource {
+  return {
+    id: 'speech-mouth',
+    priority: PARAMETER_SOURCE_PRIORITY.speech,
+    targets: new Set([mouth]),
+    sample: ({ readBase, dtMs }) => {
+      const frame = mouthController.update({
+        speaking: speech.speaking,
+        level: speech.readLevel(),
+        dtMs,
+        baseMouth: readBase(mouth),
+      })
+      return frame.ownsMouth ? new Map([[mouth, mapMouthOpenness(frame.mouthOpen)]]) : undefined
+    },
+  }
+}
+
+const rig = shallowRef<Live2DRig>()
+const sources = computed<ParameterSource[]>(() => rig.value
+  ? [
+      manualSource,
+      createIdleLife({ eyeIds: rig.value.eyeBlinkIds, isGesture: rig.value.isGesture, priority: PARAMETER_SOURCE_PRIORITY.idle }),
+      createEmotionLayer({
+        rig: rig.value,
+        looks: MAO_LOOKS,
+        weights: () => emotion.state.update(performance.now(), speech.speaking),
+        priority: PARAMETER_SOURCE_PRIORITY.emotion,
+      }),
+      createSpeechSource(rig.value.lipSyncIds[0] ?? MOUTH_OPEN_PARAMETER),
+    ]
+  : [manualSource])
+
+// A strongly entered emotion also plays its gesture once.
+watch(() => emotion.entered, (entered) => {
+  const gesture = entered && MAO_LOOKS[entered.emotion].gesture
+  if (gesture && entered.strength >= GESTURE_MIN_STRENGTH)
+    rig.value?.playMotion(gesture)
+})
+
 let testTimer: ReturnType<typeof setTimeout> | undefined
 
 function applyPresentationState(): void {
   angle.value = driven.value ? 12 : 0
 }
 
-function onReady(): void {
+function onReady(loaded: Live2DRig): void {
+  rig.value = loaded
   rendererState.value = 'ready'
   applyPresentationState()
   emit('ready')

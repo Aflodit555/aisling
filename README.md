@@ -21,6 +21,7 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 - Browser / System Speech (`speechSynthesis`)
 - Alibaba Native HTTP TTS
 - Devtools event tracing
+- Live2D idle life (blinks, gaze, posture) and Jev-judged emotion with a stabilizing state machine ([docs/emotion.md](docs/emotion.md))
 
 **Verified end-to-end:** Consciousness, Vision, Browser Speech, Alibaba TTS,
 conversation persistence.

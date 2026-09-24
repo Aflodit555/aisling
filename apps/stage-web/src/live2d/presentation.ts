@@ -4,17 +4,18 @@ export const LIVE2D_MODEL_URL = import.meta.env.VITE_LIVE2D_MODEL_URL?.trim()
 export const CUBISM_CORE_URL = import.meta.env.VITE_CUBISM_CORE_URL?.trim()
   || '/live2d/live2dcubismcore.min.js'
 
-/** Standard Live2D lip-sync parameter (Hiyori "LipSync" group). */
+/** Fallback lip-sync parameter when the model declares no LipSync group (Mao uses ParamA). */
 export const MOUTH_OPEN_PARAMETER = 'ParamMouthOpenY'
 
 /**
- * Application-layer parameter source priorities. Higher wins when two sources
- * claim the same parameter. Speech owns the mouth above any future
- * expression/motion source; manual pose sits just above the native (unregistered)
- * model value.
+ * Application-layer parameter source priorities, applied lowest first on top
+ * of the native motion: each layer sees the result of the ones below it.
+ * Speech owns the mouth above everything.
  */
 export const PARAMETER_SOURCE_PRIORITY = {
   manual: 10,
+  idle: 20,
+  emotion: 30,
   speech: 100,
 } as const
 

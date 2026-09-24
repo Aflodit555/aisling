@@ -5,6 +5,7 @@ import { Application, Ticker, UPDATE_PRIORITY } from 'pixi.js'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { createParameterController, type CoreModelLike, type ParameterSource } from '../live2d/parameter-controller'
+import { createRig, type Live2DRig } from '../live2d/rig'
 import {
   applyCharacterDisplayTransform,
   fitLive2DModel,
@@ -16,12 +17,12 @@ const props = defineProps<{
   cubismCoreSrc: string
   transform: CharacterDisplayTransform
   desktop?: boolean
-  /** Application-layer parameter sources applied after the native model update. */
+  /** Application-layer parameter sources applied right after the native motion update. */
   sources?: ParameterSource[]
 }>()
 
 const emit = defineEmits<{
-  ready: []
+  ready: [rig: Live2DRig]
   error: [error: Error]
 }>()
 
@@ -33,6 +34,7 @@ let modelSize: { width: number; height: number } | undefined
 let resizeObserver: ResizeObserver | undefined
 let disposed = false
 let coreLoad: Promise<void> | undefined
+let pendingDtMs = 0
 
 watch(() => props.sources, (sources) => controller.setSources(sources ?? []), { immediate: true })
 
@@ -117,13 +119,25 @@ function update(): void {
   if (!app || !model)
     return
 
-  // Native Cubism update first: Idle motion / blink / physics write their own
-  // parameters. The Parameter Controller then applies app-layer overrides
-  // (manual pose, speech mouth) above that base value.
-  const dtMs = app.ticker.deltaMS
-  model.update(dtMs)
-  const core = model.internalModel.coreModel as unknown as CoreModelLike
-  controller.apply(core, dtMs)
+  // Only advances the model clock; the Cubism update itself runs at render time.
+  pendingDtMs += app.ticker.deltaMS
+  model.update(app.ticker.deltaMS)
+}
+
+// Cubism keeps last frame's values; hand the motion the native ones back.
+function restoreLayers(): void {
+  if (model)
+    controller.restore(model.internalModel.coreModel as unknown as CoreModelLike)
+}
+
+// Runs inside the Cubism update, right after the motion wrote its values and
+// before expressions, physics, pose and the mesh update: app layers (idle life,
+// emotion, speech mouth) sit on top of the motion and physics reacts to them.
+function applyLayers(): void {
+  if (!model)
+    return
+  controller.apply(model.internalModel.coreModel as unknown as CoreModelLike, pendingDtMs)
+  pendingDtMs = 0
 }
 
 async function mountRenderer(): Promise<void> {
@@ -149,7 +163,15 @@ async function mountRenderer(): Promise<void> {
       return
     }
 
+    const rig = await createRig(loaded)
+    if (disposed) {
+      loaded.destroy()
+      return
+    }
+
     model = loaded
+    model.internalModel.on('beforeMotionUpdate', restoreLayers)
+    model.internalModel.on('afterMotionUpdate', applyLayers)
     modelSize = { width: model.width, height: model.height }
     model.anchor.set(0.5)
     app.stage.addChild(model)
@@ -159,7 +181,7 @@ async function mountRenderer(): Promise<void> {
     if (props.desktop && container.value.parentElement)
       resizeObserver.observe(container.value.parentElement)
     resize()
-    emit('ready')
+    emit('ready', rig)
   }
   catch (cause) {
     if (!disposed)

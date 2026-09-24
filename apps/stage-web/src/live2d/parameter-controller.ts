@@ -1,17 +1,23 @@
 /**
  * Minimal Live2D parameter layer.
  *
- * `model.update()` writes the native Idle/motion/blink values first; this
- * controller then applies application-layer overrides above that base value, so
- * application code never scatters raw `setParameterValueById` calls across
- * components. Each source declares its identity, priority and parameter targets;
- * for overlapping targets the higher priority wins. Sources may read the native
- * base value (via `readBase`) to cross-fade a handoff, and return `undefined` to
- * claim nothing this frame (releasing ownership back to native motion).
+ * The renderer applies this controller right after the native motion update
+ * (before expressions, physics and the mesh update), so application layers
+ * sit on top of the Idle/gesture motion and physics still reacts to them.
+ * Sources run as layers in ascending priority: each reads the value left by the
+ * native motion and every lower layer (via `readBase`), so additive layers such
+ * as idle gaze and emotion compose, while an absolute writer placed higher
+ * still wins. Sources return `undefined` to claim nothing this frame (releasing
+ * ownership back to the layers below). Every parameter is written once.
+ *
+ * Cubism carries parameter values into the next frame, so before each motion
+ * update the renderer calls `restore` to put back the native values the layers
+ * started from; otherwise an additive layer would stack onto its own previous
+ * output wherever the motion does not fully overwrite a parameter.
  */
 
 export interface ParameterSampleContext {
-  /** Read a parameter's native value left by model.update() this frame. */
+  /** Read a parameter as left by the native motion and all lower-priority sources this frame. */
   readBase(id: string): number
   /** Frame delta in milliseconds. */
   dtMs: number
@@ -38,10 +44,22 @@ export interface ParameterController {
   setSources(sources: readonly ParameterSource[]): void
   /** Applies sources and returns the final written claims (parameter id → value). */
   apply(core: CoreModelLike, dtMs: number): ReadonlyMap<string, number>
+  /** Puts back the native values the last `apply` overwrote. */
+  restore(core: CoreModelLike): void
 }
 
 export function createParameterController(): ParameterController {
   let sources: readonly ParameterSource[] = []
+  let overwritten = new Map<string, number>()
+
+  const read = (core: CoreModelLike, id: string): number => {
+    try {
+      return core.getParameterValueById(id)
+    }
+    catch {
+      return 0
+    }
+  }
 
   function setSources(next: readonly ParameterSource[]): void {
     sources = [...next].sort((a, b) => a.priority - b.priority)
@@ -50,12 +68,8 @@ export function createParameterController(): ParameterController {
   function apply(core: CoreModelLike, dtMs: number): ReadonlyMap<string, number> {
     const claims = new Map<string, number>()
     const readBase = (id: string): number => {
-      try {
-        return core.getParameterValueById(id)
-      }
-      catch {
-        return 0
-      }
+      const claimed = claims.get(id)
+      return claimed !== undefined ? claimed : read(core, id)
     }
 
     for (const source of sources) {
@@ -66,8 +80,10 @@ export function createParameterController(): ParameterController {
         claims.set(id, value)
     }
 
+    overwritten = new Map()
     for (const [id, value] of claims) {
       try {
+        overwritten.set(id, read(core, id))
         core.setParameterValueById(id, value)
       }
       catch {
@@ -78,5 +94,15 @@ export function createParameterController(): ParameterController {
     return claims
   }
 
-  return { setSources, apply }
+  function restore(core: CoreModelLike): void {
+    for (const [id, value] of overwritten) {
+      try {
+        core.setParameterValueById(id, value)
+      }
+      catch {}
+    }
+    overwritten = new Map()
+  }
+
+  return { setSources, apply, restore }
 }

@@ -1,7 +1,7 @@
 const { app, BaseWindow, WebContentsView, Menu, ipcMain, nativeTheme, screen } = require('electron')
 const path = require('node:path')
 const { createDesktopObserver } = require('./desktop-activity.cjs')
-const { createTypeSafeJudge } = require('./desktop-judge.cjs')
+const { createTypeSafeJudge, normalizeConversation } = require('./desktop-judge.cjs')
 const {
   buildStageUrl,
   isBuiltRendererAvailable,
@@ -19,6 +19,8 @@ const desktopObserver = createDesktopObserver()
 const semanticJudge = createTypeSafeJudge()
 /** @type {AbortController | undefined} */
 let judgeAbort
+/** @type {AbortController | undefined} */
+let emotionAbort
 
 /**
  * Resolves the Jev API key: the frontend-saved config wins, then the
@@ -459,6 +461,29 @@ async function startDesktop(options = {}) {
       finally {
         if (judgeAbort === abort)
           judgeAbort = undefined
+      }
+    })
+    ipcMain.handle('aisling:emotion:judge', async (event, conversation) => {
+      if (!trusted(event))
+        throw new Error('Untrusted emotion request')
+      const turns = normalizeConversation(conversation)
+      if (!turns.length)
+        throw new Error('No conversation to judge.')
+      const apiKey = resolveJevApiKey()
+      if (!apiKey)
+        throw new Error('Emotion judge unavailable: no Jev API Key configured.')
+      // The desktop is only included while the user has Desktop Awareness on.
+      const snapshot = desktopObserver.status()
+      const desktop = snapshot.enabled ? snapshot.context : undefined
+      emotionAbort?.abort()
+      const abort = new AbortController()
+      emotionAbort = abort
+      try {
+        return await semanticJudge.judgeEmotion({ conversation: turns, desktop }, abort.signal, apiKey)
+      }
+      finally {
+        if (emotionAbort === abort)
+          emotionAbort = undefined
       }
     })
     ipcMain.handle('aisling:desktop-awareness:test', async (event, apiKey) => {

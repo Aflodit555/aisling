@@ -13,6 +13,7 @@ import {
 import { createAislingRuntime } from '../runtime/aisling'
 import { createAutonomousController, createAutonomousState } from '../runtime/autonomous'
 import { resolvePersistentStorage } from '../storage/desktop-storage'
+import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
 
@@ -78,6 +79,7 @@ function stimulusToUserMessage(stimulus: Stimulus): { role: 'user'; content: str
 export const useStageStore = defineStore('stage', () => {
   const settings = useSettingsStore()
   const speech = useSpeechStore()
+  const emotion = useEmotionStore()
   const conversationStore = createLocalStorageConversationStore(resolvePersistentStorage())
 
   function ensureActiveSession(): ConversationSession {
@@ -251,6 +253,7 @@ export const useStageStore = defineStore('stage', () => {
         sessionMessages.value = [...sessionMessages.value, { role: 'assistant', content: turn.output.text }]
         persistActiveSession()
         void speech.speak(turn.output.text)
+        void emotion.judge(sessionMessages.value)
       }
       else {
         if (partialIndex >= 0) messages.value.splice(partialIndex, 1)

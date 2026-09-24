@@ -21,9 +21,12 @@ const props = defineProps<{
   speaking?: boolean
   searching?: boolean
   looking?: boolean
+  desktop?: boolean
 }>()
+const emit = defineEmits<{ ready: []; error: [] }>()
 
 const { transform } = storeToRefs(usePresentationStore())
+const desktopTransform = { scale: 1.2, offsetX: 0, offsetY: 0 }
 const speech = useSpeechStore()
 const rendererState = ref<'loading' | 'ready' | 'error'>('loading')
 const rendererError = ref('')
@@ -69,11 +72,13 @@ function applyPresentationState(): void {
 function onReady(): void {
   rendererState.value = 'ready'
   applyPresentationState()
+  emit('ready')
 }
 
 function onError(error: Error): void {
   rendererState.value = 'error'
   rendererError.value = error.message
+  emit('error')
 }
 
 function testMovement(): void {
@@ -87,13 +92,14 @@ onBeforeUnmount(() => clearTimeout(testTimer))
 </script>
 
 <template>
-  <section class="surface">
+  <section class="surface" :class="{ desktop }">
     <div class="presence" :class="{ 'is-active': driven, 'is-error': rendererState === 'error' }">
       <Live2DRenderer
         v-if="rendererState !== 'error'"
         :model-src="LIVE2D_MODEL_URL"
         :cubism-core-src="CUBISM_CORE_URL"
-        :transform="transform"
+        :transform="desktop ? desktopTransform : transform"
+        :desktop="desktop"
         :sources="sources"
         @ready="onReady"
         @error="onError"
@@ -104,8 +110,8 @@ onBeforeUnmount(() => clearTimeout(testTimer))
       </template>
       <p v-if="rendererState === 'loading'" class="renderer-state">Loading character…</p>
     </div>
-    <h1 class="name">{{ name }}</h1>
-    <p class="status">
+    <h1 v-if="!desktop" class="name">{{ name }}</h1>
+    <p v-if="!desktop" class="status">
       {{ looking
         ? `${name} is looking…`
         : searching
@@ -116,10 +122,10 @@ onBeforeUnmount(() => clearTimeout(testTimer))
               ? `${name} is thinking…`
               : `${name} is here.` }}
     </p>
-    <button v-if="rendererState === 'ready'" class="drive-test" type="button" @click="testMovement">
+    <button v-if="rendererState === 'ready' && !desktop" class="drive-test" type="button" @click="testMovement">
       Test movement
     </button>
-    <p v-else-if="rendererState === 'error'" class="renderer-error" :title="rendererError">
+    <p v-else-if="rendererState === 'error' && !desktop" class="renderer-error" :title="rendererError">
       Live2D unavailable · using fallback
     </p>
   </section>
@@ -137,6 +143,11 @@ onBeforeUnmount(() => clearTimeout(testTimer))
   padding: 48px 24px;
   min-width: 0;
 }
+
+.surface.desktop { width: 100%; height: 100%; padding: 0; overflow: visible; }
+.surface.desktop .presence { width: 100%; height: 100%; min-height: 0; }
+.surface.desktop .presence.is-error { width: 100%; height: 100%; }
+.surface.desktop .renderer-state { display: none; }
 
 .presence {
   position: relative;

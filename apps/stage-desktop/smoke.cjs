@@ -25,12 +25,13 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
 
 ;(async () => {
   const win = await startDesktop({ show: false, diagnostics: false })
-  const preferences = win.webContents.getLastWebPreferences()
+  const contents = win.contentView.children[0].webContents
+  const preferences = contents.getLastWebPreferences()
   assert.equal(preferences.contextIsolation, true)
   assert.equal(preferences.nodeIntegration, false)
   assert.equal(preferences.sandbox, true)
 
-  const result = await win.webContents.executeJavaScript(`(async () => {
+  const result = await contents.executeJavaScript(`(async () => {
     const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router
     const { useStageStore } = await import('/src/stores/stage.ts')
     const { useSettingsStore } = await import('/src/stores/settings.ts')
@@ -125,10 +126,10 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
   assert.equal(result.persistedOn, true)
 
   await new Promise((resolve) => {
-    win.webContents.once('did-finish-load', resolve)
-    win.webContents.reload()
+    contents.once('did-finish-load', resolve)
+    contents.reload()
   })
-  const restored = await win.webContents.executeJavaScript(`(async () => {
+  const restored = await contents.executeJavaScript(`(async () => {
     const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router
     const { useStageStore } = await import('/src/stores/stage.ts')
     const { useSettingsStore } = await import('/src/stores/settings.ts')
@@ -159,7 +160,7 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
   assert.equal(restored.persistedOff, true)
 
   const screenshot = path.join(app.getPath('userData'), 'stage-smoke.png')
-  writeFileSync(screenshot, (await win.capturePage()).toPNG())
+  writeFileSync(screenshot, (await contents.capturePage()).toPNG())
   console.log(JSON.stringify({ ok: true, ...result, restored }))
   console.log(`Screenshot: ${screenshot}`)
   clearTimeout(timeout)

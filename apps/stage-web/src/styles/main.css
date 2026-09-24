@@ -15,6 +15,11 @@ body {
   height: 100%;
 }
 
+body.desktop-mode,
+body.desktop-mode #app {
+  background: transparent;
+}
+
 body {
   background: var(--bg);
   color: var(--text);

@@ -177,7 +177,23 @@ export const useStageStore = defineStore('stage', () => {
     autonomous.error = status.error ?? ''
   }
 
+  let partialIndex = -1
   runtime.onEvent((event) => {
+    if (event.type === 'output:partial') {
+      if (!sending.value) return
+      if (!event.text.trim()) {
+        if (partialIndex >= 0) messages.value.splice(partialIndex, 1)
+        partialIndex = -1
+      }
+      else if (partialIndex < 0) {
+        partialIndex = messages.value.length
+        messages.value.push({ role: 'assistant', content: event.text })
+      }
+      else {
+        messages.value[partialIndex] = { role: 'assistant', content: event.text }
+      }
+      return
+    }
     events.value = [...events.value, event].slice(-MAX_DEVTOOLS_EVENTS)
     if (event.type === 'tool:requested' || event.type === 'tool:started')
       searching.value = true
@@ -208,6 +224,7 @@ export const useStageStore = defineStore('stage', () => {
       return
 
     sending.value = true
+    partialIndex = -1
     const userMessage = stimulusToUserMessage(stimulus)
     if (userMessage) {
       messages.value = [...messages.value, { role: 'user', content: userMessage.content }]
@@ -223,20 +240,27 @@ export const useStageStore = defineStore('stage', () => {
     void runtime.ingest(stimulus).then((turn) => {
       if (turn.status === 'completed' && turn.output) {
         lastTurn.value = { stimulus: turn.stimulus, output: turn.output }
-        if (turn.stimulus.kind === 'autonomous' && !turn.output.text.trim())
+        if (turn.stimulus.kind === 'autonomous' && !turn.output.text.trim()) {
+          if (partialIndex >= 0) messages.value.splice(partialIndex, 1)
           return
-        messages.value = [...messages.value, { role: 'assistant', content: turn.output.text }]
+        }
+        if (partialIndex >= 0)
+          messages.value[partialIndex] = { role: 'assistant', content: turn.output.text }
+        else
+          messages.value.push({ role: 'assistant', content: turn.output.text })
         sessionMessages.value = [...sessionMessages.value, { role: 'assistant', content: turn.output.text }]
         persistActiveSession()
         void speech.speak(turn.output.text)
       }
       else {
+        if (partialIndex >= 0) messages.value.splice(partialIndex, 1)
         messages.value = [...messages.value, {
           role: 'error',
           content: turn.error ?? 'Something went wrong.',
         }]
       }
     }).finally(() => {
+      partialIndex = -1
       sending.value = false
       if (stimulus.kind === 'autonomous')
         autonomousController.completed()

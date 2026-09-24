@@ -5,6 +5,18 @@ const { contextBridge, ipcRenderer } = require('electron')
 // bridge (get/set only) so the renderer can keep its existing persistence while
 // Electron owns a single stable data file in userData.
 contextBridge.exposeInMainWorld('aislingDesktop', {
+  getMode: () => ipcRenderer.invoke('aisling:mode:get'),
+  returnToStage: () => ipcRenderer.invoke('aisling:mode:return'),
+  onDesktopPointer: callback => {
+    const listener = (_event, kind) => callback(kind)
+    ipcRenderer.on('aisling:desktop-pointer', listener)
+    return () => ipcRenderer.removeListener('aisling:desktop-pointer', listener)
+  },
+  onModeChange: callback => {
+    const listener = (_event, mode) => callback(mode)
+    ipcRenderer.on('aisling:mode', listener)
+    return () => ipcRenderer.removeListener('aisling:mode', listener)
+  },
   setDesktopAwareness: enabled => ipcRenderer.invoke('aisling:desktop-awareness:set', enabled),
   readDesktopContext: () => ipcRenderer.invoke('aisling:desktop-awareness:read'),
   judgeDesktopContext: () => ipcRenderer.invoke('aisling:desktop-awareness:judge'),

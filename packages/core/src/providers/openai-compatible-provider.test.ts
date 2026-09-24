@@ -70,6 +70,50 @@ describe('openai-compatible provider', () => {
     expect(JSON.parse(captured.init?.body as string).temperature).toBe(1.1)
   })
 
+  it('shows streamed text before the response finishes and joins split events', async () => {
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"你"}}]}\n\n'))
+        await held
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"好"}}]}\n'))
+        controller.enqueue(encoder.encode('\n' + 'data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    const { fetchImpl, captured } = await captureFetch(() => new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } }))
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://x/v1', apiKey: 'k', model: 'm', fetchImpl })
+    const updates: string[] = []
+    let first!: () => void
+    const firstText = new Promise<void>(resolve => { first = resolve })
+    const result = provider.stream!({ messages: [{ role: 'user', content: 'hi' }] }, text => {
+      updates.push(text)
+      first()
+    })
+
+    await firstText
+    expect(updates).toEqual(['你'])
+    expect(JSON.parse(captured.init?.body as string).stream).toBe(true)
+    release()
+    await expect(result).resolves.toEqual({ text: '你好' })
+    expect(updates).toEqual(['你', '你好'])
+  })
+
+  it('reassembles tool calls from streamed argument fragments', async () => {
+    const events = [
+      { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'web_search', arguments: '{"query":' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"Aisling"}' } }] } }] },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`).join('')
+    const { fetchImpl } = await captureFetch(() => new Response(events, { headers: { 'Content-Type': 'text/event-stream' } }))
+    const provider = createOpenAICompatibleProvider({ baseUrl: 'https://x/v1', apiKey: 'k', model: 'm', fetchImpl })
+    await expect(provider.stream!({ messages: [] }, () => {})).resolves.toEqual({
+      text: '',
+      toolCalls: [{ id: 'call_1', name: 'web_search', arguments: '{"query":"Aisling"}' }],
+    })
+  })
+
   it('reports connection success and failure', async () => {
     const ok = await captureFetch(() => jsonResponse({ choices: [{ message: { content: 'pong' } }] }))
     await expect(testOpenAICompatibleConnection({

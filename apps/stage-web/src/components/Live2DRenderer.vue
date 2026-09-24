@@ -15,6 +15,7 @@ const props = defineProps<{
   modelSrc: string
   cubismCoreSrc: string
   transform: CharacterDisplayTransform
+  desktop?: boolean
   /** Application-layer parameter sources applied after the native model update. */
   sources?: ParameterSource[]
 }>()
@@ -87,15 +88,27 @@ function resize(): void {
   if (!app || !model || !modelSize || !container.value)
     return
 
-  const { clientWidth: width, clientHeight: height } = container.value
-  if (!width || !height)
+  const width = container.value.clientWidth
+  const visibleHeight = props.desktop ? container.value.parentElement?.clientHeight ?? 0 : container.value.clientHeight
+  if (!width || !visibleHeight)
     return
 
-  app.renderer.resize(width, height)
   const fitted = applyCharacterDisplayTransform(
-    fitLive2DModel({ width, height }, modelSize),
+    fitLive2DModel({ width, height: visibleHeight }, modelSize),
     props.transform,
   )
+  if (props.desktop) {
+    // Keep the entire live model inside its canvas; the desktop window alone
+    // masks the lower body, so the rising model never exposes a cut edge.
+    const top = visibleHeight * 0.19
+    const fullHeight = Math.ceil(top + modelSize.height * fitted.scale)
+    container.value.style.height = `${fullHeight}px`
+    app.renderer.resize(width, fullHeight)
+    model.scale.set(fitted.scale)
+    model.position.set(fitted.x, top + modelSize.height * fitted.scale / 2)
+    return
+  }
+  app.renderer.resize(width, visibleHeight)
   model.scale.set(fitted.scale)
   model.position.set(fitted.x, fitted.y)
 }
@@ -143,6 +156,8 @@ async function mountRenderer(): Promise<void> {
     app.ticker.add(update, undefined, UPDATE_PRIORITY.HIGH)
     resizeObserver = new ResizeObserver(resize)
     resizeObserver.observe(container.value)
+    if (props.desktop && container.value.parentElement)
+      resizeObserver.observe(container.value.parentElement)
     resize()
     emit('ready')
   }
@@ -172,7 +187,7 @@ watch(() => [props.transform.scale, props.transform.offsetX, props.transform.off
 </script>
 
 <template>
-  <div ref="container" class="live2d-renderer" />
+  <div ref="container" class="live2d-renderer" :class="{ desktop }" />
 </template>
 
 <style scoped>
@@ -181,6 +196,8 @@ watch(() => [props.transform.scale, props.transform.offsetX, props.transform.off
   height: 100%;
   overflow: hidden;
 }
+
+.live2d-renderer.desktop { position: absolute; top: 0; left: 0; overflow: visible; }
 
 .live2d-renderer :deep(.live2d-canvas) {
   display: block;

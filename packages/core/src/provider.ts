@@ -41,4 +41,6 @@ export interface ChatCompletionResult {
 export interface ChatProvider {
   readonly id: string
   complete(request: ChatCompletionRequest): Promise<ChatCompletionResult>
+  /** Emits cumulative reply text as it arrives, then resolves with the final result. */
+  stream?(request: ChatCompletionRequest, onText: (text: string) => void): Promise<ChatCompletionResult>
 }

@@ -19,7 +19,7 @@ watch(
     await nextTick()
     container.value?.scrollTo({
       top: container.value.scrollHeight,
-      behavior: 'smooth',
+      behavior: 'auto',
     })
   },
   { immediate: true },

@@ -48,6 +48,20 @@ interface OpenAICompletionResponse {
   }>
 }
 
+interface OpenAIStreamChunk {
+  choices?: Array<{
+    delta?: {
+      content?: string | null
+      tool_calls?: Array<{
+        index: number
+        id?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    }
+  }>
+  error?: { message?: string }
+}
+
 function endpoint(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/chat/completions`
 }
@@ -77,13 +91,14 @@ function toWireTools(tools: readonly ToolDefinition[]): Array<{ type: string; fu
 export async function openAIChatCompletion(
   options: OpenAICompatibleProviderOptions,
   request: ChatCompletionRequest,
+  onText?: (text: string) => void,
 ): Promise<ChatCompletionResult> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
 
   const body: Record<string, unknown> = {
     model: options.model,
     messages: request.messages.map(toWireMessage),
-    stream: false,
+    stream: Boolean(onText),
   }
   if (Number.isFinite(options.temperature))
     body.temperature = Math.max(0, Math.min(2, options.temperature!))
@@ -109,6 +124,9 @@ export async function openAIChatCompletion(
   if (!response.ok)
     throw new ProviderRequestError(response.status, describeFailure(response.status, await readErrorBody(response)))
 
+  if (onText && !response.headers.get('content-type')?.includes('application/json'))
+    return readStream(response, onText)
+
   const data = await response.json() as OpenAICompletionResponse
   const message = data.choices?.[0]?.message
   const text = typeof message?.content === 'string' ? message.content : ''
@@ -118,9 +136,81 @@ export async function openAIChatCompletion(
     arguments: call.function.arguments,
   }))
 
+  if (onText && text)
+    onText(text)
   return toolCalls && toolCalls.length > 0
     ? { text, toolCalls }
     : { text }
+}
+
+async function readStream(response: Response, onText: (text: string) => void): Promise<ChatCompletionResult> {
+  if (!response.body)
+    throw new ProviderRequestError(response.status, 'Provider returned an empty stream')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const calls = new Map<number, { id: string; name: string; arguments: string }>()
+  let text = ''
+  let buffer = ''
+  let dataLines: string[] = []
+
+  function dispatch(): void {
+    if (!dataLines.length)
+      return
+    const payload = dataLines.join('\n')
+    dataLines = []
+    if (payload === '[DONE]')
+      return
+    let chunk: OpenAIStreamChunk
+    try {
+      chunk = JSON.parse(payload) as OpenAIStreamChunk
+    }
+    catch {
+      throw new ProviderRequestError(response.status, 'Provider returned an invalid stream event')
+    }
+    if (chunk.error)
+      throw new ProviderRequestError(response.status, chunk.error.message ?? 'Provider stream failed')
+    const delta = chunk.choices?.[0]?.delta
+    if (typeof delta?.content === 'string' && delta.content) {
+      text += delta.content
+      onText(text)
+    }
+    for (const part of delta?.tool_calls ?? []) {
+      const call = calls.get(part.index) ?? { id: '', name: '', arguments: '' }
+      call.id += part.id ?? ''
+      call.name += part.function?.name ?? ''
+      call.arguments += part.function?.arguments ?? ''
+      calls.set(part.index, call)
+    }
+  }
+
+  function consume(chunk: string): void {
+    buffer += chunk
+    let end: number
+    while ((end = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, end).replace(/\r$/, '')
+      buffer = buffer.slice(end + 1)
+      if (!line) dispatch()
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+    }
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      consume(decoder.decode(value, { stream: true }))
+    }
+    consume(decoder.decode())
+    if (buffer) consume('\n')
+    dispatch()
+  }
+  finally {
+    reader.releaseLock()
+  }
+
+  const toolCalls = [...calls].sort(([a], [b]) => a - b).map(([, call]) => call)
+  return toolCalls.length ? { text, toolCalls } : { text }
 }
 
 async function readErrorBody(response: Response): Promise<string> {
@@ -150,6 +240,9 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
     id: 'openai-compatible',
     async complete(request: ChatCompletionRequest): Promise<ChatCompletionResult> {
       return openAIChatCompletion(options, request)
+    },
+    async stream(request: ChatCompletionRequest, onText: (text: string) => void): Promise<ChatCompletionResult> {
+      return openAIChatCompletion(options, request, onText)
     },
   }
 }

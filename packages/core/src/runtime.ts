@@ -17,6 +17,7 @@ export type RuntimeEvent =
   | { type: 'character:engaged'; turnId: string; characterId: string }
   | { type: 'capability:selected'; turnId: string; capability: string }
   | { type: 'provider:called'; turnId: string; providerId: string }
+  | { type: 'output:partial'; turnId: string; text: string }
   | { type: 'output:produced'; turnId: string; output: TextOutput }
   | { type: 'turn:completed'; turn: TurnRecord }
   | { type: 'turn:failed'; turnId: string; error: string }
@@ -126,16 +127,20 @@ export function createCharacterRuntime(options: CharacterRuntimeOptions): Charac
     const messages: ChatMessage[] = [...seed]
 
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
-      const result = await provider.complete({
+      const request = {
         messages,
         tools: tools.length > 0
           ? tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))
           : undefined,
-      })
+      }
+      const result = provider.stream
+        ? await provider.stream(request, text => emit({ type: 'output:partial', turnId, text }))
+        : await provider.complete(request)
 
       if (!result.toolCalls || result.toolCalls.length === 0)
         return createTextOutput(result.text)
 
+      emit({ type: 'output:partial', turnId, text: '' })
       emit({ type: 'tool:requested', turnId })
       messages.push({ role: 'assistant', content: null, toolCalls: result.toolCalls })
 

@@ -3,6 +3,10 @@
 interface Window {
   Live2DCubismCore?: unknown
   aislingDesktop?: {
+    getMode(): Promise<'stage' | 'desktop'>
+    returnToStage(): Promise<void>
+    onDesktopPointer(callback: (kind: 'character' | 'input' | 'ui' | 'none') => void): () => void
+    onModeChange(callback: (mode: 'stage' | 'desktop') => void): () => void
     setDesktopAwareness(enabled: boolean): Promise<import('./runtime/autonomous').DesktopObserverStatus>
     readDesktopContext(): Promise<import('./runtime/autonomous').DesktopObserverStatus>
     judgeDesktopContext(): Promise<import('./runtime/autonomous').DesktopJudgeResult>

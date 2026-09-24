@@ -182,6 +182,7 @@ function registerAppDiagnostics(diagnostics) {
 function resizeView(window) {
   if (!stageView || window.isDestroyed()) return
   const [width, height] = window.getContentSize()
+  if (width <= 0 || height <= 0) return
   stageView.setBounds({ x: 0, y: 0, width, height })
 }
 
@@ -293,6 +294,7 @@ async function createWindow(options = {}) {
   window.contentView.addChildView(stageView)
   resizeView(window)
   window.on('resize', () => resizeView(window))
+  window.on('restore', () => resizeView(window))
   window.setMenu(Menu.buildFromTemplate([
     { label: 'File', submenu: [
       { label: 'Desktop Mode', icon: path.join(__dirname, 'assets', 'desktop-mode.png'), click: enterDesktopMode },

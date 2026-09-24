@@ -1,6 +1,6 @@
 {
   "name": "@aisling/core",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "private": true,
   "type": "module",
   "description": "Framework-agnostic Aisling character runtime: Stimulus, Character, Capability, Provider, Output.",

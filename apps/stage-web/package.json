@@ -1,6 +1,6 @@
 {
   "name": "@aisling/stage-web",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "private": true,
   "type": "module",
   "description": "Aisling Web Stage — a minimal Stage-first frontend over the Aisling character runtime.",

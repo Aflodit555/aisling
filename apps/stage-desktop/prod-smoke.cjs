@@ -55,6 +55,24 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
   assert.equal(result.origin, 'aisling://stage')
   assert.ok(result.appChildCount > 0)
 
+  if (process.env.AISLING_MINIMIZE_SMOKE === '1') {
+    const view = win.contentView.children[0]
+    const before = view.getBounds()
+    win.minimize()
+    win.emit('resize') // Reproduce a delayed Windows resize while content size is 0×0.
+    assert.deepEqual(view.getBounds(), before, 'minimizing must not erase the Stage view bounds')
+    win.restore()
+    await new Promise(resolve => setTimeout(resolve, 200))
+    const [width, height] = win.getContentSize()
+    assert.deepEqual(view.getBounds(), { x: 0, y: 0, width, height })
+    assert.equal(await contents.executeJavaScript('!!document.querySelector(".stage")'), true)
+    console.log(JSON.stringify({ minimizeSmoke: 'passed' }))
+    clearTimeout(timeout)
+    win.destroy()
+    app.exit(0)
+    return
+  }
+
   const screenshot = path.join(app.getPath('userData'), 'stage-prod-smoke.png')
   const desktopScreenshot = path.join(app.getPath('userData'), 'desktop-prod-smoke.png')
   const entryScreenshot = path.join(app.getPath('userData'), 'desktop-entry-smoke.png')

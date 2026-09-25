@@ -17,6 +17,8 @@ const bubbleElement = ref<HTMLElement>()
 const draft = ref('')
 let hoverTimer: ReturnType<typeof setTimeout> | undefined
 let leaveTimer: ReturnType<typeof setTimeout> | undefined
+let returnTimer: ReturnType<typeof setTimeout> | undefined
+let returnHoverStartedAt = 0
 let stopPointer: (() => void) | undefined
 
 watch(() => stage.messages.at(-1), message => {
@@ -57,6 +59,28 @@ function onContextMenu(event: MouseEvent): void {
   event.preventDefault()
   returnVisible.value = true
   inputVisible.value = false
+  scheduleReturnHide()
+}
+
+function hideReturnButton(): void {
+  clearTimeout(returnTimer)
+  returnTimer = undefined
+  returnHoverStartedAt = 0
+  returnVisible.value = false
+}
+
+function scheduleReturnHide(): void {
+  clearTimeout(returnTimer)
+  returnTimer = setTimeout(() => {
+    if (returnHoverStartedAt && performance.now() - returnHoverStartedAt >= 300)
+      scheduleReturnHide()
+    else
+      hideReturnButton()
+  }, 3500)
+}
+
+function onReturnPointerEnter(): void {
+  returnHoverStartedAt = performance.now()
 }
 
 function returnToStage(): void {
@@ -68,6 +92,7 @@ onUnmounted(() => {
   stopPointer?.()
   clearTimeout(hoverTimer)
   clearTimeout(leaveTimer)
+  clearTimeout(returnTimer)
 })
 </script>
 
@@ -87,13 +112,15 @@ onUnmounted(() => {
     </div>
     <div data-desktop-hit class="character-hit" @click="inputVisible = true" />
     <p v-if="bubble" ref="bubbleElement" data-desktop-hit class="bubble">{{ bubble }}</p>
-    <form v-if="inputVisible" data-desktop-hit class="desktop-composer" @submit.prevent="submit">
+    <form v-if="inputVisible" data-desktop-hit class="desktop-composer" @click="hideReturnButton" @submit.prevent="submit">
       <input v-model="draft" aria-label="给 Aisling 发消息" placeholder="说点什么…" :disabled="stage.sending" @keydown.esc="inputVisible = false">
       <button type="submit" :disabled="!draft.trim() || stage.sending" aria-label="发送消息"><Icon name="send" :size="16" /></button>
     </form>
-    <button v-if="returnVisible" data-desktop-hit class="return-button" type="button" @click="returnToStage">
-      返回主窗口
-    </button>
+    <Transition name="return-fade">
+      <button v-if="returnVisible" data-desktop-hit class="return-button" type="button" @pointerenter="onReturnPointerEnter" @pointerleave="returnHoverStartedAt = 0" @click="returnToStage">
+        back
+      </button>
+    </Transition>
   </main>
 </template>
 
@@ -115,6 +142,8 @@ onUnmounted(() => {
 .return-button { position: absolute; top: 120px; right: 28px; padding: .4rem .9rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: .85rem; box-shadow: 0 4px 18px rgb(0 0 0 / .18); transition: background .15s, transform .1s }
 .return-button:hover { background: var(--tonal) }
 .return-button:active { transform: scale(.97) }
+.return-fade-leave-active { transition: opacity .5s; pointer-events: none }
+.return-fade-leave-to { opacity: 0 }
 @keyframes rise { 0% { transform: translateY(100%) } 72% { transform: translateY(-18px) } 100% { transform: translateY(0) } }
 @keyframes fade { from { opacity: 0 } }
 @media (prefers-reduced-motion: reduce) { .character.entered { animation-duration: 1ms } }

@@ -10,7 +10,7 @@ export type SpeechProviderType = 'none' | 'browser' | 'alibaba'
 export type SpeechTransport = 'websocket' | 'http'
 export type HearingProviderType = 'none' | 'openai-compatible' | 'alibaba'
 export type VisionProviderType = 'none' | 'openai-compatible'
-export type WebSearchProviderType = 'none' | 'tavily'
+export type WebSearchProviderType = 'none' | 'duckduckgo'
 
 export interface ConsciousnessConfig {
   providerType: ChatProviderType
@@ -58,7 +58,6 @@ export interface VisionConfig {
 export interface WebSearchConfig {
   /** `none` disables the web-search tool. */
   providerType: WebSearchProviderType
-  apiKey: string
 }
 
 export interface PlatformConfig {
@@ -108,8 +107,7 @@ export function createDefaultPlatformConfig(): PlatformConfig {
       model: DEFAULT_VISION_MODEL,
     },
     webSearch: {
-      providerType: 'none',
-      apiKey: '',
+      providerType: 'duckduckgo',
     },
   }
 }

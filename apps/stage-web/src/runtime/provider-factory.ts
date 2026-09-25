@@ -6,7 +6,7 @@ import {
   createOpenAICompatibleProvider,
   createOpenAICompatibleTranscriptionProvider,
   createOpenAICompatibleVisionProvider,
-  createTavilyWebSearchProvider,
+  createDuckDuckGoLiteWebSearchProvider,
   createWebSearchTool,
   type ChatProvider,
   type ConsciousnessConfig,
@@ -102,11 +102,9 @@ export function buildVisionProvider(config: VisionConfig): VisionProvider | unde
 }
 
 export function buildWebSearchProvider(config: WebSearchConfig): WebSearchProvider | undefined {
-  if (config.providerType !== 'tavily')
+  if (config.providerType !== 'duckduckgo')
     return undefined
-  if (!config.apiKey.trim())
-    return undefined
-  return createTavilyWebSearchProvider({ apiKey: config.apiKey })
+  return createDuckDuckGoLiteWebSearchProvider()
 }
 
 export function buildWebSearchTool(config: WebSearchConfig): Tool | undefined {

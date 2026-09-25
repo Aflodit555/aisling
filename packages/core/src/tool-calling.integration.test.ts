@@ -13,7 +13,7 @@ import { createWebSearchTool } from './tools/web-search-tool'
 const stubSearch: WebSearchProvider = {
   id: 'stub',
   async search() {
-    return [{ title: 'OpenAI', url: 'https://openai.com', snippet: 'AI research org', source: 'stub' }]
+    return [{ title: 'OpenAI', snippet: 'AI research org' }]
   },
 }
 
@@ -37,7 +37,7 @@ async function withToolCallingServer() {
           choices: [{
             message: {
               content: null,
-              tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'web_search', arguments: '{"query":"OpenAI"}' } }],
+              tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'search', arguments: '{"query":"OpenAI"}' } }],
             },
           }],
         }))
@@ -84,10 +84,12 @@ describe('tool calling over real HTTP', () => {
       expect(events).toContain('tool:started')
       expect(events).toContain('tool:completed')
 
-      // The second request carries the tool result back to the model.
+      const first = server.requests[0]?.body
+      expect(first?.tools).toEqual([expect.objectContaining({ function: expect.objectContaining({ name: 'search' }) })])
+      // The second request carries only the title and snippet back to the model.
       const second = server.requests[1]?.body
-      const messages = second?.messages as Array<{ role: string; tool_call_id?: string }>
-      expect(messages.some(message => message.role === 'tool' && message.tool_call_id === 'call_1')).toBe(true)
+      const messages = second?.messages as Array<{ role: string; tool_call_id?: string; content?: string }>
+      expect(messages.some(message => message.role === 'tool' && message.tool_call_id === 'call_1' && message.content === 'OpenAI\nAI research org')).toBe(true)
     }
     finally {
       await server.close()

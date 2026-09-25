@@ -29,6 +29,9 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
           // behavior for existing users while new configurations default to WS.
           const migratedTransport = storedSpeech?.transport
             ?? (storedSpeech?.endpoint?.startsWith('http://') || storedSpeech?.endpoint?.startsWith('https://') ? 'http' : defaults.speech.transport)
+          const webSearch: PlatformConfig['webSearch'] = {
+            providerType: parsed.webSearch?.providerType === 'none' ? 'none' : 'duckduckgo',
+          }
           const config = {
             consciousness: { ...defaults.consciousness, ...parsed.consciousness },
             desktopAwareness: {
@@ -41,9 +44,10 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             speech: { ...defaults.speech, ...parsed.speech, transport: migratedTransport },
             hearing: { ...defaults.hearing, ...parsed.hearing },
             vision: { ...defaults.vision, ...parsed.vision },
-            webSearch: { ...defaults.webSearch, ...parsed.webSearch },
+            webSearch,
           }
-          if (Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey'))
+          if (Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey')
+            || (parsed.webSearch && (parsed.webSearch.providerType !== webSearch.providerType || Object.keys(parsed.webSearch).some(key => key !== 'providerType'))))
             storage.setItem(KEY, JSON.stringify(config))
           return config
         }

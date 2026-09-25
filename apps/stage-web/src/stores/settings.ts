@@ -138,6 +138,9 @@ export const useSettingsStore = defineStore('settings', () => {
     config.value = { ...config.value, webSearch: next }
     await persist()
     applyConfig(config.value)
+    searchResults.value = []
+    searchState.value = 'idle'
+    searchMessage.value = ''
   }
 
   async function testConnection(next: ConsciousnessConfig): Promise<void> {
@@ -243,14 +246,10 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function testSearch(next: WebSearchConfig): Promise<TestSearchResult> {
-    if (next.providerType !== 'tavily') {
+    searchResults.value = []
+    if (next.providerType !== 'duckduckgo') {
       searchState.value = 'failed'
-      searchMessage.value = 'Web Search is disabled. Choose the Tavily provider first.'
-      return { ok: false, message: searchMessage.value }
-    }
-    if (!next.apiKey.trim()) {
-      searchState.value = 'failed'
-      searchMessage.value = 'Fill in the API Key first.'
+      searchMessage.value = 'Web Search is disabled. Choose DuckDuckGo Lite first.'
       return { ok: false, message: searchMessage.value }
     }
     searchState.value = 'connecting'
@@ -265,8 +264,8 @@ export const useSettingsStore = defineStore('settings', () => {
       const results = await provider.search('OpenAI')
       searchResults.value = results
       searchState.value = 'connected'
-      searchMessage.value = 'Ready.'
-      return { ok: true, message: 'Ready.', results }
+      searchMessage.value = results.length ? `Ready. Found ${results.length} results.` : 'No results found.'
+      return { ok: true, message: searchMessage.value, results }
     }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error)

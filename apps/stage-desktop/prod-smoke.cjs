@@ -16,7 +16,7 @@ delete process.env.AISLING_STAGE_URL
 // Replies would otherwise send the smoke conversation to the real Jev emotion judge.
 delete process.env.TYPESAFE_API_KEY
 app.setPath('userData', path.join(os.tmpdir(), `aisling-desktop-prod-smoke-${process.pid}`))
-const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out'); app.exit(1) }, 30000)
+const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out'); app.exit(1) }, 45000)
 
 ;(async () => {
   const visible = process.env.AISLING_FOCUS_SMOKE === '1'
@@ -73,6 +73,58 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     win.destroy()
     app.exit(0)
     return
+  }
+
+  // Route transitions need a visible renderer; the smoke starts with a hidden Stage window.
+  enterDesktopMode()
+  returnToStage()
+  const nativeFetch = globalThis.fetch
+  let searchUrl = ''
+  globalThis.fetch = async (url, options) => {
+    if (String(url).startsWith('https://lite.duckduckgo.com/lite/?')) {
+      searchUrl = String(url)
+      const html = Array.from({ length: 6 }, (_, index) =>
+        `<a class="result-link">Title ${index + 1}</a><div class="result-snippet">Snippet   ${index + 1}</div>`).join('')
+      return new Response(html, { headers: { 'Content-Type': 'text/html' } })
+    }
+    return nativeFetch(url, options)
+  }
+  try {
+    const searchUi = await contents.executeJavaScript(`(async () => {
+      const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router
+      await router.push('/settings/web-search')
+      for (let n = 0; n < 50 && !document.querySelector('.web-search form'); n++)
+        await new Promise(resolve => setTimeout(resolve, 50))
+      const form = document.querySelector('.web-search form')
+      if (!form) throw new Error('Web Search settings did not render at ' + location.pathname)
+      const provider = form.querySelector('select').value
+      const hasKeyField = !!form.querySelector('input[type=password]')
+      form.querySelector('button[type=button]').click()
+      for (let n = 0; n < 50 && !form.querySelector('.results'); n++)
+        await new Promise(resolve => setTimeout(resolve, 50))
+      const titles = [...form.querySelectorAll('.results strong')].map(node => node.textContent)
+      const firstSnippet = form.querySelector('.results .snippet')?.textContent
+      const select = form.querySelector('select')
+      select.value = 'none'
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      form.requestSubmit()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const disabled = form.querySelector('button[type=button]').disabled
+      const savedSearch = JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).webSearch
+      await router.push('/')
+      return { provider, hasKeyField, titles, firstSnippet, disabled, savedSearch }
+    })()`)
+    assert.equal(searchUi.provider, 'duckduckgo')
+    assert.equal(searchUi.hasKeyField, false)
+    assert.deepEqual(searchUi.titles, ['Title 1', 'Title 2', 'Title 3', 'Title 4', 'Title 5'])
+    assert.equal(searchUi.firstSnippet, 'Snippet 1')
+    assert.equal(searchUi.disabled, true)
+    assert.deepEqual(searchUi.savedSearch, { providerType: 'none' })
+    assert.equal(new URL(searchUrl).searchParams.get('q'), 'OpenAI')
+  }
+  finally {
+    globalThis.fetch = nativeFetch
   }
 
   const screenshot = path.join(app.getPath('userData'), 'stage-prod-smoke.png')
@@ -143,6 +195,43 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       const desktopImage = await contents.capturePage()
       assert.equal(desktopImage.toBitmap()[3], 0, 'desktop corner must be transparent')
       writeFileSync(desktopScreenshot, desktopImage.toPNG())
+      assert.equal(await contents.executeJavaScript(`(async () => {
+        const root = document.querySelector('.desktop-surface')
+        const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
+        const button = root.querySelector('.return-button')
+        button.dispatchEvent(new PointerEvent('pointerenter'))
+        await wait(3600)
+        if (!root.querySelector('.return-button')) return 'long hover did not renew'
+        button.dispatchEvent(new PointerEvent('pointerleave'))
+        await wait(3550)
+        if (!button.classList.contains('return-fade-leave-active')) return 'idle did not start fade'
+        await wait(550)
+        if (root.querySelector('.return-button')) return 'idle fade did not finish'
+        root.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+        await wait(0)
+        await wait(3300)
+        const shortHoverButton = root.querySelector('.return-button')
+        shortHoverButton.dispatchEvent(new PointerEvent('pointerenter'))
+        await wait(250)
+        if (!shortHoverButton.classList.contains('return-fade-leave-active')) return 'short hover renewed'
+        await wait(550)
+        if (root.querySelector('.return-button')) return 'short hover fade did not finish'
+        root.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+        await wait(0)
+        root.querySelector('.character-hit').click()
+        await wait(0)
+        root.querySelector('.desktop-composer input').click()
+        await wait(0)
+        if (!root.querySelector('.return-button.return-fade-leave-active')) return 'input click did not start fade'
+        await wait(550)
+        return root.querySelector('.return-button') ? 'input fade did not finish' : 'ok'
+      })()`), 'ok', 'back must renew on hover, fade after idle, and fade on input click')
+      assert.equal(await contents.executeJavaScript(`(async () => {
+        const root = document.querySelector('.desktop-surface')
+        root.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+        await new Promise(resolve => setTimeout(resolve, 0))
+        return !!root.querySelector('.return-button')
+      })()`), true)
       await contents.executeJavaScript('document.querySelector(".return-button").click()')
     }
     else returnToStage()

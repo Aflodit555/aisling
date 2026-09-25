@@ -57,7 +57,7 @@ function isVisionReady(config: PlatformConfig): boolean {
 }
 
 function isWebSearchReady(config: PlatformConfig): boolean {
-  return config.webSearch.providerType === 'tavily' && hasText(config.webSearch.apiKey)
+  return config.webSearch.providerType === 'duckduckgo'
 }
 
 function isDesktopAwarenessReady(config: PlatformConfig): boolean {

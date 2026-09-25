@@ -52,6 +52,19 @@ function resolveAssetPath(requestUrl) {
 
 async function handleStageRequest(request) {
   try {
+    const url = new URL(request.url)
+    if (url.hostname === HOST && url.pathname === '/api/relay/web-search') {
+      const query = url.searchParams.get('q')?.trim() ?? ''
+      if (!query || query.length > 500)
+        return new Response('Search query must be 1–500 characters.', { status: 400 })
+      try {
+        const upstream = await fetch(`https://lite.duckduckgo.com/lite/?${new URLSearchParams({ q: query })}`, { signal: AbortSignal.timeout(10000) })
+        return new Response(await upstream.text(), { status: upstream.status, headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+      }
+      catch {
+        return new Response('Could not reach DuckDuckGo Lite.', { status: 502 })
+      }
+    }
     let filePath = resolveAssetPath(request.url)
     if (!filePath || !existsSync(filePath) || statSync(filePath).isDirectory()) {
       // Unknown paths fall back to the SPA shell so client-side routes work.

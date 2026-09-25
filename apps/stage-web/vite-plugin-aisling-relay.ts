@@ -631,11 +631,32 @@ function fileNameForMime(mimeType: string): string {
   return 'recording.wav'
 }
 
+async function handleWebSearch(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (req.method !== 'GET') {
+    sendJson(res, 405, { error: 'method not allowed' })
+    return
+  }
+  const query = new URL(req.url ?? '/', 'http://localhost').searchParams.get('q')?.trim() ?? ''
+  if (!query || query.length > 500) {
+    sendJson(res, 400, { error: 'Search query must be 1–500 characters.' })
+    return
+  }
+  try {
+    const upstream = await fetch(`https://lite.duckduckgo.com/lite/?${new URLSearchParams({ q: query })}`, { signal: AbortSignal.timeout(10000) })
+    res.writeHead(upstream.status, { 'Content-Type': 'text/html; charset=utf-8' })
+    res.end(await upstream.text())
+  }
+  catch {
+    sendJson(res, 502, { error: 'Could not reach DuckDuckGo Lite.' })
+  }
+}
+
 export function aislingRelayPlugin(): Plugin {
   const routes: Array<[string, (req: IncomingMessage, res: ServerResponse) => Promise<void>]> = [
     ['/api/relay/alibaba-tts', handleAlibabaTts],
     ['/api/relay/alibaba-asr', handleAlibabaAsr],
     ['/api/relay/transcription', handleTranscription],
+    ['/api/relay/web-search', handleWebSearch],
   ]
 
   const mount = (server: { middlewares: { use: (path: string, handler: (req: IncomingMessage, res: ServerResponse) => void) => void } }): void => {

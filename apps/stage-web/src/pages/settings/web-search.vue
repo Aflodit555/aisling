@@ -5,7 +5,7 @@ import WebSearchForm from '../../components/settings/WebSearchForm.vue'
 <template>
   <div class="web-search">
     <h2 class="page-title">Web Search</h2>
-    <p class="page-sub">Give Aisling a tool for looking up current information.</p>
+    <p class="page-sub">Aisling can look up current information with DuckDuckGo Lite.</p>
 
     <WebSearchForm />
   </div>

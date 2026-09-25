@@ -36,7 +36,7 @@ async function test(): Promise<void> {
     <label class="field long-label" style="--i: 0">
       <span class="label">TypeSafe / Jev API Key</span>
       <input v-model="key" type="password" placeholder="sk-…" autocomplete="off" />
-      <span class="hint">Used by the desktop semantic judge. Saved with your settings, never committed to git or logged.</span>
+      <span class="hint">Used by the desktop semantic judge and to read Aisling's emotion from each reply. Saved with your settings, never committed to git or logged.</span>
     </label>
 
     <div class="actions">

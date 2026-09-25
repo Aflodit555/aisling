@@ -106,4 +106,32 @@ describe('parameter controller', () => {
     expect(core.getParameterValueById('ParamA')).toBe(1)
     expect(core.getParameterValueById('ParamB')).toBe(2)
   })
+
+  it('composes layers: a higher source reads the value left by lower sources', () => {
+    const controller = createParameterController()
+    const idle = source('idle', 20, ['ParamAngleX'], ({ readBase }) => new Map([['ParamAngleX', readBase('ParamAngleX') + 3]]))
+    const emotion = source('emotion', 30, ['ParamAngleX'], ({ readBase }) => new Map([['ParamAngleX', readBase('ParamAngleX') - 10]]))
+    controller.setSources([emotion, idle])
+    const core = makeCore({ ParamAngleX: 2 })
+    const spy = vi.spyOn(core, 'setParameterValueById')
+
+    controller.apply(core, 16)
+
+    expect(core.getParameterValueById('ParamAngleX')).toBe(-5)
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
+  it('restore puts back native values so additive layers do not stack across frames', () => {
+    const controller = createParameterController()
+    controller.setSources([source('idle', 20, ['ParamEyeBallX'], ({ readBase }) => new Map([['ParamEyeBallX', readBase('ParamEyeBallX') + 0.3]]))])
+    // No motion writes ParamEyeBallX, so its value carries over between frames.
+    const core = makeCore({ ParamEyeBallX: 0.1 })
+    for (let frame = 0; frame < 5; frame++) {
+      controller.restore(core)
+      controller.apply(core, 16)
+    }
+    expect(core.getParameterValueById('ParamEyeBallX')).toBeCloseTo(0.4)
+    controller.restore(core)
+    expect(core.getParameterValueById('ParamEyeBallX')).toBeCloseTo(0.1)
+  })
 })

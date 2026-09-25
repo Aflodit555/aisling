@@ -11,6 +11,8 @@ interface Window {
     readDesktopContext(): Promise<import('./runtime/autonomous').DesktopObserverStatus>
     judgeDesktopContext(): Promise<import('./runtime/autonomous').DesktopJudgeResult>
     testDesktopAwareness(apiKey: string): Promise<{ ok: boolean; message: string }>
+    /** Jev emotion judge over recent turns (+ desktop while Desktop Awareness is on). */
+    judgeEmotion?(conversation: import('./stores/emotion').EmotionTurn[]): Promise<{ emotion: string; confidence: number; intensity: number } | null>
     /** Minimal `localStorage`-shaped bridge backed by Electron userData. */
     storage?: Pick<Storage, 'getItem' | 'setItem'>
   }

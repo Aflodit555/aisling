@@ -13,6 +13,8 @@ const { startDesktop, enterDesktopMode, returnToStage } = require('./desktop-app
 app.disableHardwareAcceleration()
 
 delete process.env.AISLING_STAGE_URL
+// Replies would otherwise send the smoke conversation to the real Jev emotion judge.
+delete process.env.TYPESAFE_API_KEY
 app.setPath('userData', path.join(os.tmpdir(), `aisling-desktop-prod-smoke-${process.pid}`))
 const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out'); app.exit(1) }, 30000)
 

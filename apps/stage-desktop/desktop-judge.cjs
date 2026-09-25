@@ -1,6 +1,44 @@
 const TYPESAFE_URL = 'https://api.typesafe.ai/v1/systemone'
 const TYPESAFE_MODEL = 'jev-latest'
 
+// One category per expression the character model can show distinctly; neutral
+// is not a category but intensity 0 (see apps/stage-web/src/presentation/emotion-state.ts).
+const EMOTIONS = ['joy', 'sad', 'angry', 'surprised', 'shy']
+const INTENSITY_MAX = 3
+const emotionQuestions = {
+  emotion: {
+    type: 'choice',
+    instructions: 'Which emotion would Aisling visibly show right now? Judge mainly from her latest message in the conversation; earlier messages and the desktop are background.',
+    criteria: {
+      joy: 'Happy, amused, pleased, affectionate, playful, excited or pleasantly surprised.',
+      sad: 'Sad, disappointed, apologetic, lonely or worried.',
+      angry: 'Annoyed, irritated, indignant, sulking or pouting.',
+      surprised: 'An unpleasant or alarming surprise: shocked, startled, alarmed or scared. A happy surprise is joy.',
+      shy: 'Embarrassed, flustered, bashful or shy, e.g. after a compliment or teasing.',
+    },
+  },
+  intensity: {
+    type: 'score',
+    instructions: 'How strongly does Aisling show that emotion right now?',
+    criteria: [
+      'Not at all: calm, neutral or matter-of-fact.',
+      'Slightly: a faint tint a viewer might barely notice.',
+      'Clearly: an obvious emotion a viewer would easily notice.',
+      'Strongly: a vivid, intense emotion.',
+    ],
+  },
+}
+
+/** Recent turns from the renderer, validated and capped: [{ speaker: 'user' | 'aisling', text }]. */
+function normalizeConversation(value) {
+  if (!Array.isArray(value))
+    return []
+  return value
+    .filter(turn => turn && (turn.speaker === 'user' || turn.speaker === 'aisling') && typeof turn.text === 'string' && turn.text.trim())
+    .slice(-8)
+    .map(turn => ({ speaker: turn.speaker, text: turn.text.slice(0, 600) }))
+}
+
 function createTypeSafeJudge(options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   const questions = {
@@ -79,7 +117,43 @@ function createTypeSafeJudge(options = {}) {
     }
   }
 
-  return { judge, test }
+  /**
+   * Emotion Aisling shows, from the recent conversation and (when Desktop
+   * Awareness is on) the desktop. Returns intensity normalized to 0..1.
+   */
+  async function judgeEmotion(input, signal, apiKey) {
+    const key = resolveKey(apiKey)
+    if (!key)
+      throw new Error('Emotion judge unavailable: no Jev API Key configured.')
+    const state = { conversation: input.conversation }
+    if (input.desktop) {
+      state.desktop = {
+        app: input.desktop.focus.app,
+        title: input.desktop.focus.title,
+        screen_text: input.desktop.focus.text.slice(0, 600),
+        media: input.desktop.media,
+      }
+    }
+    const response = await fetchImpl(TYPESAFE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model: TYPESAFE_MODEL, state, questions: emotionQuestions }),
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(10_000)]),
+    })
+    if (!response.ok)
+      throw new Error(`Emotion judge failed (${response.status}).`)
+    const data = await response.json()
+    const emotion = data?.answers?.emotion
+    const intensity = data?.answers?.intensity
+    const unit = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1
+    if (emotion?.type !== 'choice' || !EMOTIONS.includes(emotion.choice) || !unit(emotion.confidence))
+      throw new Error('Emotion judge returned an invalid emotion.')
+    if (intensity?.type !== 'score' || !unit(intensity.score / INTENSITY_MAX))
+      throw new Error('Emotion judge returned an invalid intensity.')
+    return { emotion: emotion.choice, confidence: emotion.confidence, intensity: intensity.score / INTENSITY_MAX }
+  }
+
+  return { judge, judgeEmotion, test }
 }
 
-module.exports = { createTypeSafeJudge }
+module.exports = { createTypeSafeJudge, normalizeConversation }

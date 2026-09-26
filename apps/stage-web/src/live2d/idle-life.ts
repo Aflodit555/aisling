@@ -7,10 +7,10 @@
  *   - gaze fixations: mostly at the viewer, sometimes a glance away, with the
  *     head following the eyes a little and more slowly;
  *   - slow posture shifts: body lean and head tilt drifting to new rest points.
- * Everything except blinking is an additive offset on the motion's value, so
- * the Idle motion keeps playing underneath. While a gesture motion plays, the
- * gesture owns the eyes (its authored blinks and eye shapes pass through); the
- * hand-over eases over EYE_HANDOVER_MS both ways so the eyes never snap.
+ * Pointer gaze replaces spontaneous fixations while the pointer is available.
+ * Everything except blinking is additive on the motion's value. During a
+ * gesture the whole layer yields, preserving authored pose, blinks and wink;
+ * ownership eases over LIFE_HANDOVER_MS both ways.
  */
 
 import type { ParameterSource } from './parameter-controller'
@@ -20,6 +20,8 @@ export interface IdleLifeOptions {
   eyeIds: readonly string[]
   /** True while a non-idle (gesture) motion plays. */
   isGesture: () => boolean
+  /** Normalized pointer direction, or undefined to resume spontaneous gaze. */
+  pointer?: () => { x: number; y: number } | undefined
   /** Injected for tests; defaults to Math.random. */
   random?: () => number
   priority: number
@@ -39,7 +41,7 @@ const BLINK_HOLD_MS = 50
 const BLINK_OPEN_MS = 150
 const BLINK_MS = BLINK_CLOSE_MS + BLINK_HOLD_MS + BLINK_OPEN_MS
 /** At least the longest gesture fade-in (Mao: 0.5 s). */
-const EYE_HANDOVER_MS = 500
+const LIFE_HANDOVER_MS = 500
 
 /** Exponential approach with time constant `tau` (frame-rate independent). */
 function approach(current: number, goal: number, dtMs: number, tau: number): number {
@@ -67,8 +69,8 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
   let nextBlinkMs = between(1_500, 4_000)
   let blinkT = -1
   let secondBlink = false
-  // 1 while idle life owns the eyes, 0 while a gesture does.
-  let eyeOwnership = 1
+  // 1 while idle life owns gaze/posture/eyes, 0 while a gesture does.
+  let ownership = 1
 
   // Gaze fixation target and smoothed eye/head positions.
   let nextGazeMs = between(1_200, 3_500)
@@ -110,10 +112,14 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
       gazeTarget = pickGaze()
       nextGazeMs = between(1_200, 3_500)
     }
-    eye.x = approach(eye.x, gazeTarget.x, dtMs, 70)
-    eye.y = approach(eye.y, gazeTarget.y, dtMs, 70)
-    head.x = approach(head.x, gazeTarget.x * 0.4, dtMs, 500)
-    head.y = approach(head.y, gazeTarget.y * 0.4, dtMs, 500)
+    const pointer = options.pointer?.()
+    const gaze = pointer
+      ? { x: Math.max(-0.8, Math.min(0.8, pointer.x)), y: Math.max(-0.65, Math.min(0.65, pointer.y)) }
+      : gazeTarget
+    eye.x = approach(eye.x, gaze.x, dtMs, 90)
+    eye.y = approach(eye.y, gaze.y, dtMs, 90)
+    head.x = approach(head.x, gaze.x * (pointer ? 0.65 : 0.4), dtMs, 400)
+    head.y = approach(head.y, gaze.y * (pointer ? 0.65 : 0.4), dtMs, 400)
 
     nextPostureMs -= dtMs
     if (nextPostureMs <= 0) {
@@ -133,22 +139,23 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
     targets: new Set([...eyeIds, GAZE_X, GAZE_Y, HEAD_X, HEAD_Y, HEAD_Z, BODY_X, BODY_Z]),
     sample: ({ readBase, dtMs }) => {
       const openness = advance(dtMs)
+      // Give the authored gesture its full pose, then ease idle life back in.
+      const step = dtMs / LIFE_HANDOVER_MS
+      ownership = options.isGesture() ? Math.max(0, ownership - step) : Math.min(1, ownership + step)
       const claims = new Map<string, number>([
-        [GAZE_X, readBase(GAZE_X) + eye.x],
-        [GAZE_Y, readBase(GAZE_Y) + eye.y],
-        [HEAD_X, readBase(HEAD_X) + head.x * 30],
-        [HEAD_Y, readBase(HEAD_Y) + head.y * 30],
-        [HEAD_Z, readBase(HEAD_Z) + posture.tilt],
-        [BODY_X, readBase(BODY_X) + posture.lean],
-        [BODY_Z, readBase(BODY_Z) + posture.sway],
+        [GAZE_X, readBase(GAZE_X) + eye.x * ownership],
+        [GAZE_Y, readBase(GAZE_Y) + eye.y * ownership],
+        [HEAD_X, readBase(HEAD_X) + head.x * 30 * ownership],
+        [HEAD_Y, readBase(HEAD_Y) + head.y * 30 * ownership],
+        [HEAD_Z, readBase(HEAD_Z) + posture.tilt * ownership],
+        [BODY_X, readBase(BODY_X) + posture.lean * ownership],
+        [BODY_Z, readBase(BODY_Z) + posture.sway * ownership],
       ])
       // Replace the Idle motion's baked blink (never close below fully open), then blink on our schedule.
-      const step = dtMs / EYE_HANDOVER_MS
-      eyeOwnership = options.isGesture() ? Math.max(0, eyeOwnership - step) : Math.min(1, eyeOwnership + step)
-      if (eyeOwnership > 0) {
+      if (ownership > 0) {
         for (const id of eyeIds) {
           const base = readBase(id)
-          claims.set(id, base + (Math.max(base, 1) * openness - base) * eyeOwnership)
+          claims.set(id, base + (Math.max(base, 1) * openness - base) * ownership)
         }
       }
       return claims

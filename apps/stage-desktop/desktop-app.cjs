@@ -56,8 +56,10 @@ let pointerTimer
 let pointerBusy = false
 let pointerKind = 'none'
 let pointerIgnored
+let dragTimer
 
 function stopDesktopPointer() {
+  stopDesktopDrag()
   clearInterval(pointerTimer)
   pointerTimer = undefined
   pointerBusy = false
@@ -65,9 +67,35 @@ function stopDesktopPointer() {
   pointerIgnored = undefined
 }
 
+function stopDesktopDrag() {
+  clearInterval(dragTimer)
+  dragTimer = undefined
+}
+
+function startDesktopDrag() {
+  if (mode !== 'desktop' || !desktopWindow || desktopWindow.isDestroyed() || dragTimer) return
+  const desktop = desktopWindow
+  const start = screen.getCursorScreenPoint().x
+  // On Windows at fractional DPI, getBounds() rounds the outer frame up.
+  // setPosition() reuses that size and grows the window on every move.
+  const from = desktop.getContentBounds()
+  dragTimer = setInterval(() => {
+    if (desktop.isDestroyed()) return stopDesktopDrag()
+    const display = screen.getAllDisplays().find(item => item.id === desktopDisplayId)
+      ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+    const bounds = desktop.getContentBounds()
+    const work = display.workArea
+    const x = Math.round(Math.max(work.x, Math.min(work.x + work.width - from.width,
+      from.x + screen.getCursorScreenPoint().x - start)))
+    const y = work.y + work.height - from.height
+    if (x !== bounds.x || y !== bounds.y)
+      desktop.setContentBounds({ x, y, width: from.width, height: from.height })
+  }, 16)
+}
+
 function updateDesktopPointer(kind) {
   if (!desktopWindow || desktopWindow.isDestroyed() || !stageView) return
-  const ignore = kind === 'none'
+  const ignore = !dragTimer && kind === 'none'
   if (pointerIgnored !== ignore) {
     desktopWindow.setIgnoreMouseEvents(ignore, { forward: true })
     pointerIgnored = ignore
@@ -84,6 +112,11 @@ async function pollDesktopPointer() {
   const bounds = desktopWindow.getContentBounds()
   const x = point.x - bounds.x
   const y = point.y - bounds.y
+  stageView.webContents.send('aisling:cursor', x, y)
+  if (dragTimer) {
+    updateDesktopPointer('character')
+    return
+  }
   if (x < 0 || y < 0 || x >= bounds.width || y >= bounds.height) {
     updateDesktopPointer('none')
     return
@@ -185,6 +218,8 @@ function resizeView(window) {
   if (!stageView || window.isDestroyed()) return
   const [width, height] = window.getContentSize()
   if (width <= 0 || height <= 0) return
+  const bounds = stageView.getBounds()
+  if (bounds.width === width && bounds.height === height) return
   stageView.setBounds({ x: 0, y: 0, width, height })
 }
 
@@ -206,6 +241,7 @@ function enterDesktopMode() {
     resizable: false, hasShadow: false, title: 'Aisling Desktop',
   })
   const desktop = desktopWindow
+  desktop.setContentBounds(desktopBounds())
   desktop.setMenu(null)
   desktop.on('close', event => {
     if (!switching && !quitting) {
@@ -230,8 +266,8 @@ function enterDesktopMode() {
   stageView.webContents.send('aisling:mode', mode)
   mainWindow.hide()
   desktop.show()
-  // ponytail: one cursor probe every 50 ms; use native hit testing if this becomes measurable.
-  pointerTimer = setInterval(() => void pollDesktopPointer(), 50)
+  // ponytail: one cursor probe every 33 ms; use native hit testing if this becomes measurable.
+  pointerTimer = setInterval(() => void pollDesktopPointer(), 33)
   void pollDesktopPointer()
   switching = false
 }
@@ -332,6 +368,7 @@ async function createWindow(options = {}) {
     console.error(`[desktop] did-fail-load: code=${errorCode} mainFrame=${isMainFrame} url=${validatedURL} ${errorDescription}`)
   })
   contents.on('render-process-gone', (_event, details) => {
+    stopDesktopDrag()
     console.error(`[desktop] render-process-gone: reason=${details.reason} exitCode=${details.exitCode}`)
   })
   contents.on('preload-error', (_event, failedPreloadPath, error) => {
@@ -389,10 +426,10 @@ async function startDesktop(options = {}) {
   registerAppDiagnostics(diagnostics)
   registerStorageIpc()
   screen.on('display-metrics-changed', () => {
-    if (desktopWindow && !desktopWindow.isDestroyed()) desktopWindow.setBounds(desktopBounds())
+    if (desktopWindow && !desktopWindow.isDestroyed()) desktopWindow.setContentBounds(desktopBounds())
   })
   screen.on('display-removed', () => {
-    if (desktopWindow && !desktopWindow.isDestroyed()) desktopWindow.setBounds(desktopBounds())
+    if (desktopWindow && !desktopWindow.isDestroyed()) desktopWindow.setContentBounds(desktopBounds())
   })
 
   const target = options.stageUrl
@@ -411,6 +448,14 @@ async function startDesktop(options = {}) {
     const trusted = event => Boolean(stageView && event.sender === stageView.webContents
       && event.senderFrame === stageView.webContents.mainFrame
       && stageOriginOf(event.senderFrame.url) === allowedOrigin)
+    ipcMain.on('aisling:desktop-drag', (event, enabled) => {
+      if (!trusted(event) || typeof enabled !== 'boolean') return
+      if (enabled) startDesktopDrag()
+      else {
+        stopDesktopDrag()
+        void pollDesktopPointer()
+      }
+    })
     ipcMain.handle('aisling:mode:get', event => {
       if (!trusted(event)) throw new Error('Untrusted mode request')
       return mode

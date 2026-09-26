@@ -20,8 +20,31 @@ Mao's Idle motion bakes one blink into a fixed 5.6 s loop and never moves the
 eyeballs. The idle layer replaces the baked blink with irregular ones
 (2.2–6 s, sometimes double), adds gaze fixations (mostly at the viewer, now
 and then a glance aside, head following the eyes a little), and drifts body
-lean and head tilt to a new rest point every 6–14 s. During a gesture motion
-the gesture's own eyes pass through.
+lean and head tilt to a new rest point every 6–14 s. Pointer positions replace
+the spontaneous gaze target, with eyes following faster than the head. In
+desktop mode Electron supplies the OS cursor every 33 ms, including outside
+the window; the browser Stage uses pointer events. On pointer exit/blur in the
+Stage, spontaneous gaze resumes.
+
+During a gesture, idle gaze, posture and blinking yield over 500 ms. The
+emotion look yields over the same interval without changing the emotion
+state, preserving authored eyes (including `special_03`'s wink) and pose.
+Both layers ease back in when the gesture ends; speech still owns the mouth.
+
+## Touch and drag
+
+Clicks on the character and the Stage's movement button share the rig's
+gesture player. It preloads available non-idle motions, explicitly disables
+their looping, and visits each once before refilling its random selection.
+Repeated clicks cannot interrupt or queue gestures. Strong emotion gestures
+use FORCE priority and can interrupt an interaction gesture; the native
+motion manager restores Idle after completion. Failed starts release their
+reservation instead of leaving presentation layers stuck in gesture mode.
+
+A movement over 6 px turns a press into a drag, suppressing its click. Stage
+dragging updates the existing display offset; desktop dragging moves the
+window horizontally along the taskbar, within the display work area. Pointer
+cancellation, loss of capture/focus, mode changes and unmount stop dragging.
 
 ## Emotion
 

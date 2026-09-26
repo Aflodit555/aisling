@@ -5,6 +5,8 @@ interface Window {
   aislingDesktop?: {
     getMode(): Promise<'stage' | 'desktop'>
     returnToStage(): Promise<void>
+    setDragging(enabled: boolean): void
+    onCursor(callback: (x: number, y: number) => void): () => void
     onDesktopPointer(callback: (kind: 'character' | 'input' | 'ui' | 'none') => void): () => void
     onModeChange(callback: (mode: 'stage' | 'desktop') => void): () => void
     setDesktopAwareness(enabled: boolean): Promise<import('./runtime/autonomous').DesktopObserverStatus>

@@ -7,6 +7,12 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('aislingDesktop', {
   getMode: () => ipcRenderer.invoke('aisling:mode:get'),
   returnToStage: () => ipcRenderer.invoke('aisling:mode:return'),
+  setDragging: enabled => ipcRenderer.send('aisling:desktop-drag', enabled),
+  onCursor: callback => {
+    const listener = (_event, x, y) => callback(x, y)
+    ipcRenderer.on('aisling:cursor', listener)
+    return () => ipcRenderer.removeListener('aisling:cursor', listener)
+  },
   onDesktopPointer: callback => {
     const listener = (_event, kind) => callback(kind)
     ipcRenderer.on('aisling:desktop-pointer', listener)

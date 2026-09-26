@@ -14,7 +14,7 @@ function maoRig(): Live2DRig {
   const expressions = new Map<string, ReturnType<typeof parseExpression>>()
   for (const { Name, File } of maoModel.FileReferences.Expressions)
     expressions.set(Name, parseExpression(JSON.parse(readFileSync(resolve(MAO, File), 'utf8'))))
-  return { eyeBlinkIds: [], lipSyncIds: [], expressions, playMotion: () => true, isGesture: () => false }
+  return { eyeBlinkIds: [], lipSyncIds: [], expressions, playMotion: async () => true, playRandomMotion: async () => true, isGesture: () => false }
 }
 
 const weights = (partial: Partial<EmotionWeights>): EmotionWeights =>
@@ -78,5 +78,20 @@ describe('emotion look (Mao)', () => {
     const out = sample(bare, weights({ angry: 1 }), {})!
     expect(out.get('ParamAngleX')).toBe(-14)
     expect(out.has('ParamMouthAngry')).toBe(false)
+  })
+
+  it('lets authored wink and pose perform, then restores the same emotion smoothly', () => {
+    let gesture = false
+    const rig = { ...maoRig(), isGesture: () => gesture }
+    const layer = createEmotionLayer({ rig, looks: MAO_LOOKS, weights: () => weights({ joy: 1 }), priority: 30 })
+    const sample = () => layer.sample({ readBase: id => id === 'ParamEyeROpen' ? 1 : 0, dtMs: 16 })
+    expect(sample()!.get('ParamEyeROpen')).toBe(0)
+    gesture = true
+    for (let i = 0; i < 40; i++) sample()
+    expect(sample()).toBeUndefined()
+    gesture = false
+    expect(sample()!.get('ParamEyeROpen')).toBeCloseTo(0.968)
+    for (let i = 0; i < 40; i++) sample()
+    expect(sample()!.get('ParamEyeROpen')).toBe(0)
   })
 })

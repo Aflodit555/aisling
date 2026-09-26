@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 
 import { createEmotionLayer, GESTURE_MIN_STRENGTH, MAO_LOOKS } from '../live2d/emotion-look'
 import { createIdleLife } from '../live2d/idle-life'
@@ -29,7 +29,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ ready: []; error: [] }>()
 
-const { transform } = storeToRefs(usePresentationStore())
+const presentation = usePresentationStore()
+const { transform } = storeToRefs(presentation)
 const desktopTransform = { scale: 1.2, offsetX: 0, offsetY: 0 }
 const speech = useSpeechStore()
 const emotion = useEmotionStore()
@@ -39,7 +40,8 @@ const driven = computed(() => props.active || props.speaking || props.searching 
 
 // Application-layer parameter sources, applied by the renderer right after the
 // native motion update, lowest priority first (see parameter-controller).
-const angle = ref(0)
+const rig = shallowRef<Live2DRig>()
+const pointer = shallowRef<{ x: number; y: number }>()
 const mouthController = createMouthController()
 
 // Head turn while Aisling is busy, eased and added on top of whatever moves below.
@@ -49,7 +51,8 @@ const manualSource: ParameterSource = {
   priority: PARAMETER_SOURCE_PRIORITY.manual,
   targets: new Set(['ParamAngleX']),
   sample: ({ readBase, dtMs }) => {
-    manualAngle += (angle.value - manualAngle) * (1 - Math.exp(-dtMs / 250))
+    const goal = driven.value && !rig.value?.isGesture() ? 12 : 0
+    manualAngle += (goal - manualAngle) * (1 - Math.exp(-dtMs / 250))
     return new Map([['ParamAngleX', readBase('ParamAngleX') + manualAngle]])
   },
 }
@@ -71,11 +74,15 @@ function createSpeechSource(mouth: string): ParameterSource {
   }
 }
 
-const rig = shallowRef<Live2DRig>()
 const sources = computed<ParameterSource[]>(() => rig.value
   ? [
       manualSource,
-      createIdleLife({ eyeIds: rig.value.eyeBlinkIds, isGesture: rig.value.isGesture, priority: PARAMETER_SOURCE_PRIORITY.idle }),
+      createIdleLife({
+        eyeIds: rig.value.eyeBlinkIds,
+        isGesture: rig.value.isGesture,
+        pointer: () => pointer.value,
+        priority: PARAMETER_SOURCE_PRIORITY.idle,
+      }),
       createEmotionLayer({
         rig: rig.value,
         looks: MAO_LOOKS,
@@ -90,19 +97,12 @@ const sources = computed<ParameterSource[]>(() => rig.value
 watch(() => emotion.entered, (entered) => {
   const gesture = entered && MAO_LOOKS[entered.emotion].gesture
   if (gesture && entered.strength >= GESTURE_MIN_STRENGTH)
-    rig.value?.playMotion(gesture)
+    void rig.value?.playMotion(gesture, 'emotion')
 })
-
-let testTimer: ReturnType<typeof setTimeout> | undefined
-
-function applyPresentationState(): void {
-  angle.value = driven.value ? 12 : 0
-}
 
 function onReady(loaded: Live2DRig): void {
   rig.value = loaded
   rendererState.value = 'ready'
-  applyPresentationState()
   emit('ready')
 }
 
@@ -112,14 +112,21 @@ function onError(error: Error): void {
   emit('error')
 }
 
-function testMovement(): void {
-  clearTimeout(testTimer)
-  angle.value = -24
-  testTimer = setTimeout(applyPresentationState, 700)
+function interact(): void {
+  // Speech owns only the mouth, so a touch can perform without cutting the voice.
+  if (!props.active && !props.searching && !props.looking)
+    void rig.value?.playRandomMotion()
 }
 
-watch(driven, applyPresentationState)
-onBeforeUnmount(() => clearTimeout(testTimer))
+function moveCharacter(delta: { x: number; y: number }): void {
+  presentation.setTransform({
+    ...transform.value,
+    offsetX: transform.value.offsetX + delta.x,
+    offsetY: transform.value.offsetY + delta.y,
+  })
+}
+
+defineExpose({ interact })
 </script>
 
 <template>
@@ -134,6 +141,9 @@ onBeforeUnmount(() => clearTimeout(testTimer))
         :sources="sources"
         @ready="onReady"
         @error="onError"
+        @pointer="pointer = $event"
+        @tap="interact"
+        @move="moveCharacter"
       />
       <template v-else>
         <div class="halo" />
@@ -153,7 +163,7 @@ onBeforeUnmount(() => clearTimeout(testTimer))
               ? `${name} is thinking…`
               : `${name} is here.` }}
     </p>
-    <button v-if="rendererState === 'ready' && !desktop" class="btn drive-test" type="button" @click="testMovement">
+    <button v-if="rendererState === 'ready' && !desktop" class="btn drive-test" type="button" @click="interact">
       Test movement
     </button>
     <p v-else-if="rendererState === 'error' && !desktop" class="renderer-error" :title="rendererError">

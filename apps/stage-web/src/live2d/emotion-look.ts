@@ -65,19 +65,23 @@ export function createEmotionLayer(options: {
     pose: Object.entries(look.pose),
   }))
   const targets = new Set(layers.flatMap(layer => [...layer.expression.map(p => p.id), ...layer.pose.map(([id]) => id)]))
+  let ownership = 1
 
   return {
     id: 'emotion',
     priority: options.priority,
     targets,
-    sample: ({ readBase }) => {
+    sample: ({ readBase, dtMs }) => {
+      // Keep the emotion state, but let authored eyes (including wink) and pose perform.
+      ownership += (options.rig.isGesture() ? -1 : 1) * dtMs / 500
+      ownership = Math.max(0, Math.min(1, ownership))
       const weights = options.weights()
-      if (layers.every(layer => weights[layer.emotion] < SILENT))
+      if (layers.every(layer => weights[layer.emotion] * ownership < SILENT))
         return undefined
       const claims = new Map<string, number>()
       const read = (id: string) => claims.get(id) ?? readBase(id)
       for (const layer of layers) {
-        const weight = weights[layer.emotion]
+        const weight = weights[layer.emotion] * ownership
         if (weight < SILENT)
           continue
         for (const parameter of layer.expression)

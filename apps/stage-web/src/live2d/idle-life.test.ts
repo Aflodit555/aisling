@@ -71,4 +71,33 @@ describe('idle life', () => {
     expect(bx1 - bx0).toBeGreaterThan(0.5)
     expect(Math.max(Math.abs(bx0), Math.abs(bx1))).toBeLessThanOrEqual(4)
   })
+
+  it('smooths pointer gaze, yields the entire pose and wink to a gesture, then restores idle', () => {
+    let pointer: { x: number; y: number } | undefined = { x: 1, y: -1 }
+    let gesture = false
+    const source = createIdleLife({ eyeIds: EYES, isGesture: () => gesture, pointer: () => pointer, priority: 20, random: seeded(7) })
+    const base: Record<string, number> = { ParamAngleX: 3, ParamEyeLOpen: 0, ParamEyeROpen: 1 }
+    const sample = () => source.sample({ readBase: id => base[id] ?? 0, dtMs: 16 })!
+    const first = sample()
+    expect(first.get('ParamEyeBallX')).toBeGreaterThan(0)
+    expect(first.get('ParamEyeBallX')).toBeLessThan(0.3)
+    let frame = first
+    for (let i = 0; i < 60; i++) frame = sample()
+    expect(frame.get('ParamEyeBallX')).toBeCloseTo(0.8)
+    expect(frame.get('ParamEyeBallY')).toBeCloseTo(-0.65)
+    expect(frame.get('ParamAngleX')).toBeGreaterThan(10)
+    gesture = true
+    for (let i = 0; i < 40; i++) frame = sample()
+    expect(frame.has('ParamEyeLOpen')).toBe(false)
+    expect(frame.has('ParamEyeROpen')).toBe(false)
+    expect(frame.get('ParamEyeBallX')).toBe(0)
+    expect(frame.get('ParamAngleX')).toBe(3)
+    pointer = undefined
+    gesture = false
+    frame = sample()
+    expect(frame.get('ParamEyeLOpen')).toBeGreaterThan(0)
+    expect(frame.get('ParamEyeLOpen')).toBeLessThan(0.1)
+    for (let i = 0; i < 90; i++) frame = sample()
+    expect(Math.abs(frame.get('ParamEyeBallX')!)).toBeLessThan(0.6)
+  })
 })

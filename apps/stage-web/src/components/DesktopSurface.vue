@@ -4,11 +4,32 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 
 import { useSpeechStore } from '../stores/speech'
 import { useStageStore } from '../stores/stage'
+import { DESKTOP_ENTRANCE_OVERSHOOT, fitDesktopCharacter } from '../live2d/presentation'
+import { usePresentationStore } from '../stores/presentation'
 import CharacterSurface from './CharacterSurface.vue'
 import Icon from './Icon.vue'
 import SpeechBubble from './SpeechBubble.vue'
 
 const stage = useStageStore()
+const presentation = usePresentationStore()
+const controls = ref({ back: { left: '0px', top: '0px' }, composer: { left: '50%', width: '320px' } })
+
+function positionControls(): void {
+  const layout = presentation.stageLayout
+  const fitted = layout && fitDesktopCharacter({ width: innerWidth, height: innerHeight }, layout, presentation.transform)
+  const screenLeft = (window.screen as Screen & { availLeft?: number }).availLeft ?? 0
+  const left = Math.max(0, screenLeft - window.screenX) + 12
+  const right = Math.min(innerWidth, screenLeft + screen.availWidth - window.screenX) - 12
+  const width = Math.min(320, Math.max(0, right - left))
+  const clamp = (x: number, size: number) => Math.max(left, Math.min(right - size, x))
+  controls.value = {
+    back: {
+      left: `${clamp(fitted && layout ? fitted.x + (layout.body.x + layout.body.width) * fitted.scale + 12 : innerWidth * 0.7, 76)}px`,
+      top: `${Math.max(12, Math.min(innerHeight - 48, fitted && layout ? fitted.y + layout.body.y * fitted.scale + 12 : innerHeight * 0.35))}px`,
+    },
+    composer: { left: `${clamp(innerWidth / 2 - width / 2, width) + width / 2}px`, width: `${width}px` },
+  }
+}
 const { speaking, phase } = storeToRefs(useSpeechStore())
 const entered = ref(false)
 const inputVisible = ref(false)
@@ -29,6 +50,7 @@ watch(() => stage.messages.at(-1), message => {
 })
 
 function onReady(): void {
+  positionControls()
   requestAnimationFrame(() => requestAnimationFrame(() => { entered.value = true }))
 }
 
@@ -40,6 +62,7 @@ function submit(): void {
 }
 
 function onPointer(kind: 'character' | 'input' | 'ui' | 'none'): void {
+  positionControls()
   if (pressed?.moved) return
   if (kind === 'character' || kind === 'input') {
     clearTimeout(leaveTimer)
@@ -57,6 +80,7 @@ function onPointer(kind: 'character' | 'input' | 'ui' | 'none'): void {
 
 function onContextMenu(event: MouseEvent): void {
   event.preventDefault()
+  positionControls()
   returnVisible.value = true
   inputVisible.value = false
   scheduleReturnHide()
@@ -73,6 +97,7 @@ function onCharacterMove(event: PointerEvent): void {
   if (!pressed || pressed.id !== event.pointerId || pressed.moved) return
   if (Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 6) {
     pressed.moved = true
+    hideReturnButton()
     clearTimeout(hoverTimer)
     hoverTimer = undefined
     inputVisible.value = false
@@ -100,6 +125,7 @@ function onCharacterClick(): void {
     suppressClick = false
     return
   }
+  positionControls()
   inputVisible.value = true
   character.value?.interact()
 }
@@ -132,10 +158,12 @@ function returnToStage(): void {
 onMounted(() => {
   stopPointer = window.aislingDesktop?.onDesktopPointer(onPointer)
   window.addEventListener('blur', stopDrag)
+  window.addEventListener('resize', positionControls)
 })
 onUnmounted(() => {
   stopDrag()
   window.removeEventListener('blur', stopDrag)
+  window.removeEventListener('resize', positionControls)
   stopPointer?.()
   clearTimeout(hoverTimer)
   clearTimeout(leaveTimer)
@@ -145,7 +173,7 @@ onUnmounted(() => {
 
 <template>
   <main class="desktop-surface" @contextmenu="onContextMenu">
-    <div class="character" :class="{ entered }">
+    <div class="character" :class="{ entered }" :style="{ '--entrance-overshoot': `${DESKTOP_ENTRANCE_OVERSHOOT}px` }">
       <CharacterSurface
         ref="character"
         :name="stage.characterName"
@@ -160,12 +188,12 @@ onUnmounted(() => {
     </div>
     <div data-desktop-hit class="character-hit" @pointerdown="onCharacterDown" @pointermove="onCharacterMove" @pointerup="stopDrag" @pointercancel="stopDrag" @lostpointercapture="stopDrag" @click="onCharacterClick" />
     <SpeechBubble :text="bubble" :pending="stage.sending || stage.visionProcessing" :searching="stage.searching" :speaking="phase === 'buffering' || speaking" />
-    <form v-if="inputVisible" data-desktop-hit class="desktop-composer" @click="hideReturnButton" @submit.prevent="submit">
+    <form v-if="inputVisible" data-desktop-hit class="desktop-composer" :style="controls.composer" @click="hideReturnButton" @submit.prevent="submit">
       <input v-model="draft" aria-label="给 Aisling 发消息" placeholder="说点什么…" :disabled="stage.sending" @keydown.esc="inputVisible = false">
       <button type="submit" :disabled="!draft.trim() || stage.sending" aria-label="发送消息"><Icon name="send" :size="16" /></button>
     </form>
     <Transition name="return-fade">
-      <button v-if="returnVisible" data-desktop-hit class="return-button" type="button" @pointerenter="onReturnPointerEnter" @pointerleave="returnHoverStartedAt = 0" @click="returnToStage">
+      <button v-if="returnVisible" data-desktop-hit class="return-button" :style="controls.back" type="button" @pointerenter="onReturnPointerEnter" @pointerleave="returnHoverStartedAt = 0" @click="returnToStage">
         back
       </button>
     </Transition>
@@ -178,7 +206,7 @@ onUnmounted(() => {
 .character.entered { animation: rise 850ms both }
 .character-hit { position: absolute; left: 3%; width: 94%; top: 8%; bottom: 0; cursor: pointer; touch-action: none; clip-path: polygon(30% 0, 70% 0, 85% 15%, 75% 35%, 87% 60%, 85% 100%, 15% 100%, 13% 60%, 25% 35%, 15% 15%) }
 /* Floats over an arbitrary desktop, so these keep a soft shadow the rest of the app never uses. */
-.desktop-composer { position: absolute; left: 50%; width: 67.5%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: .5rem; padding: .25rem .3rem .25rem 1rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--bg); color: var(--fg); box-shadow: 0 4px 18px rgb(0 0 0 / .18); transition: border-color .15s }
+.desktop-composer { position: absolute; left: 50%; width: 320px; box-sizing: border-box; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: .5rem; padding: .25rem .3rem .25rem 1rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--bg); color: var(--fg); box-shadow: 0 4px 18px rgb(0 0 0 / .18); transition: border-color .15s }
 .desktop-composer:hover, .desktop-composer:focus-within { border-color: var(--muted) }
 .desktop-composer input { flex: 1; min-width: 0; padding: .25rem 0; border: 0; outline: none; background: none; color: inherit; font: inherit }
 .desktop-composer input::placeholder { color: var(--muted) }
@@ -186,11 +214,11 @@ onUnmounted(() => {
 .desktop-composer button:hover { background: var(--tonal-strong) }
 .desktop-composer button:active { transform: scale(.94) }
 .desktop-composer button:disabled { opacity: .45; cursor: default; transform: none; background: var(--tonal) }
-.return-button { position: absolute; top: 120px; right: 28px; padding: .4rem .9rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: .85rem; box-shadow: 0 4px 18px rgb(0 0 0 / .18); transition: background .15s, transform .1s }
+.return-button { position: absolute; width: 76px; box-sizing: border-box; padding: .4rem .9rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: .85rem; box-shadow: 0 4px 18px rgb(0 0 0 / .18); transition: background .15s, transform .1s }
 .return-button:hover { background: var(--tonal) }
 .return-button:active { transform: scale(.97) }
 .return-fade-leave-active { transition: opacity .5s; pointer-events: none }
 .return-fade-leave-to { opacity: 0 }
-@keyframes rise { 0% { transform: translateY(100%) } 72% { transform: translateY(-18px) } 100% { transform: translateY(0) } }
+@keyframes rise { 0% { transform: translateY(100%) } 72% { transform: translateY(calc(-1 * var(--entrance-overshoot))) } 100% { transform: translateY(0) } }
 @media (prefers-reduced-motion: reduce) { .character.entered { animation-duration: 1ms } }
 </style>

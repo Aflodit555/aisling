@@ -1,7 +1,7 @@
 // Production loading smoke: no dev server. Loads the built renderer through the
 // `aisling://stage` custom scheme and verifies the renderer mounts, the desktop
 // bridge is present, and the file-backed storage bridge round-trips.
-const { app, BaseWindow, nativeImage } = require('electron')
+const { app, BaseWindow, nativeImage, screen } = require('electron')
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const os = require('node:os')
@@ -130,6 +130,15 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
   const screenshot = path.join(app.getPath('userData'), 'stage-prod-smoke.png')
   const desktopScreenshot = path.join(app.getPath('userData'), 'desktop-prod-smoke.png')
   const entryScreenshot = path.join(app.getPath('userData'), 'desktop-entry-smoke.png')
+  if (process.env.AISLING_LAYOUT_SMOKE === '1') {
+    assert.equal(await contents.executeJavaScript(`(async () => {
+      for (let n = 0; n < 100; n++) {
+        if (document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('presentation')?.stageLayout) return true
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      return false
+    })()`), true, 'Stage geometry must be ready before desktop inheritance')
+  }
   const contextId = await contents.executeJavaScript('window.__smokeContext = crypto.randomUUID()')
   for (let i = 0; i < 2; i++) {
     enterDesktopMode()
@@ -150,6 +159,44 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       const canvas = document.querySelector('.desktop-surface .live2d-canvas')
       return canvas.getBoundingClientRect().height > presence.getBoundingClientRect().height
     })()`), true, 'the complete model canvas must extend behind the desktop bottom edge')
+    if (process.env.AISLING_LAYOUT_SMOKE === '1') {
+      const originalCursor = screen.getCursorScreenPoint
+      const work = screen.getDisplayMatching(floatingWindow.getContentBounds()).workArea
+      let cursor = { x: work.x + work.width / 2, y: work.y + work.height / 2 }
+      screen.getCursorScreenPoint = () => cursor
+      try {
+        for (const direction of [-1, 1]) {
+          cursor = { ...cursor, x: work.x + work.width / 2 }
+          await contents.executeJavaScript('window.aislingDesktop.setDragging(true)')
+          await new Promise(resolve => setTimeout(resolve, 60))
+          cursor = { ...cursor, x: cursor.x + direction * work.width * 4 }
+          await new Promise(resolve => setTimeout(resolve, 120))
+          await contents.executeJavaScript('window.aislingDesktop.setDragging(false)')
+          const bounds = floatingWindow.getContentBounds()
+          const expected = direction < 0 ? work.x - bounds.width * 0.55 : work.x + work.width - bounds.width * 0.45
+          assert.ok(Math.abs(bounds.x - Math.round(expected)) <= 1, 'both edges must allow a partial character')
+          const ui = await contents.executeJavaScript(`(async () => {
+            document.querySelector('.character-hit').click()
+            await new Promise(resolve => setTimeout(resolve, 0))
+            const composer = document.querySelector('.desktop-composer').getBoundingClientRect()
+            document.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+            await new Promise(resolve => setTimeout(resolve, 0))
+            const back = document.querySelector('.return-button').getBoundingClientRect()
+            return { composer: { left: composer.left + screenX, right: composer.right + screenX, width: composer.width }, back: { left: back.left + screenX, right: back.right + screenX, top: back.top } }
+          })()`)
+          assert.ok(ui.composer.width <= 320 && ui.composer.width > 150)
+          for (const rect of [ui.composer, ui.back]) {
+            assert.ok(rect.left >= work.x && rect.right <= work.x + work.width, JSON.stringify({work,bounds,ui}))
+          }
+          assert.ok(ui.back.top >= 12)
+        }
+      } finally { screen.getCursorScreenPoint = originalCursor }
+      console.log(JSON.stringify({ desktopLayout: 'passed', partialDrag: 'both edges', composer: '320px maximum' }))
+      clearTimeout(timeout)
+      win.destroy()
+      app.exit(0)
+      return
+    }
     if (i === 0) {
       await new Promise(resolve => setTimeout(resolve, 300))
       writeFileSync(entryScreenshot, (await contents.capturePage()).toPNG())
@@ -160,7 +207,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       const desktopUi = await contents.executeJavaScript(`(async () => {
         const root = document.querySelector('.desktop-surface')
         const composer = root.querySelector('.desktop-composer')
-        const composerRatio = composer?.getBoundingClientRect().width / root.getBoundingClientRect().width
+        const composerWidth = composer?.getBoundingClientRect().width
         if (composer) {
           const input = composer.querySelector('input')
           const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
@@ -171,11 +218,11 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         for (let n = 0; n < 40 && !root.querySelector('.bubble'); n++)
           await new Promise(resolve => setTimeout(resolve, 50))
         const reply = root.querySelector('.bubble')?.textContent
-        return { entered: !!root.querySelector('.character.entered'), composerShown: !!composer, composerRatio, reply }
+        return { entered: !!root.querySelector('.character.entered'), composerShown: !!composer, composerWidth, reply }
       })()`)
       assert.equal(desktopUi.entered, true)
       assert.equal(desktopUi.composerShown, true)
-      assert.ok(Math.abs(desktopUi.composerRatio - 0.675) < 0.01)
+      assert.equal(desktopUi.composerWidth, 320)
       assert.match(desktopUi.reply, /desktop smoke/)
       contents.send('aisling:desktop-pointer', 'none')
       await new Promise(resolve => setTimeout(resolve, 350))
@@ -190,7 +237,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         const button = document.querySelector('.return-button').getBoundingClientRect()
         return { top: button.top - root.top, right: root.right - button.right }
       })()`)
-      assert.ok(layout.top >= 100 && layout.right >= 20)
+      assert.ok(layout.top >= 12 && layout.right >= 12)
       await new Promise(resolve => setTimeout(resolve, 100))
       const desktopImage = await contents.capturePage()
       assert.equal(desktopImage.toBitmap()[3], 0, 'desktop corner must be transparent')

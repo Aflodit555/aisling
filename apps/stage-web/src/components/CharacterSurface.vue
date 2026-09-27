@@ -30,8 +30,7 @@ const props = defineProps<{
 const emit = defineEmits<{ ready: []; error: [] }>()
 
 const presentation = usePresentationStore()
-const { transform } = storeToRefs(presentation)
-const desktopTransform = { scale: 1.2, offsetX: 0, offsetY: 0 }
+const { transform, stageLayout } = storeToRefs(presentation)
 const speech = useSpeechStore()
 const emotion = useEmotionStore()
 const rendererState = ref<'loading' | 'ready' | 'error'>('loading')
@@ -121,7 +120,7 @@ function interact(): void {
 function moveCharacter(delta: { x: number; y: number }): void {
   presentation.setTransform({
     ...transform.value,
-    offsetX: transform.value.offsetX + delta.x,
+    offsetX: 0,
     offsetY: transform.value.offsetY + delta.y,
   })
 }
@@ -136,7 +135,8 @@ defineExpose({ interact })
         v-if="rendererState !== 'error'"
         :model-src="LIVE2D_MODEL_URL"
         :cubism-core-src="CUBISM_CORE_URL"
-        :transform="desktop ? desktopTransform : transform"
+        :transform="transform"
+        :stage-layout="stageLayout"
         :desktop="desktop"
         :sources="sources"
         @ready="onReady"
@@ -144,6 +144,7 @@ defineExpose({ interact })
         @pointer="pointer = $event"
         @tap="interact"
         @move="moveCharacter"
+        @layout="presentation.setStageLayout"
       />
       <template v-else>
         <div class="halo" />
@@ -173,14 +174,15 @@ defineExpose({ interact })
 </template>
 
 <style scoped>
-.surface { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; min-width: 0; padding: 0 1.5rem 1.5rem }
+.surface { position: relative; display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; min-width: 0; min-height: 0; padding: 0 1.5rem 1.5rem }
 
 .surface.desktop { width: 100%; height: 100%; padding: 0; overflow: visible; }
-.surface.desktop .presence { width: 100%; height: 100%; min-height: 0; }
+.surface.desktop .presence { width: 100%; height: 100%; min-height: 0; overflow: visible; clip-path: none; }
 .surface.desktop .presence.is-error { width: 100%; height: 100%; }
 .surface.desktop .renderer-state { display: none; }
 
-.presence { position: relative; display: grid; place-items: center; width: min(100%, 520px); height: min(64vh, 600px); min-height: 280px }
+.presence { position: relative; display: grid; place-items: center; width: min(100%, 520px); flex: 1; min-height: 0; overflow: visible; clip-path: inset(-100vh -100vw 0) }
+.surface > :not(.presence) { flex-shrink: 0 }
 .presence.is-error { width: 220px; height: 220px; min-height: 220px }
 .halo { position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--link) 40%, transparent), transparent 70%); transition: transform .6s var(--ease), opacity .6s var(--ease) }
 .presence.is-active .halo { transform: scale(1.12); animation: breathe 2.2s ease-in-out infinite }

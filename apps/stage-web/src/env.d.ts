@@ -5,6 +5,7 @@ interface Window {
   aislingDesktop?: {
     getMode(): Promise<'stage' | 'desktop'>
     returnToStage(): Promise<void>
+    resizeDesktop(width: number, height: number): void
     setDragging(enabled: boolean): void
     onCursor(callback: (x: number, y: number) => void): () => void
     onDesktopPointer(callback: (kind: 'character' | 'input' | 'ui' | 'none') => void): () => void

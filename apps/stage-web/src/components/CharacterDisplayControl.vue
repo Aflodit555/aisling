@@ -7,7 +7,7 @@ import { usePresentationStore } from '../stores/presentation'
 import Icon from './Icon.vue'
 
 const presentation = usePresentationStore()
-const { transform } = storeToRefs(presentation)
+const { transform, limits } = storeToRefs(presentation)
 const root = ref<HTMLElement>()
 const open = ref(false)
 
@@ -55,37 +55,26 @@ onBeforeUnmount(() => {
         <span>Size</span>
         <input
           type="range"
-          :min="CHARACTER_DISPLAY_LIMITS.scale.min"
-          :max="CHARACTER_DISPLAY_LIMITS.scale.max"
+          :min="limits.scale.min"
+          :max="limits.scale.max"
           :step="CHARACTER_DISPLAY_LIMITS.scale.step"
           :value="transform.scale"
           @input="setValue('scale', $event)"
         />
-        <output>{{ transform.scale.toFixed(2) }}</output>
-      </label>
-      <label>
-        <span>Horizontal</span>
-        <input
-          type="range"
-          :min="CHARACTER_DISPLAY_LIMITS.offset.min"
-          :max="CHARACTER_DISPLAY_LIMITS.offset.max"
-          :step="CHARACTER_DISPLAY_LIMITS.offset.step"
-          :value="transform.offsetX"
-          @input="setValue('offsetX', $event)"
-        />
-        <output>{{ transform.offsetX }}</output>
+        <output>{{ Math.round(transform.scale * 100) }}%</output>
       </label>
       <label>
         <span>Vertical</span>
         <input
           type="range"
-          :min="CHARACTER_DISPLAY_LIMITS.offset.min"
-          :max="CHARACTER_DISPLAY_LIMITS.offset.max"
+          :min="Math.ceil(limits.offset.min)"
+          :max="limits.offset.max"
+          :disabled="limits.offset.min === limits.offset.max"
           :step="CHARACTER_DISPLAY_LIMITS.offset.step"
           :value="transform.offsetY"
           @input="setValue('offsetY', $event)"
         />
-        <output>{{ transform.offsetY }}</output>
+        <output>{{ Math.round(-transform.offsetY) }}</output>
       </label>
 
       <button type="button" class="btn reset" @click="presentation.resetTransform()">Reset</button>

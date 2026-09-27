@@ -51,6 +51,7 @@ let stageView
 let mode = 'stage'
 let switching = false
 let quitting = false
+let desktopSize = { width: 360, height: 460 }
 let desktopDisplayId
 let pointerTimer
 let pointerBusy = false
@@ -72,6 +73,11 @@ function stopDesktopDrag() {
   dragTimer = undefined
 }
 
+// Allow the character center just beyond either screen edge, leaving a small half visible.
+function clampDesktopX(x, width, work) {
+  return Math.round(Math.max(work.x - width * 0.55, Math.min(work.x + work.width - width * 0.45, x)))
+}
+
 function startDesktopDrag() {
   if (mode !== 'desktop' || !desktopWindow || desktopWindow.isDestroyed() || dragTimer) return
   const desktop = desktopWindow
@@ -85,8 +91,7 @@ function startDesktopDrag() {
       ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
     const bounds = desktop.getContentBounds()
     const work = display.workArea
-    const x = Math.round(Math.max(work.x, Math.min(work.x + work.width - from.width,
-      from.x + screen.getCursorScreenPoint().x - start)))
+    const x = clampDesktopX(from.x + screen.getCursorScreenPoint().x - start, from.width, work)
     const y = work.y + work.height - from.height
     if (x !== bounds.x || y !== bounds.y)
       desktop.setContentBounds({ x, y, width: from.width, height: from.height })
@@ -227,8 +232,8 @@ function desktopBounds() {
   const display = screen.getAllDisplays().find(item => item.id === desktopDisplayId)
     ?? screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
   const { x, y, width, height } = display.workArea
-  const w = Math.min(360, width)
-  const h = Math.min(460, height)
+  const w = Math.min(desktopSize.width, width)
+  const h = Math.min(desktopSize.height, height)
   return { x: x + width - w - Math.min(24, Math.max(0, width - w)), y: y + height - h, width: w, height: h }
 }
 
@@ -448,6 +453,17 @@ async function startDesktop(options = {}) {
     const trusted = event => Boolean(stageView && event.sender === stageView.webContents
       && event.senderFrame === stageView.webContents.mainFrame
       && stageOriginOf(event.senderFrame.url) === allowedOrigin)
+    ipcMain.on('aisling:desktop-size', (event, width, height) => {
+      if (!trusted(event) || !Number.isSafeInteger(width) || !Number.isSafeInteger(height)
+        || width < 1 || height < 1 || mode !== 'desktop' || !desktopWindow) return
+      desktopSize = { width, height }
+      const next = desktopBounds()
+      const current = desktopWindow.getContentBounds()
+      if (current.width === next.width && current.height === next.height) return
+      const area = screen.getDisplayMatching(current).workArea
+      next.x = clampDesktopX(current.x + (current.width - next.width) / 2, next.width, area)
+      desktopWindow.setContentBounds(next)
+    })
     ipcMain.on('aisling:desktop-drag', (event, enabled) => {
       if (!trusted(event) || typeof enabled !== 'boolean') return
       if (enabled) startDesktopDrag()

@@ -47,5 +47,5 @@ function onImage(payload: { image: ImageInput; caption: string }): void {
 </template>
 
 <style scoped>
-.stage { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: hidden }
+.stage { display: flex; flex: 1; min-width: 0; min-height: 0; overflow: visible }
 </style>

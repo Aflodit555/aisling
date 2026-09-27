@@ -7,9 +7,11 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createParameterController, type CoreModelLike, type ParameterSource } from '../live2d/parameter-controller'
 import { createRig, type Live2DRig } from '../live2d/rig'
 import {
-  applyCharacterDisplayTransform,
-  fitLive2DModel,
+  fitDesktopCharacter,
+  CHARACTER_DISPLAY_LIMITS,
+  fitStageCharacter,
   type CharacterDisplayTransform,
+  type StageCharacterLayout,
 } from '../live2d/presentation'
 
 const props = defineProps<{
@@ -17,6 +19,7 @@ const props = defineProps<{
   cubismCoreSrc: string
   transform: CharacterDisplayTransform
   desktop?: boolean
+  stageLayout?: StageCharacterLayout
   /** Application-layer parameter sources applied right after the native motion update. */
   sources?: ParameterSource[]
 }>()
@@ -27,6 +30,7 @@ const emit = defineEmits<{
   pointer: [direction: { x: number; y: number } | undefined]
   tap: []
   move: [delta: { x: number; y: number }]
+  layout: [layout: StageCharacterLayout]
 }>()
 
 const container = ref<HTMLDivElement>()
@@ -34,12 +38,15 @@ const controller = createParameterController()
 let app: Application | undefined
 let model: Live2DModelType | undefined
 let modelSize: { width: number; height: number } | undefined
+let stageGeometry: Pick<StageCharacterLayout, 'body' | 'envelope' | 'centerX'> | undefined
+let stageLayout: StageCharacterLayout | undefined
+let canvasTopPadding = 0
 let resizeObserver: ResizeObserver | undefined
 let disposed = false
 let coreLoad: Promise<void> | undefined
 let pendingDtMs = 0
 let stopCursor: (() => void) | undefined
-let pressed: { id: number; x: number; y: number; modelX: number; modelY: number; moved: boolean } | undefined
+let pressed: { id: number; x: number; y: number; offsetY: number; moved: boolean } | undefined
 
 function canvasPoint(x: number, y: number): Point | undefined {
   if (!app)
@@ -66,11 +73,12 @@ function onPointerMove(event: PointerEvent): void {
   if (props.desktop)
     return // The OS cursor stream also covers the space outside the pet window.
   if (pressed && pressed.id === event.pointerId && model) {
-    const dx = event.clientX - pressed.x
     const dy = event.clientY - pressed.y
-    pressed.moved ||= Math.hypot(dx, dy) > 6
-    if (pressed.moved)
-      model.position.set(pressed.modelX + dx, pressed.modelY + dy)
+    pressed.moved ||= Math.abs(dy) > 6
+    if (pressed.moved && stageLayout) {
+      const fitted = fitStageCharacter(stageLayout, { ...props.transform, offsetY: pressed.offsetY + dy })
+      positionStageModel(fitted)
+    }
   }
   pointAt(event.clientX, event.clientY)
 }
@@ -81,7 +89,7 @@ function onPointerDown(event: PointerEvent): void {
   const point = canvasPoint(event.clientX, event.clientY)
   if (!point || !model.hitTest(point.x, point.y).length)
     return
-  pressed = { id: event.pointerId, x: event.clientX, y: event.clientY, modelX: model.x, modelY: model.y, moved: false }
+  pressed = { id: event.pointerId, x: event.clientX, y: event.clientY, offsetY: props.transform.offsetY, moved: false }
   ;(app!.view as HTMLCanvasElement).setPointerCapture(event.pointerId)
   event.preventDefault()
 }
@@ -95,9 +103,12 @@ function onPointerUp(event: PointerEvent): void {
     resize()
     return
   }
-  if (start.moved || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) {
-    emit('move', { x: event.clientX - start.x, y: event.clientY - start.y })
-    resize() // Also restores the fitted position if the saved offset hit a limit.
+  if (start.moved || Math.abs(event.clientY - start.y) > 6) {
+    const fitted = stageLayout && fitStageCharacter(stageLayout, { ...props.transform, offsetY: start.offsetY + event.clientY - start.y })
+    if (fitted) {
+      emit('move', { x: 0, y: fitted.transform.offsetY - props.transform.offsetY })
+      positionStageModel(fitted)
+    }
   }
   else {
     emit('tap')
@@ -171,24 +182,71 @@ function resize(): void {
   if (!width || !visibleHeight)
     return
 
-  const fitted = applyCharacterDisplayTransform(
-    fitLive2DModel({ width, height: visibleHeight }, modelSize),
-    props.transform,
-  )
-  if (props.desktop) {
-    // Keep the entire live model inside its canvas; the desktop window alone
-    // masks the lower body, so the rising model never exposes a cut edge.
-    const top = visibleHeight * 0.19
-    const fullHeight = Math.ceil(top + modelSize.height * fitted.scale)
-    container.value.style.height = `${fullHeight}px`
-    app.renderer.resize(width, fullHeight)
-    model.scale.set(fitted.scale)
-    model.position.set(fitted.x, top + modelSize.height * fitted.scale / 2)
+  if (!props.desktop && stageGeometry) {
+    stageLayout = { width, height: visibleHeight, ...stageGeometry }
+    emit('layout', stageLayout)
+    const highest = fitStageCharacter(stageLayout, { scale: CHARACTER_DISPLAY_LIMITS.scale.max, offsetX: 0, offsetY: -Number.MAX_SAFE_INTEGER })
+    canvasTopPadding = Math.ceil(Math.max(0, -(highest.y + stageGeometry.envelope.y * highest.scale - stageGeometry.body.height * highest.scale * 0.06)))
+    const canvasHeight = visibleHeight + canvasTopPadding
+    app.renderer.resize(width, canvasHeight)
+    Object.assign((app.view as HTMLCanvasElement).style, { position: 'absolute', top: `${-canvasTopPadding}px`, height: `${canvasHeight}px` })
+    positionStageModel(fitStageCharacter(stageLayout, props.transform))
     return
   }
-  app.renderer.resize(width, visibleHeight)
+
+  if (props.desktop && stageGeometry) {
+    const fitted = fitDesktopCharacter({ width, height: visibleHeight }, props.stageLayout ?? { width, height: visibleHeight, ...stageGeometry }, props.transform)
+    window.aislingDesktop?.resizeDesktop(fitted.windowWidth, fitted.windowHeight)
+    canvasTopPadding = 0
+    // Only the native window clips the model. Include the complete lower meshes,
+    // including motion margin, so entrance overshoot cannot reveal a canvas edge.
+    const fullHeight = fitted.canvasHeight
+    container.value.style.height = `${fullHeight}px`
+    app.renderer.resize(width, fullHeight)
+    positionStageModel(fitted)
+    return
+  }
+}
+
+function positionStageModel(fitted: ReturnType<typeof fitStageCharacter>): void {
+  if (!model || !modelSize) return
   model.scale.set(fitted.scale)
-  model.position.set(fitted.x, fitted.y)
+  model.position.set(fitted.x + modelSize.width * fitted.scale / 2, fitted.y + modelSize.height * fitted.scale / 2 + canvasTopPadding)
+}
+
+function readStageGeometry(): Pick<StageCharacterLayout, 'body' | 'envelope' | 'centerX'> {
+  const internal = model!.internalModel as Cubism4InternalModel
+  const hitIndices = new Set(Object.values(internal.hitAreas).map(area => area.index))
+  const body = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity }
+  const envelope = { ...body }
+  const point = new Point()
+  for (let index = 0; index < internal.coreModel.getDrawableCount(); index++) {
+    if (hitIndices.has(index)) continue
+    const vertices = internal.getDrawableVertices(index)
+    const visible = internal.coreModel.getDrawableOpacity(index) > 0
+    const targets = visible ? [body, envelope] : [envelope]
+    for (let i = 0; i < vertices.length; i += 2) {
+      point.set(vertices[i], vertices[i + 1])
+      internal.localTransform.apply(point, point)
+      for (const bounds of targets) {
+        bounds.left = Math.min(bounds.left, point.x)
+        bounds.top = Math.min(bounds.top, point.y)
+        bounds.right = Math.max(bounds.right, point.x)
+        bounds.bottom = Math.max(bounds.bottom, point.y)
+      }
+    }
+  }
+  const rect = (bounds: typeof body) => Number.isFinite(bounds.left) && bounds.bottom > bounds.top && bounds.right > bounds.left
+    ? { x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top }
+    : { x: 0, y: 0, ...modelSize! }
+  // Hit areas describe the body rather than the asymmetric wand/effect bounds.
+  const areas = Object.values(internal.hitAreas)
+  const torso = areas.find(area => /body/i.test(area.id)) ?? areas.find(area => /head/i.test(area.id))
+  const bounds = torso && internal.getDrawableBounds(torso.index)
+  const centerX = bounds
+    ? internal.localTransform.apply(new Point(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)).x
+    : internal.width / 2
+  return { body: rect(body), envelope: rect(envelope), centerX }
 }
 
 function update(): void {
@@ -253,6 +311,7 @@ async function mountRenderer(): Promise<void> {
     model.internalModel.on('beforeMotionUpdate', restoreLayers)
     model.internalModel.on('afterMotionUpdate', applyLayers)
     modelSize = { width: model.width, height: model.height }
+    stageGeometry = readStageGeometry()
     model.anchor.set(0.5)
     app.stage.addChild(model)
     app.ticker.add(update, undefined, UPDATE_PRIORITY.HIGH)
@@ -294,7 +353,7 @@ function destroyRenderer(): void {
 
 onMounted(() => void mountRenderer())
 onBeforeUnmount(destroyRenderer)
-watch(() => [props.transform.scale, props.transform.offsetX, props.transform.offsetY], resize)
+watch(() => [props.transform.scale, props.transform.offsetX, props.transform.offsetY, props.desktop ? props.stageLayout : undefined], resize)
 </script>
 
 <template>
@@ -303,10 +362,11 @@ watch(() => [props.transform.scale, props.transform.offsetX, props.transform.off
 
 <style scoped>
 .live2d-renderer {
+  position: relative;
   width: 100%;
   height: 100%;
   touch-action: none;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .live2d-renderer.desktop { position: absolute; top: 0; left: 0; overflow: visible; }

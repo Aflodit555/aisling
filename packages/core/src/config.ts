@@ -5,7 +5,7 @@
  * swappable behind the `ConfigStore` interface.
  */
 
-export type ChatProviderType = 'mock' | 'openai-compatible'
+export type ChatProviderType = 'openai-compatible'
 export type SpeechProviderType = 'none' | 'browser' | 'alibaba'
 export type SpeechTransport = 'websocket' | 'http'
 export type HearingProviderType = 'none' | 'openai-compatible' | 'alibaba'
@@ -79,7 +79,7 @@ export const DEFAULT_ALIBABA_TTS_WEBSOCKET_URL = 'wss://dashscope.aliyuncs.com/a
 export const DEFAULT_ALIBABA_ASR_MODEL = 'qwen-audio-3.0-asr-flash'
 
 export function createDefaultConsciousnessConfig(): ConsciousnessConfig {
-  return { providerType: 'mock', baseUrl: DEFAULT_OPENAI_BASE_URL, apiKey: '', model: '', temperature: 1 }
+  return { providerType: 'openai-compatible', baseUrl: DEFAULT_OPENAI_BASE_URL, apiKey: '', model: '', temperature: 1 }
 }
 
 export function createDefaultPlatformConfig(): PlatformConfig {

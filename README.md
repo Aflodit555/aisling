@@ -8,7 +8,7 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 [AIRI](https://github.com/moeru-ai/airi) as an engineering reference. Aisling is
 **not** an AIRI fork and has no official relationship with either project.
 
-> **Current version:** v0.3.1 · **Status:** early development. The architecture
+> **Current version:** v0.3.2 · **Status:** early development. The architecture
 > and public APIs may still change.
 
 ## What exists today
@@ -16,11 +16,10 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 - Runtime foundation (Stimulus → Runtime → Character → Provider → Output)
 - Character / Stimulus domain model
 - Capability registry: Consciousness, Speech, Hearing, Vision, Web Search
-- Provider Settings UI with per-module model onboarding (Test + Save)
+- Provider Settings UI for model configuration
 - Multi-conversation persistence (localStorage)
 - Browser / System Speech (`speechSynthesis`)
 - Alibaba Native HTTP TTS
-- Devtools event tracing
 - Live2D idle life (blinks, gaze, posture) and Jev-judged emotion with a stabilizing state machine ([docs/emotion.md](docs/emotion.md))
 
 **Verified end-to-end:** Consciousness, Vision, Browser Speech, Alibaba TTS,
@@ -70,7 +69,7 @@ setup, and keys are never required in source code or the terminal.
 ## Layout
 
 ```
-apps/stage-web   — Vue 3 + Vite Stage (/settings modules, /devtools)
+apps/stage-web   — Vue 3 + Vite Stage (/settings modules)
 apps/stage-desktop — minimal Windows Electron host (foreground app/title + idle IPC)
 packages/core    — framework-agnostic runtime: Stimulus, Character, Capability,
                    Provider, Output, PlatformConfig/ConfigStore, capability

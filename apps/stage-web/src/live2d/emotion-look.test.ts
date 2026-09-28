@@ -73,6 +73,23 @@ describe('emotion look (Mao)', () => {
     expect(mixed.get('ParamCheek')).toBeCloseTo(0.5)
   })
 
+  it('opens joy eyes quickly as the emotion fades without shortening its pose', () => {
+    const w = weights({ joy: 1 })
+    const layer = createEmotionLayer({ rig: maoRig(), looks: MAO_LOOKS, weights: () => w, priority: 30 })
+    const frame = () => layer.sample({ readBase: id => id.endsWith('Open') ? 1 : 0, dtMs: 100 })!
+    expect(frame().get('ParamEyeLOpen')).toBe(0)
+    for (let i = 0; i < 6; i++) {
+      w.joy -= 0.01
+      frame()
+    }
+    const recovering = frame()
+    expect(recovering.get('ParamEyeLOpen')).toBeGreaterThan(0.8)
+    expect(recovering.get('ParamEyeLSmile')).toBeLessThan(0.2)
+    expect(recovering.get('ParamAngleZ')).toBeCloseTo(6 * w.joy)
+    w.joy = 1
+    expect(frame().get('ParamEyeLOpen')).toBe(0)
+  })
+
   it('still applies the pose on a model without the expression', () => {
     const bare: Live2DRig = { ...maoRig(), expressions: new Map() }
     const out = sample(bare, weights({ angry: 1 }), {})!

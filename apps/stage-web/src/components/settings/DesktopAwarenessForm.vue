@@ -3,10 +3,8 @@ import { ref, watch } from 'vue'
 
 import { useSaveFlash } from '../../composables/use-save-flash'
 import { useSettingsStore } from '../../stores/settings'
-import { useStageStore } from '../../stores/stage'
 
 const settings = useSettingsStore()
-const stage = useStageStore()
 const { saved, flashSaved } = useSaveFlash()
 
 const key = ref(settings.config.desktopAwareness.jevApiKey)
@@ -14,21 +12,11 @@ watch(() => settings.config.desktopAwareness.jevApiKey, (next) => {
   key.value = next
 })
 
-const testState = ref<'idle' | 'connecting' | 'connected' | 'failed'>('idle')
-const testMessage = ref('')
-
 async function save(): Promise<void> {
   await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: key.value.trim() })
   flashSaved()
 }
 
-async function test(): Promise<void> {
-  testState.value = 'connecting'
-  testMessage.value = ''
-  const result = await stage.testDesktopAwareness(key.value.trim())
-  testState.value = result.ok ? 'connected' : 'failed'
-  testMessage.value = result.ok ? 'Connected.' : result.message
-}
 </script>
 
 <template>
@@ -40,18 +28,9 @@ async function test(): Promise<void> {
     </label>
 
     <div class="actions">
-      <button
-        type="button"
-        class="btn"
-        :disabled="testState === 'connecting'"
-        @click="test"
-      >
-        {{ testState === 'connecting' ? 'Connecting…' : 'Test Connection' }}
-      </button>
       <button type="submit" class="btn primary">Save</button>
     </div>
 
-    <p v-if="testMessage" class="status" :class="testState">{{ testMessage }}</p>
     <p v-if="saved" class="status saved">Saved.</p>
   </form>
 </template>

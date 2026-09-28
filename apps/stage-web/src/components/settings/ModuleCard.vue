@@ -29,7 +29,7 @@ const configurable = computed(() => link.value !== '')
 <template>
   <component :is="configurable ? RouterLink : 'div'" class="module" :to="configurable ? link : undefined">
     <div class="text">
-      <div><h3 class="name">{{ module.name }}</h3><span class="category">{{ module.category }}</span></div>
+      <div><h3 class="name">{{ module.name }}</h3></div>
       <p class="description">{{ module.description }}</p>
     </div>
     <div class="meta">
@@ -44,7 +44,6 @@ const configurable = computed(() => link.value !== '')
 a.module:hover { background: var(--hover) }
 .text { min-width: 0 }
 .name { display: inline; font-size: 1em; font-weight: 500 }
-.category { margin-left: .5rem; color: var(--muted); font-size: .75rem }
 .description { color: var(--muted); font-size: .85rem }
 .meta { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: .1rem }
 .provider { color: var(--muted); font-size: .85rem }

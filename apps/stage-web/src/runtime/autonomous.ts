@@ -20,10 +20,8 @@ export interface AutonomousState {
   enabled: boolean
   cooldownStartedAt: number | null
   lastAutonomousAt: number | null
-  lastTrigger: string
   latestContext?: DesktopActivitySnapshot
   scores?: DesktopJudgeScores
-  judgeLatencyMs: number | null
   pending: boolean
   error: string
 }
@@ -36,8 +34,6 @@ export function createAutonomousState(): AutonomousState {
     enabled: false,
     cooldownStartedAt: null,
     lastAutonomousAt: null,
-    lastTrigger: '',
-    judgeLatencyMs: null,
     pending: false,
     error: '',
   }
@@ -75,7 +71,6 @@ export function createAutonomousController(options: {
     if (!enabled) {
       state.latestContext = undefined
       state.scores = undefined
-      state.judgeLatencyMs = null
       state.error = ''
       lastJudgedSignature = ''
     }
@@ -101,11 +96,9 @@ export function createAutonomousController(options: {
       state.latestContext = snapshot.context
       let signature = contextSignature(snapshot.context)
       if (signature !== lastJudgedSignature) {
-        const startedAt = now()
         const judged = await options.judgeDesktop()
         if (!state.enabled || ticket !== revision)
           return
-        state.judgeLatencyMs = now() - startedAt
         state.latestContext = judged.context
         state.scores = judged.scores
         signature = contextSignature(judged.context)
@@ -120,7 +113,6 @@ export function createAutonomousController(options: {
         return
 
       state.lastAutonomousAt = now()
-      state.lastTrigger = `should_interrupt ${scores.shouldInterrupt.toFixed(2)}`
       state.cooldownStartedAt = now()
       lastTriggeredSignature = signature
       options.trigger(createAutonomousStimulus({ activity: judgedContext(state), at: now() }))

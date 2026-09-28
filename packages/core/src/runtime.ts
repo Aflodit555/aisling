@@ -7,9 +7,7 @@ import type { AutonomousStimulus, Stimulus, UserTextStimulus, VisualStimulus } f
 import type { Tool } from './tool'
 
 /**
- * Lifecycle events the runtime publishes for observers (e.g. `/devtools`).
- * They describe the pipeline the platform runs for every stimulus, not an
- * internal status panel for end users.
+ * Lifecycle events the runtime publishes for observers.
  */
 export type RuntimeEvent =
   | { type: 'stimulus:received'; stimulus: Stimulus }
@@ -63,7 +61,7 @@ export interface CharacterRuntimeOptions {
   /**
    * Resolves the active chat provider at turn time. When provided it overrides
    * the character's static capabilities, which lets the app hot-swap the
-   * provider (mock ↔ OpenAI-compatible) without recreating the runtime.
+   * provider without recreating the runtime.
    */
   getChatProvider?: () => ChatProvider | undefined
   /** Resolves the active tools at turn time; empty when none are configured. */

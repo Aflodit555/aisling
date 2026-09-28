@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 
-/** A short-lived "Saved." state, distinct from Test feedback. */
+/** A short-lived "Saved." state. */
 export function useSaveFlash(): { saved: ReturnType<typeof ref<boolean>>; flashSaved: () => void } {
   const saved = ref(false)
   let timer: ReturnType<typeof setTimeout> | undefined

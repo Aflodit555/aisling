@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
 import { createCharacter } from './character'
-import { createMockChatProvider } from './providers/mock-chat-provider'
 import { createCharacterRuntime } from './runtime'
 import { createUserTextStimulus } from './stimulus'
 
 function makeRuntime() {
-  const provider = createMockChatProvider()
+  const provider = {
+    id: 'test',
+    async complete(request: { messages: readonly { role: string; content: unknown }[] }) {
+      const user = [...request.messages].reverse().find(message => message.role === 'user')
+      return { text: `I'm here. You said: “${user?.content ?? ''}”` }
+    },
+  }
   const character = createCharacter({
     id: 'aisling',
     name: 'Aisling',
@@ -33,10 +38,10 @@ describe('character runtime minimal loop', () => {
     const turn = await runtime.ingest(createUserTextStimulus({ source: 'web', text: 'Hello' }))
 
     expect(turn.status).toBe('completed')
-    expect(turn.output).toEqual({ kind: 'text', text: 'I\'m here. (mock) You said: “Hello”' })
+    expect(turn.output).toEqual({ kind: 'text', text: 'I\'m here. You said: “Hello”' })
     expect(runtime.history).toEqual([
       { role: 'user', content: 'Hello' },
-      { role: 'assistant', content: 'I\'m here. (mock) You said: “Hello”' },
+      { role: 'assistant', content: 'I\'m here. You said: “Hello”' },
     ])
     expect(events).toEqual([
       'stimulus:received',

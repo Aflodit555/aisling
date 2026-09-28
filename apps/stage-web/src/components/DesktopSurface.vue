@@ -189,8 +189,8 @@ onUnmounted(() => {
     <div data-desktop-hit class="character-hit" @pointerdown="onCharacterDown" @pointermove="onCharacterMove" @pointerup="stopDrag" @pointercancel="stopDrag" @lostpointercapture="stopDrag" @click="onCharacterClick" />
     <SpeechBubble :text="bubble" :pending="stage.sending || stage.visionProcessing" :searching="stage.searching" :speaking="phase === 'buffering' || speaking" />
     <form v-if="inputVisible" data-desktop-hit class="desktop-composer" :style="controls.composer" @click="hideReturnButton" @submit.prevent="submit">
-      <input v-model="draft" aria-label="给 Aisling 发消息" placeholder="说点什么…" :disabled="stage.sending" @keydown.esc="inputVisible = false">
-      <button type="submit" :disabled="!draft.trim() || stage.sending" aria-label="发送消息"><Icon name="send" :size="16" /></button>
+      <input v-model="draft" aria-label="Message Aisling" placeholder="Say something…" :disabled="stage.sending" @keydown.esc="inputVisible = false">
+      <button type="submit" :disabled="!draft.trim() || stage.sending" aria-label="Send message"><Icon name="send" :size="16" /></button>
     </form>
     <Transition name="return-fade">
       <button v-if="returnVisible" data-desktop-hit class="return-button" :style="controls.back" type="button" @pointerenter="onReturnPointerEnter" @pointerleave="returnHoverStartedAt = 0" @click="returnToStage">

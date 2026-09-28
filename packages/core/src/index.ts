@@ -54,16 +54,12 @@ export type { Tool, ToolCapability } from './tool'
 export { toToolDefinition } from './tool'
 export type { ImageInput, VisionCapability, VisionProvider, VisionRequest, VisualObservation } from './vision'
 
-export { createMockChatProvider } from './providers/mock-chat-provider'
-export type { MockChatProviderOptions } from './providers/mock-chat-provider'
 export type { OpenAICompatibleProviderOptions } from './providers/openai-compatible-provider'
 export {
   createOpenAICompatibleProvider,
   openAIChatCompletion,
   ProviderRequestError,
-  testOpenAICompatibleConnection,
 } from './providers/openai-compatible-provider'
-export type { ConnectionTestResult } from './providers/openai-compatible-provider'
 export type { OpenAICompatibleTranscriptionOptions } from './providers/openai-compatible-transcription-provider'
 export {
   createOpenAICompatibleTranscriptionProvider,
@@ -78,7 +74,7 @@ export type { AlibabaAsrOptions } from './providers/alibaba-asr-provider'
 export { createAlibabaAsrProvider, extractAsrText } from './providers/alibaba-asr-provider'
 export { createWebSearchTool } from './tools/web-search-tool'
 
-export type { CapabilityCategory, CapabilityKind, CapabilityModule, CapabilityStatus } from './registry'
+export type { CapabilityKind, CapabilityModule, CapabilityStatus } from './registry'
 export { describeCapabilityModules } from './registry'
 export type {
   CharacterRuntime,

@@ -47,6 +47,23 @@ let coreLoad: Promise<void> | undefined
 let pendingDtMs = 0
 let stopCursor: (() => void) | undefined
 let pressed: { id: number; x: number; y: number; offsetY: number; moved: boolean } | undefined
+let gazeCenter: Point | undefined
+let lastCursor: { x: number; y: number; at: number } | undefined
+let attentionAt = 0
+let lastMotionAt = 0
+let restUntil = 0
+let following = false
+let near = false
+let idleDelayMs = 750
+const NEAR_GAZE_RANGE = 300
+const FAST_CURSOR_SPEED = 900
+
+function releaseAttention(now: number): void {
+  if (!following) return
+  following = false
+  restUntil = now + 1_200
+  emit('pointer', undefined)
+}
 
 function canvasPoint(x: number, y: number): Point | undefined {
   if (!app)
@@ -57,10 +74,32 @@ function canvasPoint(x: number, y: number): Point | undefined {
   return new Point((x - rect.left) * app.screen.width / rect.width, (y - rect.top) * app.screen.height / rect.height)
 }
 
-function pointAt(x: number, y: number): void {
+function pointAt(x: number, y: number, clicked = false): void {
   const point = canvasPoint(x, y)
-  if (!model || !point)
+  if (!model || !app || !point || !gazeCenter)
     return
+  const now = performance.now()
+  const moved = lastCursor ? Math.hypot(x - lastCursor.x, y - lastCursor.y) : 0
+  const speed = lastCursor ? moved * 1000 / Math.max(16, now - lastCursor.at) : 0
+  lastCursor = { x, y, at: now }
+  const center = model.toGlobal(gazeCenter)
+  const rect = app.view.getBoundingClientRect()
+  const centerX = rect.left + center.x * rect.width / app.screen.width
+  const centerY = rect.top + center.y * rect.height / app.screen.height
+  const distance = Math.hypot(x - centerX, y - centerY)
+  const wasNear = near
+  near = distance <= NEAR_GAZE_RANGE
+  if (wasNear && !near && following)
+    attentionAt = lastMotionAt = now
+  if (!following) {
+    if (!near && now < restUntil && !clicked) return
+    if (!near && !clicked && !(moved >= 12 && speed >= FAST_CURSOR_SPEED)) return
+    following = true
+    attentionAt = lastMotionAt = now
+    idleDelayMs = 750 + Math.random() * 1_250
+  }
+  if (moved >= 3 || clicked)
+    lastMotionAt = now
   model.toModelPosition(point, point)
   // Aim around the face, rather than the centre of the full-body canvas.
   emit('pointer', {
@@ -84,6 +123,8 @@ function onPointerMove(event: PointerEvent): void {
 }
 
 function onPointerDown(event: PointerEvent): void {
+  if (!props.desktop && event.button === 0)
+    pointAt(event.clientX, event.clientY, true)
   if (props.desktop || event.button !== 0 || pressed || !model)
     return
   const point = canvasPoint(event.clientX, event.clientY)
@@ -116,6 +157,10 @@ function onPointerUp(event: PointerEvent): void {
 }
 
 function clearPointer(): void {
+  following = false
+  near = false
+  lastCursor = undefined
+  restUntil = 0
   emit('pointer', undefined)
   if (pressed) {
     pressed = undefined
@@ -253,6 +298,10 @@ function update(): void {
   if (!app || !model)
     return
 
+  const now = performance.now()
+  if (following && !near && (now - attentionAt > 5_000 || now - lastMotionAt > idleDelayMs))
+    releaseAttention(now)
+
   // Only advances the model clock; the Cubism update itself runs at render time.
   pendingDtMs += app.ticker.deltaMS
   model.update(app.ticker.deltaMS)
@@ -305,6 +354,11 @@ async function mountRenderer(): Promise<void> {
     }
 
     model = loaded
+    const head = Object.values(model.internalModel.hitAreas).find(area => /head/i.test(area.id))
+    const bounds = head && model.internalModel.getDrawableBounds(head.index)
+    gazeCenter = bounds
+      ? new Point(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+      : new Point(model.internalModel.originalWidth / 2, model.internalModel.originalHeight / 4)
     // Idle life owns blinking. The native blinker only runs on the one-frame gap
     // between motions and would overwrite the layers' eyes there (a visible flash).
     ;(model.internalModel as Cubism4InternalModel).eyeBlink = undefined
@@ -347,6 +401,10 @@ function destroyRenderer(): void {
   model?.destroy({ children: true, texture: true, baseTexture: true })
   app?.destroy(true, { children: true, texture: true, baseTexture: true })
   model = undefined
+  gazeCenter = undefined
+  lastCursor = undefined
+  following = false
+  near = false
   modelSize = undefined
   app = undefined
 }

@@ -66,6 +66,9 @@ export function createEmotionLayer(options: {
   }))
   const targets = new Set(layers.flatMap(layer => [...layer.expression.map(p => p.id), ...layer.pose.map(([id]) => id)]))
   let ownership = 1
+  let previousJoyWeight = 0
+  let joyEyeWeight = 0
+  let joyEyesRecovering = false
 
   return {
     id: 'emotion',
@@ -76,6 +79,15 @@ export function createEmotionLayer(options: {
       ownership += (options.rig.isGesture() ? -1 : 1) * dtMs / 500
       ownership = Math.max(0, Math.min(1, ownership))
       const weights = options.weights()
+      const joyWeight = weights.joy
+      if (joyWeight < previousJoyWeight)
+        joyEyesRecovering = true
+      else if (joyWeight > previousJoyWeight)
+        joyEyesRecovering = false
+      joyEyeWeight = joyEyesRecovering
+        ? Math.min(joyWeight, joyEyeWeight * Math.exp(-dtMs / 350))
+        : joyWeight
+      previousJoyWeight = joyWeight
       if (layers.every(layer => weights[layer.emotion] * ownership < SILENT))
         return undefined
       const claims = new Map<string, number>()
@@ -84,8 +96,12 @@ export function createEmotionLayer(options: {
         const weight = weights[layer.emotion] * ownership
         if (weight < SILENT)
           continue
-        for (const parameter of layer.expression)
-          claims.set(parameter.id, blendExpression(read(parameter.id), parameter, weight))
+        for (const parameter of layer.expression) {
+          const eyeWeight = layer.emotion === 'joy' && /^ParamEye[LR](Open|Smile)$/.test(parameter.id)
+            ? joyEyeWeight * ownership
+            : weight
+          claims.set(parameter.id, blendExpression(read(parameter.id), parameter, eyeWeight))
+        }
         for (const [id, offset] of layer.pose)
           claims.set(id, read(id) + offset * weight)
       }

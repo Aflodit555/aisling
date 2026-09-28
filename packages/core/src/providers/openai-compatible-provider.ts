@@ -247,23 +247,4 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleProvider
   }
 }
 
-export interface ConnectionTestResult {
-  ok: boolean
-  error?: string
-}
-
-/** Probes the endpoint with a minimal completion and reports whether it is usable. */
-export async function testOpenAICompatibleConnection(
-  options: OpenAICompatibleProviderOptions,
-): Promise<ConnectionTestResult> {
-  try {
-    await openAIChatCompletion(options, { messages: [{ role: 'user', content: 'ping' }] })
-    return { ok: true }
-  }
-  catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    return { ok: false, error: message }
-  }
-}
-
 export type { ToolCall }

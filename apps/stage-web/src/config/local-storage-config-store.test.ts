@@ -27,3 +27,15 @@ it('keeps an explicitly disabled search disabled without retaining its old key',
   expect((await store.get()).webSearch).toEqual({ providerType: 'none' })
   expect(JSON.parse(raw).webSearch).toEqual({ providerType: 'none' })
 })
+
+it('migrates an old mock chat setting without losing its real provider fields', async () => {
+  let raw = JSON.stringify({ ...createDefaultPlatformConfig(), consciousness: {
+    providerType: 'mock', baseUrl: 'https://example.com/v1', apiKey: 'saved-key', model: 'saved-model', temperature: 0.7,
+  } })
+  const store = createLocalStorageConfigStore({ getItem: () => raw, setItem: (_key, value) => { raw = value } })
+  const loaded = await store.get()
+  expect(loaded.consciousness).toEqual({
+    providerType: 'openai-compatible', baseUrl: 'https://example.com/v1', apiKey: 'saved-key', model: 'saved-model', temperature: 0.7,
+  })
+  expect(JSON.parse(raw).consciousness).toEqual(loaded.consciousness)
+})

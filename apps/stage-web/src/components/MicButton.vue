@@ -12,7 +12,7 @@ const emit = defineEmits<{
   (event: 'transcribed', text: string): void
 }>()
 
-// Keep the Stage label short; the full technical error lives in Devtools.
+// Keep the Stage label short; the full technical error is in the button title.
 const shortError = computed(() => {
   const message = error.value
   if (!message)

@@ -100,4 +100,15 @@ describe('idle life', () => {
     for (let i = 0; i < 90; i++) frame = sample()
     expect(Math.abs(frame.get('ParamEyeBallX')!)).toBeLessThan(0.6)
   })
+
+  it('slows before reversing gaze after a sudden pointer turn', () => {
+    let pointer = { x: 0.8, y: 0 }
+    const source = createIdleLife({ eyeIds: EYES, isGesture: () => false, pointer: () => pointer, priority: 20, random: seeded(7) })
+    const sample = () => source.sample({ readBase: () => 0, dtMs: 16 })!.get('ParamEyeBallX')!
+    for (let i = 0; i < 60; i++) sample()
+    pointer = { x: -0.8, y: 0 }
+    expect(sample()).toBeGreaterThan(0.6)
+    for (let i = 0; i < 40; i++) sample()
+    expect(sample()).toBeLessThan(-0.6)
+  })
 })

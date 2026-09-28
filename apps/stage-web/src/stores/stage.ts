@@ -1,4 +1,4 @@
-import type { CharacterOutput, ChatMessage, ImageInput, RuntimeEvent, Stimulus } from '@aisling/core'
+import type { CharacterOutput, ChatMessage, ImageInput, Stimulus } from '@aisling/core'
 import { defineStore } from 'pinia'
 import { computed, reactive, ref, shallowRef } from 'vue'
 
@@ -23,19 +23,6 @@ export interface DisplayMessage {
   content: string
 }
 
-/** Events shown in /devtools: runtime lifecycle plus app-level pipeline events. */
-export type PipelineEvent =
-  | RuntimeEvent
-  | { type: 'vision:started' }
-  | { type: 'vision:completed' }
-  | { type: 'vision:failed'; error: string }
-  | { type: 'hearing:capture_started' }
-  | { type: 'hearing:capture_stopped' }
-  | { type: 'hearing:recognition_started' }
-  | { type: 'hearing:transcript_ready'; transcript: string }
-  | { type: 'hearing:error'; error: string }
-
-const MAX_DEVTOOLS_EVENTS = 200
 const MODEL_CONTEXT_WINDOW = 40
 const MAX_SESSION_MESSAGES = 200
 
@@ -73,7 +60,7 @@ function stimulusToUserMessage(stimulus: Stimulus): { role: 'user'; content: str
 
 /**
  * The single Stage store: owns the runtime instance, the active conversation
- * session, the visible messages, and the Devtools event buffer. UI/persistence
+ * session and the visible messages. UI/persistence
  * history and the runtime's model-context window are kept separate.
  */
 export const useStageStore = defineStore('stage', () => {
@@ -110,7 +97,6 @@ export const useStageStore = defineStore('stage', () => {
   const sending = ref(false)
   const searching = ref(false)
   const visionProcessing = ref(false)
-  const events = ref<PipelineEvent[]>([])
   const lastTurn = shallowRef<{ stimulus: Stimulus; output: CharacterOutput } | undefined>()
   const autonomous = reactive(createAutonomousState())
   const desktopBridgeState = ref<DesktopBridgeState>(hasDesktopBridge() ? 'connected' : 'unavailable')
@@ -133,18 +119,6 @@ export const useStageStore = defineStore('stage', () => {
     if (!refreshDesktopBridgeStatus())
       throw new Error('Desktop bridge is unavailable')
     return window.aislingDesktop!.judgeDesktopContext()
-  }
-
-  /** Tests the TypeSafe / Jev API with the given key (no autonomous trigger). */
-  async function testDesktopAwareness(apiKey: string): Promise<{ ok: boolean; message: string }> {
-    if (!refreshDesktopBridgeStatus() || typeof window.aislingDesktop?.testDesktopAwareness !== 'function')
-      return { ok: false, message: 'Desktop Awareness is available in the Electron app only.' }
-    try {
-      return await window.aislingDesktop.testDesktopAwareness(apiKey)
-    }
-    catch (error) {
-      return { ok: false, message: error instanceof Error ? error.message : String(error) }
-    }
   }
 
   const autonomousController = createAutonomousController({
@@ -196,16 +170,11 @@ export const useStageStore = defineStore('stage', () => {
       }
       return
     }
-    events.value = [...events.value, event].slice(-MAX_DEVTOOLS_EVENTS)
     if (event.type === 'tool:requested' || event.type === 'tool:started')
       searching.value = true
     if (event.type === 'tool:completed' || event.type === 'tool:failed')
       searching.value = false
   })
-
-  function appendEvent(event: PipelineEvent): void {
-    events.value = [...events.value, event].slice(-MAX_DEVTOOLS_EVENTS)
-  }
 
   function persistActiveSession(): void {
     const session = conversationStore.get(activeSessionId.value)
@@ -283,21 +252,17 @@ export const useStageStore = defineStore('stage', () => {
       return
     const provider = settings.activeVisionProvider
     if (!provider) {
-      appendEvent({ type: 'vision:failed', error: 'Vision is not configured' })
       messages.value = [...messages.value, { role: 'error', content: 'Vision is not configured — set it up in Settings.' }]
       return
     }
 
     visionProcessing.value = true
-    appendEvent({ type: 'vision:started' })
     try {
       const observation = await provider.analyze({ image })
-      appendEvent({ type: 'vision:completed' })
       sendStimulus(createWebVisualStimulus(observation.text, caption))
     }
     catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      appendEvent({ type: 'vision:failed', error: message })
       messages.value = [...messages.value, { role: 'error', content: `Vision failed: ${message}` }]
     }
     finally {
@@ -357,13 +322,10 @@ export const useStageStore = defineStore('stage', () => {
     noteHumanInteraction: autonomousController.noteHumanInteraction,
     restoreDesktopAwareness: () => setDesktopAwarenessEnabled(settings.config.desktopAwareness.enabled, false),
     setDesktopAwarenessEnabled,
-    testDesktopAwareness,
     activeSessionId,
     deleteSession,
-    appendEvent,
     character: runtime.character,
     characterName,
-    events,
     lastTurn,
     messages,
     newConversation,

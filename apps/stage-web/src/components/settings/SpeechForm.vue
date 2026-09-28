@@ -7,16 +7,13 @@ import {
   validateAlibabaTtsEndpoint,
   type SpeechConfig,
 } from '@aisling/core'
-import { storeToRefs } from 'pinia'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 
-import { playSpeechResult } from '../../audio/playback'
 import { useSaveFlash } from '../../composables/use-save-flash'
 import { listBrowserVoices, pickPreferredVoice } from '../../providers/browser-speech-provider'
 import { useSettingsStore } from '../../stores/settings'
 
 const settings = useSettingsStore()
-const { voiceMessage, voiceState } = storeToRefs(settings)
 const { saved, flashSaved } = useSaveFlash()
 
 const draft = reactive<SpeechConfig>({ ...settings.config.speech })
@@ -45,21 +42,6 @@ onMounted(() => {
 onUnmounted(() => {
   window.speechSynthesis?.removeEventListener('voiceschanged', refreshVoices)
 })
-
-async function test(): Promise<void> {
-  if (endpointError.value)
-    return
-  const result = await settings.testVoice({ ...draft })
-  if (result.ok && result.audio) {
-    try {
-      await playSpeechResult(result.audio)
-      settings.completeVoicePlayback()
-    }
-    catch (error) {
-      settings.failVoicePlayback(error)
-    }
-  }
-}
 
 function switchTransport(): void {
   if (draft.transport === 'websocket' && !draft.endpoint.trim().startsWith('wss://'))
@@ -134,18 +116,9 @@ async function save(): Promise<void> {
     </template>
 
     <div class="actions">
-      <button
-        type="button"
-        class="btn"
-        :disabled="voiceState === 'connecting'"
-        @click="test"
-      >
-        {{ voiceState === 'connecting' ? 'Synthesizing…' : 'Test Voice' }}
-      </button>
       <button type="submit" class="btn primary">Save</button>
     </div>
 
-    <p v-if="voiceMessage" class="status" :class="voiceState">{{ voiceMessage }}</p>
     <p v-if="saved" class="status saved-state">Saved.</p>
   </form>
 </template>

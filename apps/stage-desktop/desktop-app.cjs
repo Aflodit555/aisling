@@ -1,5 +1,6 @@
-const { app, BaseWindow, WebContentsView, Menu, ipcMain, nativeTheme, screen } = require('electron')
+const { app, BaseWindow, WebContentsView, Menu, Tray, ipcMain, nativeImage, nativeTheme, screen } = require('electron')
 const path = require('node:path')
+const ICON_PATH = path.join(__dirname, 'assets', 'desktop-mode.png')
 const { createDesktopObserver } = require('./desktop-activity.cjs')
 const { createTypeSafeJudge, normalizeConversation } = require('./desktop-judge.cjs')
 const {
@@ -44,6 +45,7 @@ const stageBackground = () => nativeTheme.shouldUseDarkColors ? '#0F0F1A' : '#F4
 
 /** @type {import('electron').BaseWindow | undefined} */
 let mainWindow
+let tray
 /** @type {import('electron').BaseWindow | undefined} */
 let desktopWindow
 /** @type {import('electron').WebContentsView | undefined} */
@@ -58,6 +60,7 @@ let pointerBusy = false
 let pointerKind = 'none'
 let pointerIgnored
 let dragTimer
+let desktopAlwaysOnTop = true
 
 function stopDesktopPointer() {
   stopDesktopDrag()
@@ -242,7 +245,7 @@ function enterDesktopMode() {
   desktopDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
   desktopWindow = new BaseWindow({
     ...desktopBounds(), show: false, frame: false, transparent: true,
-    backgroundColor: '#00000000', alwaysOnTop: true, skipTaskbar: true,
+    backgroundColor: '#00000000', alwaysOnTop: desktopAlwaysOnTop, skipTaskbar: true,
     resizable: false, hasShadow: false, title: 'Aisling Desktop',
   })
   const desktop = desktopWindow
@@ -277,7 +280,15 @@ function enterDesktopMode() {
   switching = false
 }
 
-function returnToStage() {
+function showStage() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+  stageView?.webContents.focus()
+}
+
+function returnToStage(background = false) {
   if (mode !== 'desktop' || !mainWindow || mainWindow.isDestroyed() || !stageView) return
   switching = true
   stopDesktopPointer()
@@ -288,14 +299,27 @@ function returnToStage() {
   resizeView(mainWindow)
   mode = 'stage'
   stageView.webContents.send('aisling:mode', mode)
-  mainWindow.show()
-  mainWindow.focus()
-  stageView.webContents.focus()
+  if (background) mainWindow.minimize()
+  else showStage()
   desktopWindow?.destroy()
   desktopWindow = undefined
   desktopDisplayId = undefined
   switching = false
 }
+
+const trayMenu = () => Menu.buildFromTemplate([
+  { label: 'Always on top', type: 'checkbox', checked: desktopAlwaysOnTop, click: item => {
+    desktopAlwaysOnTop = item.checked
+    desktopWindow?.setAlwaysOnTop(item.checked)
+  } },
+  { label: 'Show Aisling', type: 'checkbox', checked: mode === 'desktop', click: item => {
+    if (item.checked) enterDesktopMode()
+    else returnToStage(true)
+  } },
+  { label: 'Electron stage', click: () => mode === 'desktop' ? returnToStage() : showStage() },
+  { type: 'separator' },
+  { label: 'Quit', click: () => app.quit() },
+])
 
 function stopDesktopAwareness() {
   judgeAbort?.abort()
@@ -326,6 +350,7 @@ async function createWindow(options = {}) {
     minHeight: 560,
     center: true,
     title: 'Aisling',
+    icon: ICON_PATH,
     backgroundColor: stageBackground(),
   })
   const window = mainWindow
@@ -340,7 +365,7 @@ async function createWindow(options = {}) {
   window.on('restore', () => resizeView(window))
   window.setMenu(Menu.buildFromTemplate([
     { label: 'File', submenu: [
-      { label: 'Desktop Mode', icon: path.join(__dirname, 'assets', 'desktop-mode.png'), click: enterDesktopMode },
+      { label: 'Desktop Mode', icon: nativeImage.createFromPath(ICON_PATH).resize({ width: 16, height: 16 }), click: enterDesktopMode },
       { type: 'separator' }, { role: 'quit' },
     ] },
     { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
@@ -428,6 +453,11 @@ async function startDesktop(options = {}) {
   const diagnostics = options.diagnostics ?? true
   await app.whenReady()
   diagnostic(diagnostics, 'app ready')
+  if (!tray) {
+    tray = new Tray(nativeImage.createFromPath(ICON_PATH).resize({ width: 32, height: 32 }))
+    tray.setToolTip('Aisling')
+    tray.on('right-click', () => tray.popUpContextMenu(trayMenu()))
+  }
   registerAppDiagnostics(diagnostics)
   registerStorageIpc()
   screen.on('display-metrics-changed', () => {
@@ -553,14 +583,6 @@ async function startDesktop(options = {}) {
         if (emotionAbort === abort)
           emotionAbort = undefined
       }
-    })
-    ipcMain.handle('aisling:desktop-awareness:test', async (event, apiKey) => {
-      if (!trusted(event))
-        throw new Error('Untrusted desktop awareness request')
-      const key = typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : resolveJevApiKey()
-      if (!key)
-        throw new Error('No Jev API Key configured. Configure it or set TYPESAFE_API_KEY.')
-      return semanticJudge.test(key)
     })
   }
   return createWindow({ ...options, stageUrl: target.url })

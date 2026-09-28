@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createOpenAICompatibleProvider, testOpenAICompatibleConnection } from './openai-compatible-provider'
+import { createOpenAICompatibleProvider } from './openai-compatible-provider'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -114,23 +114,4 @@ describe('openai-compatible provider', () => {
     })
   })
 
-  it('reports connection success and failure', async () => {
-    const ok = await captureFetch(() => jsonResponse({ choices: [{ message: { content: 'pong' } }] }))
-    await expect(testOpenAICompatibleConnection({
-      baseUrl: 'https://x/v1',
-      apiKey: 'k',
-      model: 'm',
-      fetchImpl: ok.fetchImpl,
-    })).resolves.toEqual({ ok: true })
-
-    const failed = await captureFetch(() => jsonResponse({ error: { message: 'nope' } }, 401))
-    const result = await testOpenAICompatibleConnection({
-      baseUrl: 'https://x/v1',
-      apiKey: 'k',
-      model: 'm',
-      fetchImpl: failed.fetchImpl,
-    })
-    expect(result.ok).toBe(false)
-    expect(result.error).toContain('401')
-  })
 })

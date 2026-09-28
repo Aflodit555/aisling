@@ -8,8 +8,6 @@ const route = useRoute()
 const title = computed(() => {
   if (route.path.startsWith('/settings'))
     return 'Settings'
-  if (route.path.startsWith('/devtools'))
-    return 'Devtools'
   return 'Stage'
 })
 </script>
@@ -20,7 +18,6 @@ const title = computed(() => {
     <nav>
       <RouterLink to="/">Stage</RouterLink>
       <RouterLink to="/settings">Settings</RouterLink>
-      <RouterLink to="/devtools">Devtools</RouterLink>
     </nav>
     <button type="button" class="icon-btn theme-toggle" aria-label="Toggle theme" title="Toggle theme" @click="toggleTheme" />
   </header>

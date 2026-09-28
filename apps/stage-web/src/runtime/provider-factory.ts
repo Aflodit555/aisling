@@ -2,7 +2,6 @@ import { createBrowserSpeechProvider } from '../providers/browser-speech-provide
 import {
   createAlibabaAsrProvider,
   createAlibabaSpeechProvider,
-  createMockChatProvider,
   createOpenAICompatibleProvider,
   createOpenAICompatibleTranscriptionProvider,
   createOpenAICompatibleVisionProvider,
@@ -27,9 +26,6 @@ import {
  * sees the provider/tool interfaces.
  */
 export function buildChatProvider(config: ConsciousnessConfig): ChatProvider | undefined {
-  if (config.providerType === 'mock')
-    return createMockChatProvider({ id: 'mock', delayMs: 450 })
-
   if (config.providerType === 'openai-compatible') {
     if (!config.baseUrl.trim() || !config.apiKey.trim() || !config.model.trim())
       return undefined

@@ -1,20 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import { useStageStore } from '../stores/stage'
-import { SHOULD_INTERRUPT_THRESHOLD } from '../runtime/autonomous'
 
 const stage = useStageStore()
 const settings = useSettingsStore()
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | undefined
-onMounted(() => { timer = setInterval(() => { now.value = Date.now() }, 1000) })
-onUnmounted(() => clearInterval(timer))
-const cooldown = computed(() => stage.autonomous.cooldownStartedAt === null
-  ? 0
-  : Math.max(0, Math.ceil((stage.autonomous.cooldownStartedAt + settings.config.desktopAwareness.cooldownSeconds * 1000 - now.value) / 1000)))
-const score = (value?: number) => value === undefined ? '—' : value.toFixed(2)
-
 function onToggle(event: Event): void {
   void stage.setDesktopAwarenessEnabled((event.currentTarget as HTMLInputElement).checked)
 }
@@ -61,15 +50,6 @@ function saveCooldown(event: Event): void {
         <strong>{{ settings.config.desktopAwareness.cooldownSeconds }} s</strong>
       </label>
     </div>
-    <h3 class="debug-title">Debug</h3>
-    <dl v-if="stage.desktopAvailable">
-      <dt>App</dt><dd>{{ stage.autonomous.latestContext?.focus.app || '—' }}</dd>
-      <dt>Title</dt><dd>{{ stage.autonomous.latestContext?.focus.title || '—' }}</dd>
-      <dt>should_interrupt</dt><dd>{{ score(stage.autonomous.scores?.shouldInterrupt) }} / ≥ {{ SHOULD_INTERRUPT_THRESHOLD }}</dd>
-      <dt>Last trigger</dt><dd>{{ stage.autonomous.lastTrigger || '—' }}</dd>
-      <dt>Judge latency</dt><dd>{{ stage.autonomous.judgeLatencyMs === null ? '—' : `${stage.autonomous.judgeLatencyMs} ms` }}</dd>
-      <dt>Cooldown</dt><dd>{{ cooldown }}s remaining / {{ settings.config.desktopAwareness.cooldownSeconds }}s</dd>
-    </dl>
     <p v-if="stage.autonomous.error" class="error" role="status">{{ stage.autonomous.error }}</p>
   </section>
 </template>
@@ -87,11 +67,5 @@ h3 { font-family: var(--display); font-size: 1rem; font-weight: 600 }
 .form .field { grid-template-columns: 10rem minmax(0, 1fr) auto }
 .form .field > strong { grid-column: 3; min-width: 3rem; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums }
 input[type="range"] { width: 100%; margin: 0 }
-.debug-title { margin: 1.5rem 0 .5rem; color: var(--muted); font-family: inherit; font-size: .85rem; font-weight: 500 }
-dl { display: grid; grid-template-columns: 10rem minmax(0, 1fr); font-family: var(--mono); font-size: .85rem }
-dt, dd { padding: .4rem 0 }
-dt { color: var(--muted); padding-right: 1rem }
-dd { overflow-wrap: anywhere }
-:is(dt, dd):nth-child(n+3) { border-top: 1px solid var(--rule) }
 .error { margin-top: .75rem; color: var(--danger); font-size: .85rem; overflow-wrap: anywhere }
 </style>

@@ -4,7 +4,6 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'stage', component: () => import('./pages/index.vue') },
-    { path: '/devtools', name: 'devtools', component: () => import('./pages/devtools.vue') },
     {
       path: '/settings',
       component: () => import('./layouts/settings.vue'),

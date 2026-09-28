@@ -26,8 +26,8 @@ export function createAislingCharacter(): Character {
 
 /**
  * Assembles the phase-1 Aisling runtime. The chat provider and the active
- * tools are resolved at turn time, so the app can hot-swap mock ↔ real
- * providers (and mount/unmount the web-search tool) without recreating the
+ * tools are resolved at turn time, so the app can update providers and
+ * mount/unmount the web-search tool without recreating the
  * runtime.
  */
 export function createAislingRuntime(deps: {

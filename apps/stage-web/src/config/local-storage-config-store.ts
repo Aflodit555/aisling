@@ -33,7 +33,7 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             providerType: parsed.webSearch?.providerType === 'none' ? 'none' : 'duckduckgo',
           }
           const config = {
-            consciousness: { ...defaults.consciousness, ...parsed.consciousness },
+            consciousness: { ...defaults.consciousness, ...parsed.consciousness, providerType: 'openai-compatible' as const },
             desktopAwareness: {
               enabled: parsed.desktopAwareness?.enabled ?? defaults.desktopAwareness.enabled,
               cooldownSeconds: parsed.desktopAwareness?.cooldownSeconds ?? defaults.desktopAwareness.cooldownSeconds,
@@ -46,7 +46,8 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             vision: { ...defaults.vision, ...parsed.vision },
             webSearch,
           }
-          if (Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey')
+          if (parsed.consciousness?.providerType !== 'openai-compatible'
+            || Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey')
             || (parsed.webSearch && (parsed.webSearch.providerType !== webSearch.providerType || Object.keys(parsed.webSearch).some(key => key !== 'providerType'))))
             storage.setItem(KEY, JSON.stringify(config))
           return config
@@ -56,7 +57,7 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
         const legacy = storage.getItem(LEGACY_CONSCIOUSNESS_KEY)
         if (legacy) {
           const old = JSON.parse(legacy) as Record<string, unknown>
-          return { ...defaults, consciousness: { ...defaults.consciousness, ...old } }
+          return { ...defaults, consciousness: { ...defaults.consciousness, ...old, providerType: 'openai-compatible' } }
         }
 
         return defaults

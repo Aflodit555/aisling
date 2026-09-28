@@ -164,10 +164,7 @@ defineExpose({ interact })
               ? `${name} is thinking…`
               : `${name} is here.` }}
     </p>
-    <button v-if="rendererState === 'ready' && !desktop" class="btn drive-test" type="button" @click="interact">
-      Test movement
-    </button>
-    <p v-else-if="rendererState === 'error' && !desktop" class="renderer-error" :title="rendererError">
+    <p v-if="rendererState === 'error' && !desktop" class="renderer-error" :title="rendererError">
       Live2D unavailable · using fallback
     </p>
   </section>
@@ -192,7 +189,6 @@ defineExpose({ interact })
 .status, .renderer-state, .renderer-error { color: var(--muted) }
 .renderer-state { position: absolute; font-size: .85rem }
 .renderer-error { margin-top: .75rem; font-size: .85rem }
-.drive-test { margin-top: .75rem }
 
 @keyframes breathe { 0%, 100% { transform: scale(1.06); opacity: .85 } 50% { transform: scale(1.14); opacity: 1 } }
 </style>

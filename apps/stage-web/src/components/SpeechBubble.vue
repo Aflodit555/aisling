@@ -43,12 +43,12 @@ onUnmounted(() => clearTimeout(timer))
 </script>
 
 <template>
-  <div ref="element" data-desktop-hit class="speech-bubble" :hidden="!visible" role="status" aria-live="polite" :aria-label="content === 'thinking' ? '正在思考' : undefined">
+  <div ref="element" data-desktop-hit class="speech-bubble" :hidden="!visible" role="status" aria-live="polite" :aria-label="content === 'thinking' ? 'Thinking' : undefined">
     <p v-if="content === 'searching'" class="doing">
       <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
         <circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" />
       </svg>
-      <span>正在搜索…</span>
+      <span>Searching…</span>
     </p>
     <span v-else-if="content === 'line'" class="line">{{ text }}</span>
   </div>

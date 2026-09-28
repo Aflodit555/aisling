@@ -1,15 +1,11 @@
 <script setup lang="ts">
 import { DEFAULT_ALIBABA_ASR_MODEL, DEFAULT_OPENAI_BASE_URL, DEFAULT_TRANSCRIPTION_MODEL, validateAlibabaWorkspaceBaseUrl, type HearingConfig } from '@aisling/core'
-import { storeToRefs } from 'pinia'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 
 import { useSaveFlash } from '../../composables/use-save-flash'
-import { useHearingStore } from '../../stores/hearing'
 import { useSettingsStore } from '../../stores/settings'
 
 const settings = useSettingsStore()
-const hearing = useHearingStore()
-const { error, transcript } = storeToRefs(hearing)
 const { saved, flashSaved } = useSaveFlash()
 
 const draft = reactive<HearingConfig>({ ...settings.config.hearing })
@@ -20,7 +16,6 @@ watch(() => settings.config.hearing, (next) => {
 const isConfigured = computed(() => draft.providerType !== 'none')
 const isAlibaba = computed(() => draft.providerType === 'alibaba')
 const endpointError = computed(() => (isAlibaba.value ? validateAlibabaWorkspaceBaseUrl(draft.baseUrl) : undefined))
-const testState = ref<'idle' | 'recording' | 'recognizing' | 'success' | 'failed'>('idle')
 
 watch(() => draft.providerType, (next) => {
   if (next === 'alibaba' && (!draft.model || draft.model === DEFAULT_TRANSCRIPTION_MODEL))
@@ -28,25 +23,6 @@ watch(() => draft.providerType, (next) => {
   if (next === 'openai-compatible' && draft.model === DEFAULT_ALIBABA_ASR_MODEL)
     draft.model = DEFAULT_TRANSCRIPTION_MODEL
 })
-
-async function test(): Promise<void> {
-  if (endpointError.value)
-    return
-  testState.value = 'recording'
-  try {
-    await hearing.startRecording()
-  }
-  catch {
-    testState.value = 'failed'
-    return
-  }
-
-  setTimeout(async () => {
-    testState.value = 'recognizing'
-    const text = await hearing.stopAndTranscribe({ ...draft })
-    testState.value = text ? 'success' : 'failed'
-  }, 3000)
-}
 
 async function save(): Promise<void> {
   if (endpointError.value)
@@ -88,14 +64,9 @@ async function save(): Promise<void> {
     </template>
 
     <div class="actions">
-      <button type="button" class="btn" :disabled="testState === 'recording' || testState === 'recognizing'" @click="test">
-        {{ testState === 'recording' ? 'Recording…' : testState === 'recognizing' ? 'Recognizing…' : 'Test Hearing' }}
-      </button>
       <button type="submit" class="btn primary">Save</button>
     </div>
 
-    <p v-if="testState === 'success'" class="status success">Heard: “{{ transcript }}”</p>
-    <p v-else-if="testState === 'failed'" class="status failed">{{ error || 'Recognition failed.' }}</p>
     <p v-if="saved" class="status saved">Saved.</p>
   </form>
 </template>

@@ -34,7 +34,7 @@ export interface ChatCompletionResult {
 }
 
 /**
- * The port every concrete chat backend implements. Mock, OpenAI-compatible,
+ * The port every concrete chat backend implements. OpenAI-compatible,
  * Alibaba, … are interchangeable implementations; the runtime depends only on
  * this interface and never on a specific vendor (Provider replacement test).
  */

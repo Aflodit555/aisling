@@ -27,7 +27,6 @@ contextBridge.exposeInMainWorld('aislingDesktop', {
   setDesktopAwareness: enabled => ipcRenderer.invoke('aisling:desktop-awareness:set', enabled),
   readDesktopContext: () => ipcRenderer.invoke('aisling:desktop-awareness:read'),
   judgeDesktopContext: () => ipcRenderer.invoke('aisling:desktop-awareness:judge'),
-  testDesktopAwareness: apiKey => ipcRenderer.invoke('aisling:desktop-awareness:test', apiKey),
   judgeEmotion: conversation => ipcRenderer.invoke('aisling:emotion:judge', conversation),
   storage: {
     getItem: key => ipcRenderer.sendSync('aisling:storage:get', key),

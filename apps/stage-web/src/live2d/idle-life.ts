@@ -75,7 +75,9 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
   // Gaze fixation target and smoothed eye/head positions.
   let nextGazeMs = between(1_200, 3_500)
   let gazeTarget = { x: 0, y: 0 }
+  let hadPointer = false
   const eye = { x: 0, y: 0 }
+  const eyeVelocity = { x: 0, y: 0 }
   const head = { x: 0, y: 0 }
 
   // Posture rest point and smoothed offsets.
@@ -84,11 +86,48 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
   const posture = { lean: 0, sway: 0, tilt: 0 }
 
   function pickGaze(): { x: number; y: number } {
-    // Mostly look at the viewer; now and then glance aside.
-    if (random() < 0.55)
+    // Mostly look at the viewer; occasionally glance sideways or down.
+    const choice = random()
+    if (choice < 0.55)
       return { x: between(-0.06, 0.06), y: between(-0.04, 0.06) }
+    if (choice >= 0.85)
+      return { x: between(-0.18, 0.18), y: between(-0.4, -0.22) }
     const side = random() < 0.5 ? -1 : 1
     return { x: side * between(0.25, 0.55), y: between(-0.3, 0.2) }
+  }
+
+  function moveEyes(gaze: { x: number; y: number }, dtMs: number): void {
+    // The older Aisling focus used bounded speed and acceleration, so a reversal
+    // slows before turning instead of snapping to each new cursor position.
+    const dx = gaze.x - eye.x
+    const dy = gaze.y - eye.y
+    const distance = Math.hypot(dx, dy)
+    if (distance < 0.01) {
+      eye.x = gaze.x
+      eye.y = gaze.y
+      eyeVelocity.x = eyeVelocity.y = 0
+      return
+    }
+    const dt = Math.min(dtMs, 50)
+    const maxSpeed = 5.33 * dt / 1000
+    const maxAcceleration = maxSpeed * dt / 150
+    let ax = maxSpeed * dx / distance - eyeVelocity.x
+    let ay = maxSpeed * dy / distance - eyeVelocity.y
+    const acceleration = Math.hypot(ax, ay)
+    if (acceleration > maxAcceleration) {
+      ax *= maxAcceleration / acceleration
+      ay *= maxAcceleration / acceleration
+    }
+    eyeVelocity.x += ax
+    eyeVelocity.y += ay
+    const speed = Math.hypot(eyeVelocity.x, eyeVelocity.y)
+    const stoppingSpeed = (Math.sqrt(maxAcceleration ** 2 + 8 * maxAcceleration * distance) - maxAcceleration) / 2
+    if (speed > stoppingSpeed) {
+      eyeVelocity.x *= stoppingSpeed / speed
+      eyeVelocity.y *= stoppingSpeed / speed
+    }
+    eye.x += eyeVelocity.x
+    eye.y += eyeVelocity.y
   }
 
   function advance(dtMs: number): number {
@@ -113,13 +152,17 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
       nextGazeMs = between(1_200, 3_500)
     }
     const pointer = options.pointer?.()
+    if (hadPointer && !pointer) {
+      gazeTarget = { x: between(-0.04, 0.04), y: between(-0.03, 0.04) }
+      nextGazeMs = between(700, 1_200)
+    }
+    hadPointer = !!pointer
     const gaze = pointer
       ? { x: Math.max(-0.8, Math.min(0.8, pointer.x)), y: Math.max(-0.65, Math.min(0.65, pointer.y)) }
       : gazeTarget
-    eye.x = approach(eye.x, gaze.x, dtMs, 90)
-    eye.y = approach(eye.y, gaze.y, dtMs, 90)
-    head.x = approach(head.x, gaze.x * (pointer ? 0.65 : 0.4), dtMs, 400)
-    head.y = approach(head.y, gaze.y * (pointer ? 0.65 : 0.4), dtMs, 400)
+    moveEyes(gaze, dtMs)
+    head.x = approach(head.x, eye.x * (pointer ? 0.65 : 0.4), dtMs, 400)
+    head.y = approach(head.y, eye.y * (pointer ? 0.65 : 0.4), dtMs, 400)
 
     nextPostureMs -= dtMs
     if (nextPostureMs <= 0) {

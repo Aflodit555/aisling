@@ -59,6 +59,11 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
     await wait(500)
     const left = await contents.executeJavaScript('window.__interactionSmoke.renderer.model.internalModel.coreModel.getParameterValueById("ParamEyeBallX")')
     assert.ok(right > left + 0.2, 'gaze must follow pointer direction')
+    await wait(2_200)
+    assert.ok(await contents.executeJavaScript('window.__interactionSmoke.character.pointer'), 'Stage gaze must hold a pointer near the head')
+    await contents.executeJavaScript(`window.dispatchEvent(new PointerEvent('pointermove', { clientX: ${head.x + 800}, clientY: ${head.y} }))`)
+    await wait(2_200)
+    assert.equal(await contents.executeJavaScript('window.__interactionSmoke.character.pointer'), undefined, 'Stage gaze must leave a stopped distant pointer')
 
     const gestures = await contents.executeJavaScript(`(async () => {
       const { renderer, character, started } = window.__interactionSmoke
@@ -115,12 +120,36 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
   const realCursor = screen.getCursorScreenPoint
   let cursor = { x: bounds.x - 1000, y: bounds.y + 150 }
   screen.getCursorScreenPoint = () => cursor
-  await wait(350)
-  const outsideLeft = await contents.executeJavaScript('window.__interactionSmoke.renderer.model.internalModel.coreModel.getParameterValueById("ParamEyeBallX")')
+  await wait(2_200)
+  assert.equal(await contents.executeJavaScript('window.__interactionSmoke.character.pointer'), undefined, 'desktop gaze must leave a stopped distant cursor')
   cursor = { x: bounds.x + 1400, y: bounds.y + 150 }
+  await wait(100)
+  assert.ok(await contents.executeJavaScript('window.__interactionSmoke.character.pointer'), 'desktop gaze must notice fast movement anywhere on screen')
+  await wait(2_200)
+  assert.equal(await contents.executeJavaScript('window.__interactionSmoke.character.pointer'), undefined, 'desktop gaze must leave a stopped full-screen cursor')
+  const desktopHead = await contents.executeJavaScript(`(() => {
+    const { model, app } = window.__interactionSmoke.renderer
+    const area = model.internalModel.hitAreas.HitAreaHead
+    const bounds = model.internalModel.getDrawableBounds(area.index)
+    const point = model.toGlobal({ x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 })
+    const rect = app.view.getBoundingClientRect()
+    return { x: Math.round(rect.left + point.x * rect.width / app.screen.width), y: Math.round(rect.top + point.y * rect.height / app.screen.height) }
+  })()`)
+  cursor = { x: bounds.x + desktopHead.x + 120, y: bounds.y + desktopHead.y }
   await wait(350)
-  const outsideRight = await contents.executeJavaScript('window.__interactionSmoke.renderer.model.internalModel.coreModel.getParameterValueById("ParamEyeBallX")')
-  assert.ok(outsideRight > outsideLeft + 0.2, 'desktop gaze must accept cursor positions outside the window')
+  assert.ok(await contents.executeJavaScript('window.__interactionSmoke.character.pointer'), 'desktop gaze must hold a nearby cursor')
+  await wait(2_200)
+  assert.ok(await contents.executeJavaScript('window.__interactionSmoke.character.pointer'), 'desktop gaze must not return to autonomous gaze near the head')
+  cursor = { x: bounds.x + desktopHead.x - 120, y: bounds.y + desktopHead.y }
+  await wait(350)
+  const nearbyLeft = await contents.executeJavaScript('window.__interactionSmoke.renderer.model.internalModel.coreModel.getParameterValueById("ParamEyeBallX")')
+  cursor = { x: bounds.x + desktopHead.x + 120, y: bounds.y + desktopHead.y }
+  await wait(350)
+  const nearbyRight = await contents.executeJavaScript('window.__interactionSmoke.renderer.model.internalModel.coreModel.getParameterValueById("ParamEyeBallX")')
+  assert.ok(nearbyRight > nearbyLeft + 0.2, 'desktop gaze must follow a nearby cursor')
+  cursor = { x: bounds.x + desktopHead.x + 500, y: bounds.y + desktopHead.y }
+  await wait(2_200)
+  assert.equal(await contents.executeJavaScript('window.__interactionSmoke.character.pointer'), undefined, 'desktop gaze must leave a stopped cursor')
   const tap = { x: Math.round(bounds.width / 2), y: 190 }
   cursor = { x: bounds.x + tap.x, y: bounds.y + tap.y }
   await contents.executeJavaScript(`(() => {

@@ -8,7 +8,6 @@
 export type ChatProviderType = 'openai-compatible'
 export type SpeechProviderType = 'none' | 'browser' | 'alibaba'
 export type SpeechTransport = 'websocket' | 'http'
-export type HearingProviderType = 'none' | 'openai-compatible' | 'alibaba'
 export type VisionProviderType = 'none' | 'openai-compatible'
 export type WebSearchProviderType = 'none' | 'duckduckgo'
 
@@ -28,7 +27,8 @@ export interface DesktopAwarenessConfig {
 }
 
 export interface SpeechConfig {
-  /** `none` disables speech output; the character stays text-only. */
+  enabled: boolean
+  /** Selected speech provider; `none` means no provider is configured. */
   providerType: SpeechProviderType
   apiKey: string
   model: string
@@ -39,16 +39,9 @@ export interface SpeechConfig {
   endpoint: string
 }
 
-export interface HearingConfig {
-  /** `none` disables voice input. */
-  providerType: HearingProviderType
-  baseUrl: string
-  apiKey: string
-  model: string
-}
-
 export interface VisionConfig {
-  /** `none` disables image input. */
+  enabled: boolean
+  /** Selected vision provider; `none` means no provider is configured. */
   providerType: VisionProviderType
   baseUrl: string
   apiKey: string
@@ -56,7 +49,8 @@ export interface VisionConfig {
 }
 
 export interface WebSearchConfig {
-  /** `none` disables the web-search tool. */
+  enabled: boolean
+  /** Selected search provider; `none` means no provider is configured. */
   providerType: WebSearchProviderType
 }
 
@@ -64,7 +58,6 @@ export interface PlatformConfig {
   consciousness: ConsciousnessConfig
   desktopAwareness: DesktopAwarenessConfig
   speech: SpeechConfig
-  hearing: HearingConfig
   vision: VisionConfig
   webSearch: WebSearchConfig
 }
@@ -72,11 +65,9 @@ export interface PlatformConfig {
 export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
 export const DEFAULT_ALIBABA_TTS_MODEL = 'qwen-audio-3.0-tts-flash'
 export const DEFAULT_ALIBABA_TTS_VOICE = 'longanhuan_v3.6'
-export const DEFAULT_TRANSCRIPTION_MODEL = 'whisper-1'
 export const DEFAULT_VISION_MODEL = 'gpt-4o-mini'
 export const DEFAULT_ALIBABA_TTS_BASE_URL = 'https://dashscope.aliyuncs.com/api/v1'
 export const DEFAULT_ALIBABA_TTS_WEBSOCKET_URL = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference'
-export const DEFAULT_ALIBABA_ASR_MODEL = 'qwen-audio-3.0-asr-flash'
 
 export function createDefaultConsciousnessConfig(): ConsciousnessConfig {
   return { providerType: 'openai-compatible', baseUrl: DEFAULT_OPENAI_BASE_URL, apiKey: '', model: '', temperature: 1 }
@@ -87,6 +78,7 @@ export function createDefaultPlatformConfig(): PlatformConfig {
     consciousness: createDefaultConsciousnessConfig(),
     desktopAwareness: { enabled: false, cooldownSeconds: 30, jevApiKey: '' },
     speech: {
+      enabled: false,
       providerType: 'none',
       apiKey: '',
       model: DEFAULT_ALIBABA_TTS_MODEL,
@@ -94,44 +86,18 @@ export function createDefaultPlatformConfig(): PlatformConfig {
       transport: 'websocket',
       endpoint: DEFAULT_ALIBABA_TTS_WEBSOCKET_URL,
     },
-    hearing: {
-      providerType: 'none',
-      baseUrl: DEFAULT_OPENAI_BASE_URL,
-      apiKey: '',
-      model: DEFAULT_TRANSCRIPTION_MODEL,
-    },
     vision: {
+      enabled: false,
       providerType: 'none',
       baseUrl: DEFAULT_OPENAI_BASE_URL,
       apiKey: '',
       model: DEFAULT_VISION_MODEL,
     },
     webSearch: {
+      enabled: true,
       providerType: 'duckduckgo',
     },
   }
-}
-
-/**
- * Validates the Alibaba workspace HTTP API base URL. Native TTS/ASR only accept
- * `https://<workspace>.<region>.maas.aliyuncs.com/api/v1`-style bases; a
- * WebSocket or OpenAI-compatible endpoint here is a misconfiguration.
- */
-export function validateAlibabaWorkspaceBaseUrl(value: string): string | undefined {
-  const trimmed = value.trim()
-  if (!trimmed)
-    return 'Workspace API Base URL is required.'
-
-  if (trimmed.startsWith('wss://') || trimmed.startsWith('ws://'))
-    return 'Alibaba Native TTS/ASR requires the workspace HTTP API base URL, not a WebSocket endpoint.'
-
-  if (trimmed.includes('/api-ws/') || trimmed.includes('/compatible-mode/'))
-    return 'Alibaba Native TTS/ASR requires the workspace HTTP API base URL, not a WebSocket or OpenAI-compatible endpoint.'
-
-  if (!/^https?:\/\//i.test(trimmed))
-    return 'Enter a full HTTP(S) workspace API base URL, e.g. https://<workspace>.cn-beijing.maas.aliyuncs.com/api/v1'
-
-  return undefined
 }
 
 /** Validates the endpoint contract for the selected Alibaba TTS transport. */

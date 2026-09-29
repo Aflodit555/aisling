@@ -3,6 +3,8 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import type { ConversationSession } from '../conversation/conversation-store'
 import Icon from './Icon.vue'
+import { t, language } from '../i18n'
+import { DEFAULT_SESSION_TITLE } from '../conversation/conversation-store'
 
 const props = defineProps<{
   sessions: ConversationSession[]
@@ -26,7 +28,7 @@ onMounted(() => document.addEventListener('click', onDocumentClick))
 onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 
 const activeTitle = computed(() => (
-  props.sessions.find(session => session.id === props.activeId)?.title ?? 'New conversation'
+  props.sessions.find(session => session.id === props.activeId)?.title ?? DEFAULT_SESSION_TITLE
 ))
 
 function formatTime(timestamp: number): string {
@@ -34,15 +36,15 @@ function formatTime(timestamp: number): string {
   const now = new Date()
   const sameDay = date.toDateString() === now.toDateString()
   return sameDay
-    ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : date.toLocaleDateString()
+    ? date.toLocaleTimeString(language.value, { hour: '2-digit', minute: '2-digit' })
+    : date.toLocaleDateString(language.value)
 }
 </script>
 
 <template>
   <div ref="root" class="brow">
     <button type="button" class="trigger" :aria-expanded="open" @click="open = !open">
-      <span class="title">{{ activeTitle }}</span>
+      <span class="title">{{ t(activeTitle) }}</span>
       <Icon name="chevron" :size="16" />
     </button>
 
@@ -54,13 +56,13 @@ function formatTime(timestamp: number): string {
         :class="{ active: session.id === activeId }"
         @click="emit('select', session.id); open = false"
       >
-        <span class="item-title">{{ session.title }}</span>
+        <span class="item-title">{{ t(session.title) }}</span>
         <span class="time">{{ formatTime(session.updatedAt) }}</span>
         <button
           type="button"
           class="delete"
-          title="Delete conversation"
-          aria-label="Delete conversation"
+          :title="t('Delete conversation')"
+          :aria-label="t('Delete conversation')"
           @click.stop="emit('delete', session.id)"
         >
           <Icon name="trash" :size="15" />

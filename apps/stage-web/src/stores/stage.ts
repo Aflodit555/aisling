@@ -137,19 +137,26 @@ export const useStageStore = defineStore('stage', () => {
       autonomousController.setEnabled(false)
     if (!desktopAvailable.value) {
       if (persist)
-        await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled })
+        await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled: false })
       autonomous.error = 'Desktop Awareness is available in the Electron app only.'
+      return
+    }
+    if (enabled && (!settings.config.desktopAwareness.jevApiKey.trim() || !settings.activeChatProvider)) {
+      autonomousController.setEnabled(false)
+      await window.aislingDesktop!.setDesktopAwareness(false)
+      if (persist || settings.config.desktopAwareness.enabled)
+        await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled: false })
+      autonomous.error = !settings.config.desktopAwareness.jevApiKey.trim() ? 'Configure the API key before enabling.' : 'Configure Consciousness before enabling.'
       return
     }
     // Start/stop IPC is issued before persistence so OFF cancels collection and
     // the in-flight judge immediately instead of waiting on storage.
-    const [status] = await Promise.all([
-      window.aislingDesktop!.setDesktopAwareness(enabled),
-      persist ? settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled }) : Promise.resolve(),
-    ])
+    const status = await window.aislingDesktop!.setDesktopAwareness(enabled)
     if (ticket !== awarenessRevision)
       return
     autonomousController.setEnabled(status.enabled)
+    if (persist)
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled: status.enabled })
     autonomous.error = status.error ?? ''
   }
 

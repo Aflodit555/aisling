@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import type { ImageInput } from '@aisling/core'
 import { ref } from 'vue'
 
@@ -12,7 +13,6 @@ import CharacterDisplayControl from './CharacterDisplayControl.vue'
 import ConversationBrow from './ConversationBrow.vue'
 import ImageInputButton from './ImageInput.vue'
 import MessageList from './MessageList.vue'
-import MicButton from './MicButton.vue'
 
 defineProps<{
   messages: DisplayMessage[]
@@ -23,7 +23,6 @@ defineProps<{
 
 const emit = defineEmits<{
   (event: 'send', text: string): void
-  (event: 'speech', text: string): void
   (event: 'image', payload: { image: ImageInput; caption: string }): void
   (event: 'select-session', id: string): void
   (event: 'new-conversation'): void
@@ -60,9 +59,8 @@ function onSend(text: string): void {
         @select="selectedImage = $event"
         @remove="selectedImage = undefined"
       />
-      <MicButton @transcribed="emit('speech', $event)" />
       <CharacterDisplayControl />
-      <button type="button" class="icon-btn" title="New conversation" aria-label="New conversation" @click="emit('new-conversation')">
+      <button type="button" class="icon-btn" :title="t('New conversation')" :aria-label="t('New conversation')" @click="emit('new-conversation')">
         <Icon name="plus" />
       </button>
       <Composer :disabled="sending" @send="onSend" />

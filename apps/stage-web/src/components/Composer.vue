@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import { ref } from 'vue'
 
 import Icon from './Icon.vue'
@@ -28,11 +29,11 @@ function submit(): void {
     <textarea
       v-model="draft"
       rows="1"
-      placeholder="Say something to Aisling…"
+      :placeholder="t('Say something to Aisling…')"
       :disabled="disabled"
       @keydown.enter.exact.prevent="submit"
     />
-    <button type="submit" class="icon-btn send" aria-label="Send" :disabled="disabled || !draft.trim()">
+    <button type="submit" class="icon-btn send" :aria-label="t('Send')" :disabled="disabled || !draft.trim()">
       <Icon name="send" />
     </button>
   </form>

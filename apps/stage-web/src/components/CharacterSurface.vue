@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import { storeToRefs } from 'pinia'
 import { computed, ref, shallowRef, watch } from 'vue'
 
@@ -150,22 +151,22 @@ defineExpose({ interact })
         <div class="halo" />
         <div class="avatar">{{ name.slice(0, 1) }}</div>
       </template>
-      <p v-if="rendererState === 'loading'" class="renderer-state">Loading character…</p>
+      <p v-if="rendererState === 'loading'" class="renderer-state">{{ t('Loading character…') }}</p>
     </div>
     <h2 v-if="!desktop" class="name">{{ name }}</h2>
     <p v-if="!desktop" class="status">
       {{ looking
-        ? `${name} is looking…`
+        ? `${name} ${t('is looking…')}`
         : searching
-          ? `${name} is searching…`
+          ? `${name} ${t('is searching…')}`
           : speaking
-            ? `${name} is speaking…`
+            ? `${name} ${t('is speaking…')}`
             : active
-              ? `${name} is thinking…`
-              : `${name} is here.` }}
+              ? `${name} ${t('is thinking…')}`
+              : `${name} ${t('is here.')}` }}
     </p>
     <p v-if="rendererState === 'error' && !desktop" class="renderer-error" :title="rendererError">
-      Live2D unavailable · using fallback
+      {{ t('Live2D unavailable · using fallback') }}
     </p>
   </section>
 </template>

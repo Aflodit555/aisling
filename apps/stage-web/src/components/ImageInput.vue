@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import { ref } from 'vue'
 
 import { readImageFile, validateImageFile, type SelectedImage } from '../image/file'
@@ -39,15 +40,15 @@ async function onChange(event: Event): Promise<void> {
   <div class="image-input">
     <input ref="input" type="file" accept="image/png,image/jpeg,image/webp" hidden @change="onChange" />
     <div v-if="image" class="preview">
-      <img :src="image.previewUrl" alt="attachment" />
-      <button type="button" class="remove" title="Remove image" aria-label="Remove image" @click="emit('remove')">
+      <img :src="image.previewUrl" :alt="t('attachment')" />
+      <button type="button" class="remove" :title="t('Remove image')" :aria-label="t('Remove image')" @click="emit('remove')">
         <Icon name="close" :size="12" />
       </button>
     </div>
 
-    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="error" class="error">{{ t(error) }}</p>
 
-    <button type="button" class="icon-btn" title="Attach an image" aria-label="Attach an image" @click="pick">
+    <button type="button" class="icon-btn" :title="t('Attach an image')" :aria-label="t('Attach an image')" @click="pick">
       <Icon name="image" />
     </button>
   </div>

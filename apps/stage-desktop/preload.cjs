@@ -6,6 +6,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 // Electron owns a single stable data file in userData.
 contextBridge.exposeInMainWorld('aislingDesktop', {
   getMode: () => ipcRenderer.invoke('aisling:mode:get'),
+  setLanguage: language => ipcRenderer.send('aisling:language:set', language),
   returnToStage: () => ipcRenderer.invoke('aisling:mode:return'),
   resizeDesktop: (width, height) => ipcRenderer.send('aisling:desktop-size', width, height),
   setDragging: enabled => ipcRenderer.send('aisling:desktop-drag', enabled),

@@ -9,7 +9,7 @@ const {
   registerStageScheme,
   registerStageProtocol,
 } = require('./desktop-protocol.cjs')
-const { registerStorageIpc, readStoredConfig } = require('./desktop-store.cjs')
+const { registerStorageIpc, readStoredConfig, readStoredLanguage } = require('./desktop-store.cjs')
 
 // Must run before app.whenReady(): this makes `aisling://` a standard, secure
 // origin so the built renderer keeps working localStorage + history routing.
@@ -307,19 +307,32 @@ function returnToStage(background = false) {
   switching = false
 }
 
+const desktopText = (en, zh) => readStoredLanguage() === 'zh-CN' ? zh : en
 const trayMenu = () => Menu.buildFromTemplate([
-  { label: 'Always on top', type: 'checkbox', checked: desktopAlwaysOnTop, click: item => {
+  { label: desktopText('Always on top', '始终置顶'), type: 'checkbox', checked: desktopAlwaysOnTop, click: item => {
     desktopAlwaysOnTop = item.checked
     desktopWindow?.setAlwaysOnTop(item.checked)
   } },
-  { label: 'Show Aisling', type: 'checkbox', checked: mode === 'desktop', click: item => {
+  { label: desktopText('Show Aisling', '显示 Aisling'), type: 'checkbox', checked: mode === 'desktop', click: item => {
     if (item.checked) enterDesktopMode()
     else returnToStage(true)
   } },
-  { label: 'Electron stage', click: () => mode === 'desktop' ? returnToStage() : showStage() },
+  { label: desktopText('Electron stage', '打开舞台'), click: () => mode === 'desktop' ? returnToStage() : showStage() },
   { type: 'separator' },
-  { label: 'Quit', click: () => app.quit() },
+  { label: desktopText('Quit', '退出'), click: () => app.quit() },
 ])
+
+function refreshWindowMenu() {
+  mainWindow?.setMenu(Menu.buildFromTemplate([
+    { label: desktopText('File', '文件'), submenu: [
+      { label: desktopText('Desktop Mode', '桌面模式'), icon: nativeImage.createFromPath(ICON_PATH).resize({ width: 16, height: 16 }), click: enterDesktopMode },
+      { type: 'separator' }, { label: desktopText('Quit', '退出'), role: 'quit' },
+    ] },
+    { label: desktopText('Edit', '编辑'), role: 'editMenu' },
+    { label: desktopText('View', '视图'), role: 'viewMenu' },
+    { label: desktopText('Window', '窗口'), role: 'windowMenu' },
+  ]))
+}
 
 function stopDesktopAwareness() {
   judgeAbort?.abort()
@@ -363,13 +376,7 @@ async function createWindow(options = {}) {
   resizeView(window)
   window.on('resize', () => resizeView(window))
   window.on('restore', () => resizeView(window))
-  window.setMenu(Menu.buildFromTemplate([
-    { label: 'File', submenu: [
-      { label: 'Desktop Mode', icon: nativeImage.createFromPath(ICON_PATH).resize({ width: 16, height: 16 }), click: enterDesktopMode },
-      { type: 'separator' }, { role: 'quit' },
-    ] },
-    { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
-  ]))
+  refreshWindowMenu()
   const contents = stageView.webContents
   diagnostic(diagnostics, 'Stage window created')
 
@@ -483,6 +490,10 @@ async function startDesktop(options = {}) {
     const trusted = event => Boolean(stageView && event.sender === stageView.webContents
       && event.senderFrame === stageView.webContents.mainFrame
       && stageOriginOf(event.senderFrame.url) === allowedOrigin)
+    ipcMain.on('aisling:language:set', (event, language) => {
+      if (!trusted(event) || (language !== 'en' && language !== 'zh-CN')) return
+      refreshWindowMenu()
+    })
     ipcMain.on('aisling:desktop-size', (event, width, height) => {
       if (!trusted(event) || !Number.isSafeInteger(width) || !Number.isSafeInteger(height)
         || width < 1 || height < 1 || mode !== 'desktop' || !desktopWindow) return

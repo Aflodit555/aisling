@@ -21,3 +21,19 @@ it('serves DuckDuckGo Lite through the web search relay without a key', async ()
     await server.close()
   }
 })
+
+it('does not expose voice-input relay endpoints', async () => {
+  const server = await createServer({ configFile: false, plugins: [aislingRelayPlugin()], server: { host: '127.0.0.1', port: 0 } })
+  try {
+    await server.listen()
+    const address = server.httpServer?.address()
+    if (!address || typeof address === 'string') throw new Error('No test server address')
+    for (const path of ['/api/relay/alibaba-asr', '/api/relay/transcription']) {
+      const response = await fetch(`http://127.0.0.1:${address.port}${path}`, { method: 'POST' })
+      expect(response.status).toBe(404)
+    }
+  }
+  finally {
+    await server.close()
+  }
+})

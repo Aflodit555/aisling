@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import { nextTick, ref, watch } from 'vue'
 
 import type { DisplayMessage } from '../stores/stage'
@@ -28,7 +29,7 @@ watch(
 
 <template>
   <div ref="container" class="messages">
-    <p v-if="messages.length === 0" class="empty">Aisling is waiting. Say hello.</p>
+    <p v-if="messages.length === 0" class="empty">{{ t('Aisling is waiting. Say hello.') }}</p>
     <div
       v-for="(message, index) in messages"
       :key="index"
@@ -36,9 +37,9 @@ watch(
       :class="`is-${message.role}`"
     >
       <span class="role">
-        {{ message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Aisling' : 'Error' }}
+        {{ t(message.role === 'user' ? 'You' : message.role === 'assistant' ? 'Aisling' : 'Error') }}
       </span>
-      <p class="content">{{ message.content }}</p>
+      <p class="content">{{ message.role === 'error' ? t(message.content) : message.content }}</p>
     </div>
   </div>
 </template>

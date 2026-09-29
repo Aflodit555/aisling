@@ -14,11 +14,11 @@ export interface StimulusBase<K extends string> {
   readonly kind: K
   /** Epoch milliseconds when the stimulus was created. */
   readonly at: number
-  /** Optional adapter-supplied tags (e.g. `inputMode: 'speech'`); never required by the runtime. */
+  /** Optional adapter-supplied tags; never required by the runtime. */
   readonly meta?: Readonly<Record<string, unknown>>
 }
 
-/** A user typed or spoke a message that should reach the character. */
+/** A user wrote a message that should reach the character. */
 export interface UserTextStimulus extends StimulusBase<'user-text'> {
   /** The raw text the user produced. */
   readonly text: string

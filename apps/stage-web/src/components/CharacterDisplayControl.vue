@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import { storeToRefs } from 'pinia'
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
@@ -40,19 +41,19 @@ onBeforeUnmount(() => {
     <button
       type="button"
       class="icon-btn"
-      title="Character display"
-      aria-label="Character display"
+      :title="t('Character display')"
+      :aria-label="t('Character display')"
       :aria-expanded="open"
       @click="open = !open"
     >
       <Icon name="character" :size="20" />
     </button>
 
-    <section v-if="open" class="pop panel" aria-label="Character display controls">
-      <header>Character</header>
+    <section v-if="open" class="pop panel" :aria-label="t('Character display controls')">
+      <header>{{ t('Character') }}</header>
 
       <label>
-        <span>Size</span>
+        <span>{{ t('Size') }}</span>
         <input
           type="range"
           :min="limits.scale.min"
@@ -64,7 +65,7 @@ onBeforeUnmount(() => {
         <output>{{ Math.round(transform.scale * 100) }}%</output>
       </label>
       <label>
-        <span>Vertical</span>
+        <span>{{ t('Vertical') }}</span>
         <input
           type="range"
           :min="Math.ceil(limits.offset.min)"
@@ -77,7 +78,7 @@ onBeforeUnmount(() => {
         <output>{{ Math.round(-transform.offsetY) }}</output>
       </label>
 
-      <button type="button" class="btn reset" @click="presentation.resetTransform()">Reset</button>
+      <button type="button" class="btn reset" @click="presentation.resetTransform()">{{ t('Reset') }}</button>
     </section>
   </div>
 </template>

@@ -1,19 +1,16 @@
 import {
   createDefaultPlatformConfig,
-  describeCapabilityModules,
   type ChatProvider,
   type ConsciousnessConfig,
   type DesktopAwarenessConfig,
-  type HearingConfig,
-  type HearingProvider,
   type PlatformConfig,
-  type RecognitionAudio,
   type SpeechConfig,
   type SpeechProvider,
   type Tool,
   type VisionConfig,
   type VisionProvider,
   type WebSearchConfig,
+  validateAlibabaTtsEndpoint,
 } from '@aisling/core'
 import { defineStore } from 'pinia'
 import { computed, ref, shallowRef } from 'vue'
@@ -22,7 +19,6 @@ import { createLocalStorageConfigStore } from '../config/local-storage-config-st
 import { resolvePersistentStorage } from '../storage/desktop-storage'
 import {
   buildChatProvider,
-  buildHearingProvider,
   buildSpeechProvider,
   buildVisionProvider,
   buildWebSearchTool,
@@ -36,25 +32,37 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const activeChatProvider = shallowRef<ChatProvider | undefined>(undefined)
   const activeSpeechProvider = shallowRef<SpeechProvider | undefined>(undefined)
-  const activeHearingProvider = shallowRef<HearingProvider | undefined>(undefined)
   const activeVisionProvider = shallowRef<VisionProvider | undefined>(undefined)
   const activeWebSearchTool = shallowRef<Tool | undefined>(undefined)
 
   const activeTools = computed(() => (activeWebSearchTool.value ? [activeWebSearchTool.value] : []))
 
-  const modules = computed(() => describeCapabilityModules(config.value))
+  const speechReady = computed(() => (config.value.speech.providerType === 'browser' && typeof window !== 'undefined' && Boolean(window.speechSynthesis))
+    || (config.value.speech.providerType === 'alibaba' && Boolean(config.value.speech.apiKey.trim() && config.value.speech.model.trim() && config.value.speech.voice.trim()) && !validateAlibabaTtsEndpoint(config.value.speech.endpoint, config.value.speech.transport)))
+  const visionReady = computed(() => config.value.vision.providerType === 'openai-compatible'
+    && Boolean(config.value.vision.baseUrl.trim() && config.value.vision.apiKey.trim() && config.value.vision.model.trim()))
+  const webSearchReady = computed(() => config.value.webSearch.providerType === 'duckduckgo')
+
 
   function applyConfig(next: PlatformConfig): void {
     config.value = next
     activeChatProvider.value = buildChatProvider(next.consciousness)
     activeSpeechProvider.value = buildSpeechProvider(next.speech)
-    activeHearingProvider.value = buildHearingProvider(next.hearing)
     activeVisionProvider.value = buildVisionProvider(next.vision)
     activeWebSearchTool.value = buildWebSearchTool(next.webSearch)
   }
 
   async function load(): Promise<void> {
     applyConfig(await configStore.get())
+    if ((config.value.speech.enabled && !speechReady.value)
+      || (config.value.vision.enabled && !visionReady.value)
+      || (config.value.webSearch.enabled && !webSearchReady.value)) {
+      config.value.speech.enabled &&= speechReady.value
+      config.value.vision.enabled &&= visionReady.value
+      config.value.webSearch.enabled &&= webSearchReady.value
+      await persist()
+      applyConfig(config.value)
+    }
     loaded.value = true
   }
 
@@ -80,43 +88,36 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
-  async function saveSpeech(next: SpeechConfig): Promise<void> {
-    config.value = { ...config.value, speech: next }
+  async function saveSpeech(next: Omit<SpeechConfig, 'enabled'>): Promise<void> {
+    config.value = { ...config.value, speech: { ...next, enabled: config.value.speech.enabled } }
+    if (!speechReady.value) config.value.speech.enabled = false
     await persist()
     applyConfig(config.value)
   }
 
-  async function saveHearing(next: HearingConfig): Promise<void> {
-    config.value = { ...config.value, hearing: next }
+  async function saveVision(next: Omit<VisionConfig, 'enabled'>): Promise<void> {
+    config.value = { ...config.value, vision: { ...next, enabled: config.value.vision.enabled } }
+    if (!visionReady.value) config.value.vision.enabled = false
     await persist()
     applyConfig(config.value)
   }
 
-  async function saveVision(next: VisionConfig): Promise<void> {
-    config.value = { ...config.value, vision: next }
+  async function saveWebSearch(next: Omit<WebSearchConfig, 'enabled'>): Promise<void> {
+    config.value = { ...config.value, webSearch: { ...next, enabled: config.value.webSearch.enabled } }
+    if (!webSearchReady.value) config.value.webSearch.enabled = false
     await persist()
     applyConfig(config.value)
   }
 
-  async function saveWebSearch(next: WebSearchConfig): Promise<void> {
-    config.value = { ...config.value, webSearch: next }
+  async function setModuleEnabled(module: 'speech' | 'vision' | 'webSearch', enabled: boolean): Promise<void> {
+    if (enabled && !(module === 'speech' ? speechReady.value : module === 'vision' ? visionReady.value : webSearchReady.value)) return
+    config.value = { ...config.value, [module]: { ...config.value[module], enabled } }
     await persist()
     applyConfig(config.value)
-  }
-
-  /** Recognizes audio with the current hearing config. */
-  async function transcribe(audio: RecognitionAudio): Promise<string> {
-    const provider = activeHearingProvider.value
-    if (!provider)
-      throw new Error('Hearing is not configured')
-
-    const result = await provider.recognize({ audio })
-    return result.text
   }
 
   return {
     activeChatProvider,
-    activeHearingProvider,
     activeSpeechProvider,
     activeTools,
     activeVisionProvider,
@@ -124,13 +125,14 @@ export const useSettingsStore = defineStore('settings', () => {
     config,
     load,
     loaded,
-    modules,
     saveConsciousness,
     saveDesktopAwareness,
-    saveHearing,
     saveSpeech,
     saveVision,
     saveWebSearch,
-    transcribe,
+    setModuleEnabled,
+    speechReady,
+    visionReady,
+    webSearchReady,
   }
 })

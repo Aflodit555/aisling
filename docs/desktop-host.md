@@ -16,7 +16,7 @@ Conversation 有单一且可解释的数据归属。Browser Stage 保留为开�
 - `stage-web` 的 Settings 与 Conversation 都用 `window.localStorage`
   （`aisling.config.v1` / `aisling.conversations.v1` + legacy key），origin 决定了
   数据归属：浏览器与 Electron 物理上是两份独立存储。
-- Alibaba TTS/ASR 与 transcription 经 Vite 的 `/api/relay/*` 插件转发
+- 当时的 Alibaba TTS/ASR 与 transcription 经 Vite 的 `/api/relay/*` 插件转发
   （`configureServer` / `configurePreviewServer`），只在 dev/preview 存在。
 - `smoke.cjs` 依赖 `http://localhost:5174` 且用独立临时 userData。
 
@@ -87,9 +87,9 @@ pnpm dev             # 浏览器 Stage 开发入口（保留）
 
 自动更新、installer 深度定制、代码签名、开机自启、system tray、多窗口、
 crash reporter、telemetry、SQLite/ORM 迁移、Electron framework 重构、Live2D、
-Autonomous silence 重构、Interaction Policy 重构、ASR 修复、新 Provider。
+Autonomous silence 重构、Interaction Policy 重构、新 Provider。
 
-已知 built 路径限制：Alibaba TTS/ASR 与 transcription 依赖 Vite `/api/relay/*`，
+已知 built 路径限制：Alibaba TTS 依赖 Vite `/api/relay/*`，
 built renderer 下这些 relay 尚未由 Electron main 提供（本轮不要求发布 installer，
 未扩 scope）。Browser Speech、OpenAI-compatible Chat/Vision 不经 relay，不受影响。
 

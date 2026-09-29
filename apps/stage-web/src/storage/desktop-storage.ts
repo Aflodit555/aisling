@@ -16,6 +16,7 @@ const AISLING_KEYS = [
   'aisling.conversations.v1',
   'aisling.conversation.v1',
   'aisling.presentation.character-display.v1',
+  'aisling.language.v1',
 ]
 
 function desktopBridge(): PersistentStorage | undefined {

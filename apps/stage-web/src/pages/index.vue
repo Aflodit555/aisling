@@ -2,7 +2,6 @@
 import type { ImageInput } from '@aisling/core'
 import { storeToRefs } from 'pinia'
 
-import { createHearingStimulus } from '../adapter/hearing'
 import CharacterSurface from '../components/CharacterSurface.vue'
 import InteractionDock from '../components/InteractionDock.vue'
 import { useSpeechStore } from '../stores/speech'
@@ -12,10 +11,6 @@ const stage = useStageStore()
 const speech = useSpeechStore()
 const { activeSessionId, characterName, messages, searching, sending, sessions, visionProcessing } = storeToRefs(stage)
 const { speaking } = storeToRefs(speech)
-
-function onSpeech(text: string): void {
-  stage.sendStimulus(createHearingStimulus(text))
-}
 
 function onImage(payload: { image: ImageInput; caption: string }): void {
   void stage.sendImage(payload.image, payload.caption)
@@ -37,7 +32,6 @@ function onImage(payload: { image: ImageInput; caption: string }): void {
       :sessions="sessions"
       :active-session-id="activeSessionId"
       @send="stage.send"
-      @speech="onSpeech"
       @image="onImage"
       @select-session="stage.switchSession"
       @new-conversation="stage.newConversation"

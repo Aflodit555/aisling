@@ -1,20 +1,22 @@
 <script setup lang="ts">
-import { storeToRefs } from 'pinia'
-import { computed } from 'vue'
-import { RouterLink, RouterView, useRouter } from 'vue-router'
+import { t } from '../i18n'
+import { RouterLink, RouterView } from 'vue-router'
 
-import { useSettingsStore } from '../stores/settings'
-
-const router = useRouter()
-const { modules } = storeToRefs(useSettingsStore())
-const pages = computed(() => modules.value.filter(module => router.hasRoute(`settings-${module.kind}`)))
+const pages = [
+  { kind: 'consciousness', name: 'Consciousness' },
+  { kind: 'speech', name: 'Speech' },
+  { kind: 'vision', name: 'Vision' },
+  { kind: 'web-search', name: 'Web Search' },
+  { kind: 'desktop-awareness', name: 'Desktop Awareness' },
+]
 </script>
 
 <template>
   <div class="settings">
     <aside>
-      <RouterLink to="/settings">Overview</RouterLink>
-      <RouterLink v-for="module in pages" :key="module.kind" :to="`/settings/${module.kind}`">{{ module.name }}</RouterLink>
+      <RouterLink to="/settings/general">{{ t('General') }}</RouterLink>
+      <div class="group-title">{{ t('Modules') }}</div>
+      <RouterLink v-for="module in pages" :key="module.kind" :to="`/settings/${module.kind}`">{{ t(module.name) }}</RouterLink>
     </aside>
     <RouterView v-slot="{ Component }">
       <Transition name="page" mode="out-in">
@@ -29,6 +31,7 @@ const pages = computed(() => modules.value.filter(module => router.hasRoute(`set
 .settings { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; scroll-padding-top: 3rem; display: grid; grid-template-columns: 13rem minmax(0, 40rem); gap: 2rem; align-content: start; padding: 0 1.5rem 1.5rem }
 /* align-self start: a stretched grid item has no room to stick. */
 aside { position: sticky; top: 0; align-self: start; display: flex; flex-direction: column; gap: .25rem }
+.group-title { margin: 1.25rem 0 .25rem; padding: 0 1rem; color: var(--muted); font-size: .9rem; font-weight: 600; letter-spacing: .04em }
 /* Negative scroll-margin cancels the title padding: the pinned aside is always in view, so focusing a link must not scroll the form. */
 aside a { scroll-margin-top: -3rem; display: flex; align-items: center; gap: .75rem; padding: .5rem 1rem; border-radius: 6px; font-weight: 500; color: var(--muted); white-space: nowrap; transition: background .15s, color .15s, transform .1s }
 aside a:hover { color: var(--fg); background: var(--hover) }

@@ -11,7 +11,7 @@ const LEGACY_CONSCIOUSNESS_KEY = 'aisling.consciousness.config.v1'
 
 /**
  * localStorage-backed `ConfigStore` for the unified platform config. All module
- * settings (consciousness/speech/hearing) share one store; the API keys live
+ * settings share one store; the API keys live
  * only in the browser and never in source control. Swap the storage
  * implementation behind the same `ConfigStore` interface to move to a file or
  * service later.
@@ -31,6 +31,7 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             ?? (storedSpeech?.endpoint?.startsWith('http://') || storedSpeech?.endpoint?.startsWith('https://') ? 'http' : defaults.speech.transport)
           const webSearch: PlatformConfig['webSearch'] = {
             providerType: parsed.webSearch?.providerType === 'none' ? 'none' : 'duckduckgo',
+            enabled: parsed.webSearch?.enabled ?? parsed.webSearch?.providerType !== 'none',
           }
           const config = {
             consciousness: { ...defaults.consciousness, ...parsed.consciousness, providerType: 'openai-compatible' as const },
@@ -41,14 +42,15 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
                 ? parsed.desktopAwareness.jevApiKey
                 : defaults.desktopAwareness.jevApiKey,
             },
-            speech: { ...defaults.speech, ...parsed.speech, transport: migratedTransport },
-            hearing: { ...defaults.hearing, ...parsed.hearing },
-            vision: { ...defaults.vision, ...parsed.vision },
+            speech: { ...defaults.speech, ...parsed.speech, enabled: storedSpeech?.enabled ?? (storedSpeech?.providerType !== undefined && storedSpeech.providerType !== 'none'), transport: migratedTransport },
+            vision: { ...defaults.vision, ...parsed.vision, enabled: parsed.vision?.enabled ?? (parsed.vision?.providerType !== undefined && parsed.vision.providerType !== 'none') },
             webSearch,
           }
-          if (parsed.consciousness?.providerType !== 'openai-compatible'
+          if (Object.hasOwn(parsed, 'hearing')
+            || parsed.speech?.enabled === undefined || parsed.vision?.enabled === undefined || parsed.webSearch?.enabled === undefined
+            || parsed.consciousness?.providerType !== 'openai-compatible'
             || Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey')
-            || (parsed.webSearch && (parsed.webSearch.providerType !== webSearch.providerType || Object.keys(parsed.webSearch).some(key => key !== 'providerType'))))
+            || (parsed.webSearch && (parsed.webSearch.providerType !== webSearch.providerType || Object.keys(parsed.webSearch).some(key => key !== 'providerType' && key !== 'enabled'))))
             storage.setItem(KEY, JSON.stringify(config))
           return config
         }

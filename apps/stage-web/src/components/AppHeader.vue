@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from '../i18n'
 import { computed } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
@@ -14,12 +15,12 @@ const title = computed(() => {
 
 <template>
   <header class="app-header">
-    <h1>{{ title }}</h1>
+    <h1>{{ t(title) }}</h1>
     <nav>
-      <RouterLink to="/">Stage</RouterLink>
-      <RouterLink to="/settings">Settings</RouterLink>
+      <RouterLink to="/">{{ t('Stage') }}</RouterLink>
+      <RouterLink to="/settings">{{ t('Settings') }}</RouterLink>
     </nav>
-    <button type="button" class="icon-btn theme-toggle" aria-label="Toggle theme" title="Toggle theme" @click="toggleTheme" />
+    <button type="button" class="icon-btn theme-toggle" :aria-label="t('Toggle theme')" :title="t('Toggle theme')" @click="toggleTheme" />
   </header>
 </template>
 

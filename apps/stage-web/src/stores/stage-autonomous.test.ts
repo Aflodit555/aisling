@@ -36,6 +36,7 @@ describe('Stage desktop awareness integration', () => {
   it.each([true, false])('reuses chat, conversation, and speech when speech enabled=%s', async (speechEnabled) => {
     const settings = useSettingsStore()
     await settings.load()
+    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: 'test-key' })
     const complete = vi.fn(async (_request: ChatCompletionRequest) => ({ text: 'That answer looks suspiciously tidy.' }))
     settings.activeChatProvider = { id: 'test', complete }
     const synthesize = vi.fn(async () => ({ spoken: true }))
@@ -58,6 +59,7 @@ describe('Stage desktop awareness integration', () => {
   it('stops immediately and invalidates an in-flight judge', async () => {
     const settings = useSettingsStore()
     await settings.load()
+    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: 'test-key' })
     const complete = vi.fn(async () => ({ text: 'Too late.' }))
     settings.activeChatProvider = { id: 'test', complete }
     const stage = useStageStore()
@@ -90,5 +92,6 @@ describe('Stage desktop awareness integration', () => {
     expect(stage.desktopBridgeState).toBe('unavailable')
     expect(stage.autonomous.enabled).toBe(false)
     expect(stage.autonomous.error).toContain('Electron')
+    expect(settings.config.desktopAwareness.enabled).toBe(false)
   })
 })

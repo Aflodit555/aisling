@@ -15,7 +15,7 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 
 - Runtime foundation (Stimulus → Runtime → Character → Provider → Output)
 - Character / Stimulus domain model
-- Capability registry: Consciousness, Speech, Hearing, Vision, Web Search
+- Settings pages: General, Consciousness, Speech, Vision, Web Search, Desktop Awareness
 - Provider Settings UI for model configuration
 - Multi-conversation persistence (localStorage)
 - Browser / System Speech (`speechSynthesis`)
@@ -24,9 +24,6 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 
 **Verified end-to-end:** Consciousness, Vision, Browser Speech, Alibaba TTS,
 conversation persistence.
-
-**Known limitations:** Hearing / Alibaba ASR is implemented but not yet fully
-verified end-to-end against the real provider.
 
 ## Quick start
 
@@ -72,8 +69,8 @@ setup, and keys are never required in source code or the terminal.
 apps/stage-web   — Vue 3 + Vite Stage (/settings modules)
 apps/stage-desktop — minimal Windows Electron host (foreground app/title + idle IPC)
 packages/core    — framework-agnostic runtime: Stimulus, Character, Capability,
-                   Provider, Output, PlatformConfig/ConfigStore, capability
-                   registry, tool domain, and chat/speech/hearing/vision/search providers
+                   Provider, Output, PlatformConfig/ConfigStore, tool domain,
+                   and chat/speech/vision/search providers
 ```
 
 ## Configuration & key boundary

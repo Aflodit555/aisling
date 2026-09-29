@@ -1,6 +1,6 @@
 /**
  * Vision is a perception capability: an image enters, a textual observation
- * leaves. Like Hearing, it is split into boundaries that stay independent:
+ * leaves. It is split into boundaries that stay independent:
  *
  *   Image Source    (file picker / future camera)  — lives in the app adapter
  *   Vision Provider (VisionProvider)               — image → observation text

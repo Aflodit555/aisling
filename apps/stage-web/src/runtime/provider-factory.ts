@@ -1,16 +1,12 @@
 import { createBrowserSpeechProvider } from '../providers/browser-speech-provider'
 import {
-  createAlibabaAsrProvider,
   createAlibabaSpeechProvider,
   createOpenAICompatibleProvider,
-  createOpenAICompatibleTranscriptionProvider,
   createOpenAICompatibleVisionProvider,
   createDuckDuckGoLiteWebSearchProvider,
   createWebSearchTool,
   type ChatProvider,
   type ConsciousnessConfig,
-  type HearingConfig,
-  type HearingProvider,
   type SpeechConfig,
   type SpeechProvider,
   type Tool,
@@ -41,6 +37,7 @@ export function buildChatProvider(config: ConsciousnessConfig): ChatProvider | u
 }
 
 export function buildSpeechProvider(config: SpeechConfig): SpeechProvider | undefined {
+  if (!config.enabled) return undefined
   if (config.providerType === 'browser')
     return createBrowserSpeechProvider({ voice: config.voice })
 
@@ -59,33 +56,8 @@ export function buildSpeechProvider(config: SpeechConfig): SpeechProvider | unde
   return undefined
 }
 
-export function buildHearingProvider(config: HearingConfig): HearingProvider | undefined {
-  if (!config.baseUrl.trim() || !config.apiKey.trim() || !config.model.trim())
-    return undefined
-
-  if (config.providerType === 'alibaba') {
-    return createAlibabaAsrProvider({
-      endpoint: config.baseUrl,
-      apiKey: config.apiKey,
-      model: config.model,
-      transport: 'relay',
-    })
-  }
-
-  if (config.providerType === 'openai-compatible') {
-    return createOpenAICompatibleTranscriptionProvider({
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      model: config.model,
-      // Browsers often cannot reach the endpoint (CORS); use the thin relay.
-      transport: 'relay',
-    })
-  }
-
-  return undefined
-}
-
 export function buildVisionProvider(config: VisionConfig): VisionProvider | undefined {
+  if (!config.enabled) return undefined
   if (config.providerType !== 'openai-compatible')
     return undefined
   if (!config.baseUrl.trim() || !config.apiKey.trim() || !config.model.trim())
@@ -98,6 +70,7 @@ export function buildVisionProvider(config: VisionConfig): VisionProvider | unde
 }
 
 export function buildWebSearchProvider(config: WebSearchConfig): WebSearchProvider | undefined {
+  if (!config.enabled) return undefined
   if (config.providerType !== 'duckduckgo')
     return undefined
   return createDuckDuckGoLiteWebSearchProvider()

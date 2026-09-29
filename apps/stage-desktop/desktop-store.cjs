@@ -64,6 +64,10 @@ function readStoredConfig() {
   }
 }
 
+function readStoredLanguage() {
+  return readStore()['aisling.language.v1'] === 'zh-CN' ? 'zh-CN' : 'en'
+}
+
 let registered = false
 
 function registerStorageIpc() {
@@ -92,4 +96,4 @@ function registerStorageIpc() {
   })
 }
 
-module.exports = { CHANNELS, registerStorageIpc, readStoredConfig }
+module.exports = { CHANNELS, registerStorageIpc, readStoredConfig, readStoredLanguage }

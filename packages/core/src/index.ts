@@ -5,7 +5,6 @@ export type {
   ConfigStore,
   ConsciousnessConfig,
   DesktopAwarenessConfig,
-  HearingConfig,
   PlatformConfig,
   SpeechConfig,
   SpeechTransport,
@@ -16,18 +15,14 @@ export {
   createDefaultConsciousnessConfig,
   createDefaultPlatformConfig,
   createMemoryConfigStore,
-  validateAlibabaWorkspaceBaseUrl,
   validateAlibabaTtsEndpoint,
-  DEFAULT_ALIBABA_ASR_MODEL,
   DEFAULT_ALIBABA_TTS_BASE_URL,
   DEFAULT_ALIBABA_TTS_WEBSOCKET_URL,
   DEFAULT_ALIBABA_TTS_MODEL,
   DEFAULT_ALIBABA_TTS_VOICE,
   DEFAULT_OPENAI_BASE_URL,
-  DEFAULT_TRANSCRIPTION_MODEL,
   DEFAULT_VISION_MODEL,
 } from './config'
-export type { HearingCapability, HearingProvider, RecognitionAudio, RecognitionRequest, Transcript } from './hearing'
 export type { CharacterOutput, TextOutput } from './output'
 export { createTextOutput } from './output'
 export type {
@@ -60,22 +55,13 @@ export {
   openAIChatCompletion,
   ProviderRequestError,
 } from './providers/openai-compatible-provider'
-export type { OpenAICompatibleTranscriptionOptions } from './providers/openai-compatible-transcription-provider'
-export {
-  createOpenAICompatibleTranscriptionProvider,
-  normalizeTranscriptionText,
-} from './providers/openai-compatible-transcription-provider'
 export type { OpenAICompatibleVisionOptions } from './providers/openai-compatible-vision-provider'
 export { createOpenAICompatibleVisionProvider } from './providers/openai-compatible-vision-provider'
 export type { AlibabaSpeechProviderOptions } from './providers/alibaba-speech-provider'
 export { buildContinueTaskMessage, buildFinishTaskMessage, buildRunTaskMessage, createAlibabaSpeechProvider, pcmToWav } from './providers/alibaba-speech-provider'
 export { createDuckDuckGoLiteWebSearchProvider } from './providers/duckduckgo-lite-web-search-provider'
-export type { AlibabaAsrOptions } from './providers/alibaba-asr-provider'
-export { createAlibabaAsrProvider, extractAsrText } from './providers/alibaba-asr-provider'
 export { createWebSearchTool } from './tools/web-search-tool'
 
-export type { CapabilityKind, CapabilityModule, CapabilityStatus } from './registry'
-export { describeCapabilityModules } from './registry'
 export type {
   CharacterRuntime,
   CharacterRuntimeOptions,

@@ -7,7 +7,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 contextBridge.exposeInMainWorld('aislingDesktop', {
   getMode: () => ipcRenderer.invoke('aisling:mode:get'),
   setLanguage: language => ipcRenderer.send('aisling:language:set', language),
-  returnToStage: () => ipcRenderer.invoke('aisling:mode:return'),
+  openDesktopMenu: () => ipcRenderer.send('aisling:desktop-menu'),
   resizeDesktop: (width, height) => ipcRenderer.send('aisling:desktop-size', width, height),
   setDragging: enabled => ipcRenderer.send('aisling:desktop-drag', enabled),
   onCursor: callback => {

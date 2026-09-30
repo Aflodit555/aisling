@@ -5,7 +5,7 @@ interface Window {
   aislingDesktop?: {
     getMode(): Promise<'stage' | 'desktop'>
     setLanguage?(language: 'en' | 'zh-CN'): void
-    returnToStage(): Promise<void>
+    openDesktopMenu(): void
     resizeDesktop(width: number, height: number): void
     setDragging(enabled: boolean): void
     onCursor(callback: (x: number, y: number) => void): () => void

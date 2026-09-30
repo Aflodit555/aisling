@@ -42,6 +42,7 @@ const BLINK_OPEN_MS = 150
 const BLINK_MS = BLINK_CLOSE_MS + BLINK_HOLD_MS + BLINK_OPEN_MS
 /** At least the longest gesture fade-in (Mao: 0.5 s). */
 const LIFE_HANDOVER_MS = 500
+const POINTER_ENTRY_MS = 140
 
 /** Exponential approach with time constant `tau` (frame-rate independent). */
 function approach(current: number, goal: number, dtMs: number, tau: number): number {
@@ -79,6 +80,8 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
   const eye = { x: 0, y: 0 }
   const eyeVelocity = { x: 0, y: 0 }
   const head = { x: 0, y: 0 }
+  const headAtPointerEntry = { x: 0, y: 0 }
+  let pointerEntryMs = 0
 
   // Posture rest point and smoothed offsets.
   let nextPostureMs = between(6_000, 14_000)
@@ -96,7 +99,7 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
     return { x: side * between(0.25, 0.55), y: between(-0.3, 0.2) }
   }
 
-  function moveEyes(gaze: { x: number; y: number }, dtMs: number): void {
+  function moveEyes(gaze: { x: number; y: number }, dtMs: number, followingPointer: boolean): void {
     // The older Aisling focus used bounded speed and acceleration, so a reversal
     // slows before turning instead of snapping to each new cursor position.
     const dx = gaze.x - eye.x
@@ -110,7 +113,7 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
     }
     const dt = Math.min(dtMs, 50)
     const maxSpeed = 5.33 * dt / 1000
-    const maxAcceleration = maxSpeed * dt / 150
+    const maxAcceleration = maxSpeed * dt / (followingPointer ? 120 : 150)
     let ax = maxSpeed * dx / distance - eyeVelocity.x
     let ay = maxSpeed * dy / distance - eyeVelocity.y
     const acceleration = Math.hypot(ax, ay)
@@ -152,17 +155,29 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
       nextGazeMs = between(1_200, 3_500)
     }
     const pointer = options.pointer?.()
+    if (pointer && !hadPointer) {
+      headAtPointerEntry.x = head.x
+      headAtPointerEntry.y = head.y
+      pointerEntryMs = 0
+    }
     if (hadPointer && !pointer) {
       gazeTarget = { x: between(-0.04, 0.04), y: between(-0.03, 0.04) }
       nextGazeMs = between(700, 1_200)
     }
     hadPointer = !!pointer
     const gaze = pointer
-      ? { x: Math.max(-0.8, Math.min(0.8, pointer.x)), y: Math.max(-0.65, Math.min(0.65, pointer.y)) }
+      ? { x: Math.max(-0.8, Math.min(0.8, pointer.x)), y: Math.max(-0.8, Math.min(1.0, pointer.y)) }
       : gazeTarget
-    moveEyes(gaze, dtMs)
-    head.x = approach(head.x, eye.x * (pointer ? 0.65 : 0.4), dtMs, 400)
-    head.y = approach(head.y, eye.y * (pointer ? 0.65 : 0.4), dtMs, 400)
+    moveEyes(gaze, dtMs, !!pointer)
+    if (pointer) {
+      const blend = Math.min(1, (pointerEntryMs += dtMs) / POINTER_ENTRY_MS)
+      head.x = headAtPointerEntry.x + (eye.x - headAtPointerEntry.x) * blend
+      head.y = headAtPointerEntry.y + (eye.y - headAtPointerEntry.y) * blend
+    }
+    else {
+      head.x = approach(head.x, eye.x * 0.4, dtMs, 400)
+      head.y = approach(head.y, eye.y * 0.4, dtMs, 400)
+    }
 
     nextPostureMs -= dtMs
     if (nextPostureMs <= 0) {

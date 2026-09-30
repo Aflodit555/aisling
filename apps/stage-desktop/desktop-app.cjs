@@ -115,12 +115,13 @@ function updateDesktopPointer(kind) {
 }
 
 async function pollDesktopPointer() {
-  if (pointerBusy || mode !== 'desktop' || !desktopWindow || !stageView) return
+  if (mode !== 'desktop' || !desktopWindow || !stageView) return
   const point = screen.getCursorScreenPoint()
   const bounds = desktopWindow.getContentBounds()
   const x = point.x - bounds.x
   const y = point.y - bounds.y
   stageView.webContents.send('aisling:cursor', x, y)
+  if (pointerBusy) return
   if (dragTimer) {
     updateDesktopPointer('character')
     return
@@ -322,6 +323,11 @@ const trayMenu = () => Menu.buildFromTemplate([
   { label: desktopText('Quit', '退出'), click: () => app.quit() },
 ])
 
+function openDesktopMenu() {
+  if (mode !== 'desktop' || !desktopWindow || desktopWindow.isDestroyed()) return
+  trayMenu().popup({ window: desktopWindow })
+}
+
 function refreshWindowMenu() {
   mainWindow?.setMenu(Menu.buildFromTemplate([
     { label: desktopText('File', '文件'), submenu: [
@@ -517,9 +523,8 @@ async function startDesktop(options = {}) {
       if (!trusted(event)) throw new Error('Untrusted mode request')
       return mode
     })
-    ipcMain.handle('aisling:mode:return', event => {
-      if (!trusted(event)) throw new Error('Untrusted mode request')
-      returnToStage()
+    ipcMain.on('aisling:desktop-menu', event => {
+      if (trusted(event)) openDesktopMenu()
     })
     ipcMain.handle('aisling:desktop-awareness:set', (event, enabled) => {
       if (!trusted(event) || typeof enabled !== 'boolean')

@@ -1,7 +1,7 @@
 // Production loading smoke: no dev server. Loads the built renderer through the
 // `aisling://stage` custom scheme and verifies the renderer mounts, the desktop
 // bridge is present, and the file-backed storage bridge round-trips.
-const { app, BaseWindow, nativeImage, screen } = require('electron')
+const { app, BaseWindow, Menu, nativeImage, screen } = require('electron')
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const os = require('node:os')
@@ -22,6 +22,8 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
   const visible = process.env.AISLING_FOCUS_SMOKE === '1'
   const win = await startDesktop({ show: visible, diagnostics: false })
   const contents = win.contentView.children[0].webContents
+  const desktopMenus = []
+  Menu.prototype.popup = function (options) { desktopMenus.push({ menu: this, options }) }
   if (visible) assert.equal(contents.isFocused(), true, 'Stage renderer must own focus after startup')
   const preferences = contents.getLastWebPreferences()
   assert.equal(preferences.contextIsolation, true)
@@ -175,20 +177,22 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
           const bounds = floatingWindow.getContentBounds()
           const expected = direction < 0 ? work.x - bounds.width * 0.55 : work.x + work.width - bounds.width * 0.45
           assert.ok(Math.abs(bounds.x - Math.round(expected)) <= 1, 'both edges must allow a partial character')
+          cursor = { x: direction < 0 ? work.x + 12 : work.x + work.width - 12, y: work.y + work.height / 2 }
           const ui = await contents.executeJavaScript(`(async () => {
             document.querySelector('.character-hit').click()
             await new Promise(resolve => setTimeout(resolve, 0))
             const composer = document.querySelector('.desktop-composer').getBoundingClientRect()
             document.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-            await new Promise(resolve => setTimeout(resolve, 0))
-            const back = document.querySelector('.return-button').getBoundingClientRect()
-            return { composer: { left: composer.left + screenX, right: composer.right + screenX, width: composer.width }, back: { left: back.left + screenX, right: back.right + screenX, top: back.top } }
+            return { composer: { left: composer.left + screenX, right: composer.right + screenX, width: composer.width }, backRemoved: !document.querySelector('.return-button') }
           })()`)
           assert.ok(ui.composer.width <= 320 && ui.composer.width > 150)
-          for (const rect of [ui.composer, ui.back]) {
-            assert.ok(rect.left >= work.x && rect.right <= work.x + work.width, JSON.stringify({work,bounds,ui}))
-          }
-          assert.ok(ui.back.top >= 12)
+          assert.ok(ui.composer.left >= work.x && ui.composer.right <= work.x + work.width, JSON.stringify({work,bounds,ui}))
+          assert.equal(ui.backRemoved, true)
+          await new Promise(resolve => setTimeout(resolve, 30))
+          assert.equal(desktopMenus.length, direction < 0 ? 1 : 2)
+          const menu = desktopMenus.at(-1)
+          assert.ok(menu)
+          assert.deepEqual(menu.options, { window: floatingWindow })
         }
       } finally { screen.getCursorScreenPoint = originalCursor }
       console.log(JSON.stringify({ desktopLayout: 'passed', partialDrag: 'both edges', composer: '320px maximum' }))
@@ -227,59 +231,23 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       contents.send('aisling:desktop-pointer', 'none')
       await new Promise(resolve => setTimeout(resolve, 350))
       assert.equal(await contents.executeJavaScript('!document.querySelector(".desktop-composer")'), true)
-      assert.equal(await contents.executeJavaScript(`(async () => {
+      assert.equal(await contents.executeJavaScript(`(() => {
         document.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-        await new Promise(resolve => setTimeout(resolve, 0))
-        return !!document.querySelector('.return-button')
+        return !document.querySelector('.return-button')
       })()`), true)
-      const layout = await contents.executeJavaScript(`(() => {
-        const root = document.querySelector('.desktop-surface').getBoundingClientRect()
-        const button = document.querySelector('.return-button').getBoundingClientRect()
-        return { top: button.top - root.top, right: root.right - button.right }
-      })()`)
-      assert.ok(layout.top >= 12 && layout.right >= 12)
+      await new Promise(resolve => setTimeout(resolve, 30))
+      assert.equal(desktopMenus.length, 1)
+      const menu = desktopMenus[0].menu
+      assert.deepEqual(menu.items.map(item => item.type), ['checkbox', 'checkbox', 'normal', 'separator', 'normal'])
+      assert.equal(menu.items[1].checked, true)
+      await contents.executeJavaScript(`document.querySelector('.desktop-surface').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+      await new Promise(resolve => setTimeout(resolve, 30))
+      assert.equal(desktopMenus.length, 2, 'the character edge also opens the menu')
       await new Promise(resolve => setTimeout(resolve, 100))
       const desktopImage = await contents.capturePage()
       assert.equal(desktopImage.toBitmap()[3], 0, 'desktop corner must be transparent')
       writeFileSync(desktopScreenshot, desktopImage.toPNG())
-      assert.equal(await contents.executeJavaScript(`(async () => {
-        const root = document.querySelector('.desktop-surface')
-        const wait = ms => new Promise(resolve => setTimeout(resolve, ms))
-        const button = root.querySelector('.return-button')
-        button.dispatchEvent(new PointerEvent('pointerenter'))
-        await wait(3600)
-        if (!root.querySelector('.return-button')) return 'long hover did not renew'
-        button.dispatchEvent(new PointerEvent('pointerleave'))
-        await wait(3550)
-        if (!button.classList.contains('return-fade-leave-active')) return 'idle did not start fade'
-        await wait(550)
-        if (root.querySelector('.return-button')) return 'idle fade did not finish'
-        root.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-        await wait(0)
-        await wait(3300)
-        const shortHoverButton = root.querySelector('.return-button')
-        shortHoverButton.dispatchEvent(new PointerEvent('pointerenter'))
-        await wait(250)
-        if (!shortHoverButton.classList.contains('return-fade-leave-active')) return 'short hover renewed'
-        await wait(550)
-        if (root.querySelector('.return-button')) return 'short hover fade did not finish'
-        root.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-        await wait(0)
-        root.querySelector('.character-hit').click()
-        await wait(0)
-        root.querySelector('.desktop-composer input').click()
-        await wait(0)
-        if (!root.querySelector('.return-button.return-fade-leave-active')) return 'input click did not start fade'
-        await wait(550)
-        return root.querySelector('.return-button') ? 'input fade did not finish' : 'ok'
-      })()`), 'ok', 'back must renew on hover, fade after idle, and fade on input click')
-      assert.equal(await contents.executeJavaScript(`(async () => {
-        const root = document.querySelector('.desktop-surface')
-        root.querySelector('.character-hit').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-        await new Promise(resolve => setTimeout(resolve, 0))
-        return !!root.querySelector('.return-button')
-      })()`), true)
-      await contents.executeJavaScript('document.querySelector(".return-button").click()')
+      menu.items[2].click()
     }
     else returnToStage()
     assert.equal(await contents.executeJavaScript('window.aislingDesktop.getMode()'), 'stage')

@@ -13,28 +13,52 @@ import SpeechBubble from './SpeechBubble.vue'
 
 const stage = useStageStore()
 const presentation = usePresentationStore()
-const controls = ref({ back: { left: '0px', top: '0px' }, composer: { left: '50%', width: '320px' } })
+const composerStyle = ref({ left: '50%', width: '320px' })
+const bubbleStyle = ref<Record<string, string>>({})
+const speechBubble = ref<InstanceType<typeof SpeechBubble>>()
 
-function positionControls(): void {
-  const layout = presentation.stageLayout
-  const fitted = layout && fitDesktopCharacter({ width: innerWidth, height: innerHeight }, layout, presentation.transform)
-  const screenLeft = (window.screen as Screen & { availLeft?: number }).availLeft ?? 0
-  const left = Math.max(0, screenLeft - window.screenX) + 12
-  const right = Math.min(innerWidth, screenLeft + screen.availWidth - window.screenX) - 12
+function visibleDesktopArea() {
+  const display = window.screen as Screen & { availLeft?: number; availTop?: number }
+  const screenLeft = display.availLeft ?? 0
+  const screenTop = display.availTop ?? 0
+  return {
+    left: Math.max(0, screenLeft - window.screenX) + 12,
+    right: Math.min(innerWidth, screenLeft + screen.availWidth - window.screenX) - 12,
+    top: Math.max(0, screenTop - window.screenY) + 8,
+    bottom: Math.min(innerHeight, screenTop + screen.availHeight - window.screenY) - 8,
+  }
+}
+
+function positionComposer(): void {
+  const { left, right } = visibleDesktopArea()
   const width = Math.min(320, Math.max(0, right - left))
   const clamp = (x: number, size: number) => Math.max(left, Math.min(right - size, x))
-  controls.value = {
-    back: {
-      left: `${clamp(fitted && layout ? fitted.x + (layout.body.x + layout.body.width) * fitted.scale + 12 : innerWidth * 0.7, 76)}px`,
-      top: `${Math.max(12, Math.min(innerHeight - 48, fitted && layout ? fitted.y + layout.body.y * fitted.scale + 12 : innerHeight * 0.35))}px`,
-    },
-    composer: { left: `${clamp(innerWidth / 2 - width / 2, width) + width / 2}px`, width: `${width}px` },
+  composerStyle.value = { left: `${clamp(innerWidth / 2 - width / 2, width) + width / 2}px`, width: `${width}px` }
+  positionBubble()
+}
+
+function positionBubble(): void {
+  const layout = presentation.stageLayout
+  const element = speechBubble.value?.$el as HTMLElement | undefined
+  if (!layout || !element) return
+  const { left, right, top, bottom } = visibleDesktopArea()
+  const width = Math.max(0, Math.min(innerWidth * .85, right - left))
+  const contentWidth = Math.max(0, width - 30)
+  const fitted = fitDesktopCharacter({ width: innerWidth, height: innerHeight }, layout, presentation.transform)
+  const headTop = fitted.y + layout.body.y * fitted.scale
+  const bubbleWidth = element.offsetWidth
+  const bubbleHeight = element.offsetHeight
+  const x = Math.max(left + bubbleWidth / 2, Math.min(right - bubbleWidth / 2, innerWidth / 2))
+  const y = Math.max(top, Math.min(bottom - bubbleHeight, headTop - bubbleHeight - 12))
+  bubbleStyle.value = {
+    left: `${x - bubbleWidth / 2}px`, top: `${y}px`, right: 'auto', margin: '0',
+    maxWidth: `${contentWidth}px`, maxHeight: `${Math.max(0, bottom - top - 16)}px`,
+    '--bubble-content-width': `${contentWidth}px`,
   }
 }
 const { speaking, phase } = storeToRefs(useSpeechStore())
 const entered = ref(false)
 const inputVisible = ref(false)
-const returnVisible = ref(false)
 const bubble = ref('')
 const draft = ref('')
 const character = ref<InstanceType<typeof CharacterSurface>>()
@@ -42,16 +66,17 @@ let pressed: { id: number; x: number; y: number; moved: boolean } | undefined
 let suppressClick = false
 let hoverTimer: ReturnType<typeof setTimeout> | undefined
 let leaveTimer: ReturnType<typeof setTimeout> | undefined
-let returnTimer: ReturnType<typeof setTimeout> | undefined
-let returnHoverStartedAt = 0
 let stopPointer: (() => void) | undefined
+let bubbleObserver: ResizeObserver | undefined
+
+watch(() => [presentation.stageLayout, presentation.transform], positionBubble, { flush: 'post' })
 
 watch(() => stage.messages.at(-1), message => {
   bubble.value = message?.role === 'assistant' || message?.role === 'error' ? message.content.trim() : ''
 })
 
 function onReady(): void {
-  positionControls()
+  positionComposer()
   requestAnimationFrame(() => requestAnimationFrame(() => { entered.value = true }))
 }
 
@@ -63,7 +88,7 @@ function submit(): void {
 }
 
 function onPointer(kind: 'character' | 'input' | 'ui' | 'none'): void {
-  positionControls()
+  positionComposer()
   if (pressed?.moved) return
   if (kind === 'character' || kind === 'input') {
     clearTimeout(leaveTimer)
@@ -80,11 +105,9 @@ function onPointer(kind: 'character' | 'input' | 'ui' | 'none'): void {
 }
 
 function onContextMenu(event: MouseEvent): void {
+  if (event.target instanceof Element && event.target.closest('.desktop-composer')) return
   event.preventDefault()
-  positionControls()
-  returnVisible.value = true
-  inputVisible.value = false
-  scheduleReturnHide()
+  window.aislingDesktop?.openDesktopMenu()
 }
 
 function onCharacterDown(event: PointerEvent): void {
@@ -98,7 +121,6 @@ function onCharacterMove(event: PointerEvent): void {
   if (!pressed || pressed.id !== event.pointerId || pressed.moved) return
   if (Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) > 6) {
     pressed.moved = true
-    hideReturnButton()
     clearTimeout(hoverTimer)
     hoverTimer = undefined
     inputVisible.value = false
@@ -126,49 +148,31 @@ function onCharacterClick(): void {
     suppressClick = false
     return
   }
-  positionControls()
+  positionComposer()
   inputVisible.value = true
   character.value?.interact()
 }
 
-function hideReturnButton(): void {
-  clearTimeout(returnTimer)
-  returnTimer = undefined
-  returnHoverStartedAt = 0
-  returnVisible.value = false
-}
-
-function scheduleReturnHide(): void {
-  clearTimeout(returnTimer)
-  returnTimer = setTimeout(() => {
-    if (returnHoverStartedAt && performance.now() - returnHoverStartedAt >= 300)
-      scheduleReturnHide()
-    else
-      hideReturnButton()
-  }, 3500)
-}
-
-function onReturnPointerEnter(): void {
-  returnHoverStartedAt = performance.now()
-}
-
-function returnToStage(): void {
-  void window.aislingDesktop?.returnToStage()
-}
-
 onMounted(() => {
+  const element = speechBubble.value?.$el as HTMLElement | undefined
+  if (element) {
+    bubbleObserver = new ResizeObserver(positionBubble)
+    bubbleObserver.observe(element)
+  }
   stopPointer = window.aislingDesktop?.onDesktopPointer(onPointer)
   window.addEventListener('blur', stopDrag)
-  window.addEventListener('resize', positionControls)
+  window.addEventListener('move', positionComposer)
+  window.addEventListener('resize', positionComposer)
 })
 onUnmounted(() => {
+  bubbleObserver?.disconnect()
   stopDrag()
   window.removeEventListener('blur', stopDrag)
-  window.removeEventListener('resize', positionControls)
+  window.removeEventListener('move', positionComposer)
+  window.removeEventListener('resize', positionComposer)
   stopPointer?.()
   clearTimeout(hoverTimer)
   clearTimeout(leaveTimer)
-  clearTimeout(returnTimer)
 })
 </script>
 
@@ -188,16 +192,11 @@ onUnmounted(() => {
       />
     </div>
     <div data-desktop-hit class="character-hit" @pointerdown="onCharacterDown" @pointermove="onCharacterMove" @pointerup="stopDrag" @pointercancel="stopDrag" @lostpointercapture="stopDrag" @click="onCharacterClick" />
-    <SpeechBubble :text="bubble" :pending="stage.sending || stage.visionProcessing" :searching="stage.searching" :speaking="phase === 'buffering' || speaking" />
-    <form v-if="inputVisible" data-desktop-hit class="desktop-composer" :style="controls.composer" @click="hideReturnButton" @submit.prevent="submit">
+    <SpeechBubble ref="speechBubble" :style="bubbleStyle" :text="bubble" :pending="stage.sending || stage.visionProcessing" :searching="stage.searching" :speaking="phase === 'buffering' || speaking" />
+    <form v-if="inputVisible" data-desktop-hit class="desktop-composer" :style="composerStyle" @submit.prevent="submit">
       <input v-model="draft" :aria-label="t('Message Aisling')" :placeholder="t('Say something…')" :disabled="stage.sending" @keydown.esc="inputVisible = false">
       <button type="submit" :disabled="!draft.trim() || stage.sending" :aria-label="t('Send message')"><Icon name="send" :size="16" /></button>
     </form>
-    <Transition name="return-fade">
-      <button v-if="returnVisible" data-desktop-hit class="return-button" :style="controls.back" type="button" @pointerenter="onReturnPointerEnter" @pointerleave="returnHoverStartedAt = 0" @click="returnToStage">
-        {{ t('back') }}
-      </button>
-    </Transition>
   </main>
 </template>
 
@@ -215,11 +214,6 @@ onUnmounted(() => {
 .desktop-composer button:hover { background: var(--tonal-strong) }
 .desktop-composer button:active { transform: scale(.94) }
 .desktop-composer button:disabled { opacity: .45; cursor: default; transform: none; background: var(--tonal) }
-.return-button { position: absolute; width: 76px; box-sizing: border-box; padding: .4rem .9rem; border: 1px solid var(--rule); border-radius: 999px; background: var(--bg); color: var(--fg); font-size: .85rem; box-shadow: 0 4px 18px rgb(0 0 0 / .18); transition: background .15s, transform .1s }
-.return-button:hover { background: var(--tonal) }
-.return-button:active { transform: scale(.97) }
-.return-fade-leave-active { transition: opacity .5s; pointer-events: none }
-.return-fade-leave-to { opacity: 0 }
 @keyframes rise { 0% { transform: translateY(100%) } 72% { transform: translateY(calc(-1 * var(--entrance-overshoot))) } 100% { transform: translateY(0) } }
 @media (prefers-reduced-motion: reduce) { .character.entered { animation-duration: 1ms } }
 </style>

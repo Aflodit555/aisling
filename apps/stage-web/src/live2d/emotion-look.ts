@@ -51,6 +51,7 @@ export function blendExpression(value: number, parameter: ExpressionParameter, w
 }
 
 const SILENT = 0.001
+const JOY_EYE_PARAMETER = /^ParamEye[LR](Open|Smile)$/
 
 export function createEmotionLayer(options: {
   rig: Live2DRig
@@ -97,7 +98,7 @@ export function createEmotionLayer(options: {
         if (weight < SILENT)
           continue
         for (const parameter of layer.expression) {
-          const eyeWeight = layer.emotion === 'joy' && /^ParamEye[LR](Open|Smile)$/.test(parameter.id)
+          const eyeWeight = layer.emotion === 'joy' && JOY_EYE_PARAMETER.test(parameter.id)
             ? joyEyeWeight * ownership
             : weight
           claims.set(parameter.id, blendExpression(read(parameter.id), parameter, eyeWeight))

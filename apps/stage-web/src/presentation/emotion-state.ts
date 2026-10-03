@@ -87,10 +87,11 @@ export function createEmotionState(start = 0): EmotionState {
       active = null
       target = 0
     }
+    const rise = 1 - Math.exp(-dt / t.riseMs)
+    const fall = 1 - Math.exp(-dt / t.fallMs)
     for (const emotion of EMOTIONS) {
       const goal = emotion === active ? target : 0
-      const tau = goal > weights[emotion] ? t.riseMs : t.fallMs
-      weights[emotion] += (goal - weights[emotion]) * (1 - Math.exp(-dt / tau))
+      weights[emotion] += (goal - weights[emotion]) * (goal > weights[emotion] ? rise : fall)
     }
     return weights
   }

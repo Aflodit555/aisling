@@ -28,7 +28,7 @@ export interface ParameterSource {
   id: string
   /** Higher priority wins for overlapping parameters. */
   priority: number
-  /** Parameters this source is allowed to write. */
+  /** Parameters this source targets. */
   targets: ReadonlySet<string>
   /** Produce this frame's claims, or undefined to claim nothing. */
   sample(ctx: ParameterSampleContext): ReadonlyMap<string, number> | undefined
@@ -87,7 +87,7 @@ export function createParameterController(): ParameterController {
         core.setParameterValueById(id, value)
       }
       catch {
-        // The model lacks this parameter; ignore like the previous mouth drive did.
+        // Ignore write failures so other parameters can still be applied.
       }
     }
 

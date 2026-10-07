@@ -5,8 +5,9 @@
 ```text
 Settings toggle
   → preload IPC
-  → Electron main starts external/kernel_c/build/Release/kernel.exe 2
-  → JSONL DesktopContext
+  → Electron main starts external/kernel_c/build/Release/kernel.exe <own_pid>
+  → startup report, then renderer read → stdin sequence → WM_APP → UIA report
+  → JSONL DesktopContext (capturedAt / targetHwnd / sequence)
   → SemanticJudge
   → should_interrupt probability
   → thin trigger
@@ -19,6 +20,12 @@ Browser-only Stage shows the control as unavailable and never attempts desktop c
 Electron main owns the native child process. Toggle OFF, window close, renderer teardown,
 and app quit stop the process; OFF also aborts an in-flight semantic request. Raw desktop
 text is kept only in memory and is passed to the character as ephemeral system context.
+
+The foreground hook only updates the target HWND. The kernel has no collection
+timer; each renderer read requests a new capture and waits up to 5 seconds for
+the matching sequence. Startup reports have a null sequence. A failed read
+returns unavailable without substituting the cached latest context. Capture
+metadata is not part of the judge input or the autonomous content signature.
 
 ## Semantic judge
 
@@ -38,7 +45,7 @@ shown in Desktop Awareness and the next poll retries. Electron must inherit
 
 ## Trigger
 
-- Poll: 2 seconds
+- Renderer request interval: 2 seconds (no independent kernel polling)
 - `shouldInterrupt >= 0.65`
 - Current bounded `app + title + full text + media + mic + idleSeconds` signature differs from the last trigger
 - Existing runtime is ready and not generating a reply, processing vision, or speaking

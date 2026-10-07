@@ -40,6 +40,7 @@ let model: Live2DModelType | undefined
 let modelSize: { width: number; height: number } | undefined
 let stageGeometry: Pick<StageCharacterLayout, 'body' | 'envelope' | 'centerX'> | undefined
 let stageLayout: StageCharacterLayout | undefined
+let desktopFallbackLayout: StageCharacterLayout | undefined
 let canvasTopPadding = 0
 let resizeObserver: ResizeObserver | undefined
 let disposed = false
@@ -240,7 +241,9 @@ function resize(): void {
   }
 
   if (props.desktop && stageGeometry) {
-    const fitted = fitDesktopCharacter({ width, height: visibleHeight }, props.stageLayout ?? { width, height: visibleHeight, ...stageGeometry }, props.transform)
+    const layout = props.stageLayout ?? (desktopFallbackLayout ??= { width, height: visibleHeight, ...stageGeometry })
+    if (!props.stageLayout) emit('layout', layout)
+    const fitted = fitDesktopCharacter({ width, height: visibleHeight }, layout, props.transform)
     window.aislingDesktop?.resizeDesktop(fitted.windowWidth, fitted.windowHeight)
     canvasTopPadding = 0
     // Only the native window clips the model. Include the complete lower meshes,

@@ -17,6 +17,7 @@ describe('autonomous runtime observation', () => {
     runtime.onEvent(event => eventTypes.push(event.type))
     const turn = await runtime.ingest(createAutonomousStimulus({
       activity: {
+        capturedAt: 1, targetHwnd: '123', sequence: 1,
         idleSeconds: 3,
         focus: { app: 'Code', title: 'main.ts - project_Aisling', text: 'createCharacterRuntime' },
         media: [], mic: [], headphones: '',
@@ -42,7 +43,7 @@ describe('autonomous runtime observation', () => {
       getChatProvider: () => ({ id: 'test', complete }),
     })
     const stimulus = createAutonomousStimulus({
-      activity: { idleSeconds: 0, focus: { app: 'Code', title: '', text: '' }, media: [], mic: [], headphones: '' },
+      activity: { capturedAt: 1, targetHwnd: '123', sequence: 1, idleSeconds: 0, focus: { app: 'Code', title: '', text: '' }, media: [], mic: [], headphones: '' },
     })
     expect((await runtime.ingest(stimulus)).status).toBe('completed')
     expect((await runtime.ingest(stimulus)).status).toBe('failed')

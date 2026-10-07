@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { createAutonomousController, createAutonomousState, type DesktopObserverStatus } from './autonomous'
 
 const context = (title = 'main.ts'): NonNullable<DesktopObserverStatus['context']> => ({
+  capturedAt: 1, targetHwnd: '123', sequence: 1,
   idleSeconds: 0,
   focus: { app: 'Code', title, text: 'const answer = 42' },
   media: [], mic: [], headphones: '',
@@ -69,6 +70,18 @@ describe('desktop awareness gate', () => {
     await h.controller.tick()
     expect(h.judgeDesktop).toHaveBeenCalledOnce()
     expect(h.trigger).toHaveBeenCalledOnce()
+    await h.controller.tick()
+    expect(h.judgeDesktop).toHaveBeenCalledOnce()
+    expect(h.trigger).toHaveBeenCalledOnce()
+  })
+
+  it('does not treat capture metadata as a content signature change', async () => {
+    const h = setup()
+    h.controller.setEnabled(true)
+    await h.controller.tick()
+    h.readDesktop.mockResolvedValue({ enabled: true, available: true, context: {
+      ...context(), capturedAt: 2, targetHwnd: '456', sequence: 2,
+    } })
     await h.controller.tick()
     expect(h.judgeDesktop).toHaveBeenCalledOnce()
     expect(h.trigger).toHaveBeenCalledOnce()

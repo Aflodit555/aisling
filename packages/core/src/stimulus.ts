@@ -59,6 +59,12 @@ export interface DesktopMediaSnapshot {
 }
 
 export interface DesktopActivitySnapshot {
+  /** Epoch milliseconds when the complete desktop capture finished. */
+  readonly capturedAt: number
+  /** Decimal HWND string, preserving the native handle without JS number rounding. */
+  readonly targetHwnd: string
+  /** Request sequence; null for the startup report. */
+  readonly sequence: number | null
   readonly idleSeconds: number
   readonly focus: DesktopFocusSnapshot
   readonly media: readonly DesktopMediaSnapshot[]

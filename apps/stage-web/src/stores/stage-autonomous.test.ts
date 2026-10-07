@@ -6,6 +6,7 @@ import { useSettingsStore } from './settings'
 import { useStageStore } from './stage'
 
 const context: DesktopActivitySnapshot = {
+  capturedAt: 1, targetHwnd: '123', sequence: 1,
   idleSeconds: 1,
   focus: { app: 'Code', title: 'main.ts', text: 'const answer = 42' },
   media: [], mic: [], headphones: '',
@@ -93,5 +94,25 @@ describe('Stage desktop awareness integration', () => {
     expect(stage.autonomous.enabled).toBe(false)
     expect(stage.autonomous.error).toContain('Electron')
     expect(settings.config.desktopAwareness.enabled).toBe(false)
+  })
+
+  it('does not judge or reply when a desktop request returns unavailable', async () => {
+    const settings = useSettingsStore()
+    await settings.load()
+    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: 'test-key' })
+    const complete = vi.fn(async () => ({ text: 'Stale.' }))
+    settings.activeChatProvider = { id: 'test', complete }
+    const stage = useStageStore()
+    await stage.setDesktopAwarenessEnabled(true)
+    vi.mocked(window.aislingDesktop!.readDesktopContext).mockResolvedValue({
+      enabled: true, available: false, error: 'Desktop observer request timed out.',
+    })
+
+    await stage.tickAutonomous()
+
+    expect(window.aislingDesktop!.judgeDesktopContext).not.toHaveBeenCalled()
+    expect(complete).not.toHaveBeenCalled()
+    expect(stage.autonomous.error).toContain('timed out')
+    expect(stage.autonomous.pending).toBe(false)
   })
 })

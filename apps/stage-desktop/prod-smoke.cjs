@@ -141,6 +141,27 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       return false
     })()`), true, 'Stage geometry must be ready before desktop inheritance')
   }
+  if (process.env.AISLING_MISSING_STAGE_LAYOUT_SMOKE === '1') {
+    await contents.executeJavaScript(`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('presentation').stageLayout = undefined`)
+    enterDesktopMode()
+    assert.equal(await contents.executeJavaScript(`(async () => {
+      for (let n = 0; n < 100; n++) {
+        if (document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('presentation')?.stageLayout) return true
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      return false
+    })()`), true, 'desktop must fix a missing Stage layout before resizing')
+    const floatingWindow = BaseWindow.getAllWindows().find(window => window !== win)
+    await new Promise(resolve => setTimeout(resolve, 300))
+    const bounds = floatingWindow.getContentBounds()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    assert.deepEqual(floatingWindow.getContentBounds(), bounds, 'desktop size must settle without Stage layout feedback')
+    console.log(JSON.stringify({ missingStageLayout: 'passed', bounds }))
+    clearTimeout(timeout)
+    win.destroy()
+    app.exit(0)
+    return
+  }
   const contextId = await contents.executeJavaScript('window.__smokeContext = crypto.randomUUID()')
   for (let i = 0; i < 2; i++) {
     enterDesktopMode()

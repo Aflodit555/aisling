@@ -2,16 +2,23 @@ const { spawn } = require('node:child_process')
 const path = require('node:path')
 const readline = require('node:readline')
 
-const KERNEL_POLL_SECONDS = '2'
 const REQUEST_TIMEOUT_MS = 5000
 
 /** Keep the native wire format out of the renderer and cap every text field. */
 function normalizeKernelState(value) {
   const state = value && typeof value === 'object' ? value : {}
+  const sequence = state.sequence ?? null
+  if (!Number.isSafeInteger(state.capturedAt) || state.capturedAt <= 0
+    || typeof state.targetHwnd !== 'string' || !/^\d+$/.test(state.targetHwnd)
+    || (sequence !== null && (!Number.isSafeInteger(sequence) || sequence <= 0)))
+    throw new Error('Desktop observer returned invalid snapshot metadata.')
   const focus = state.focus && typeof state.focus === 'object' ? state.focus : {}
   const text = (input, cap) => typeof input === 'string' ? input.slice(0, cap) : ''
   const list = (input, cap = 12) => Array.isArray(input) ? input.slice(0, cap) : []
   return {
+    capturedAt: state.capturedAt,
+    targetHwnd: state.targetHwnd,
+    sequence,
     idleSeconds: Number.isFinite(state.idle_s) && state.idle_s >= 0 ? state.idle_s : 0,
     focus: {
       app: text(focus.app, 120),
@@ -39,7 +46,8 @@ function createDesktopObserver(options = {}) {
   let latest
   let error = ''
   let stopping = false
-  /** @type {{ resolve: (v: unknown) => void, reject: (e: Error) => void, timer: NodeJS.Timeout } | undefined} */
+  let sequence = 0
+  /** @type {{ sequence: number, resolve: (v: ReturnType<typeof normalizeKernelState>) => void, reject: (e: Error) => void, timer: NodeJS.Timeout } | undefined} */
   let waiter
 
   function settle(line) {
@@ -49,8 +57,9 @@ function createDesktopObserver(options = {}) {
     }
     catch {
       error = 'Desktop observer returned invalid data.'
+      return
     }
-    if (waiter) {
+    if (waiter && latest.sequence === waiter.sequence) {
       const w = waiter
       waiter = undefined
       clearTimeout(w.timer)
@@ -65,7 +74,7 @@ function createDesktopObserver(options = {}) {
     error = ''
     latest = undefined
     try {
-      child = spawnImpl(executable, [KERNEL_POLL_SECONDS, ownPid], {
+      child = spawnImpl(executable, [ownPid], {
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'ignore'], // stdin piped so the parent can ask for an on-demand snapshot
       })
@@ -113,10 +122,8 @@ function createDesktopObserver(options = {}) {
   }
 
   /**
-   * Asks the long-running kernel for an immediate snapshot (one stdin line) and
-   * resolves with the next normalized context. The kernel keeps the latest real
-   * foreground window cached via its foreground hook, so this reads the current
-   * target instead of waiting for the fallback timer.
+   * Requests one snapshot and accepts only its matching sequence. Startup and
+   * late replies may update latest, but cannot complete a different request.
    */
   function request() {
     return new Promise((resolve, reject) => {
@@ -129,6 +136,7 @@ function createDesktopObserver(options = {}) {
         return
       }
       waiter = {
+        sequence: ++sequence,
         resolve,
         reject,
         timer: setTimeout(() => {
@@ -136,7 +144,7 @@ function createDesktopObserver(options = {}) {
           reject(new Error('Desktop observer request timed out.'))
         }, REQUEST_TIMEOUT_MS),
       }
-      child.stdin.write('\n')
+      child.stdin.write(`${sequence}\n`)
     })
   }
 

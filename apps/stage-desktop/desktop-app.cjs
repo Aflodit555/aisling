@@ -539,16 +539,17 @@ async function startDesktop(options = {}) {
       if (!trusted(event))
         throw new Error('Untrusted desktop awareness request')
       const current = desktopObserver.status()
-      if (current.enabled) {
-        // On-demand: ask the long-running kernel for an immediate snapshot of
-        // the cached foreground window instead of only serving the last timer poll.
-        // A failed request falls back to the last known status (never throws).
-        try {
-          await desktopObserver.request()
-        }
-        catch { /* keep the last known status */ }
+      if (!current.enabled)
+        return { ...current, available: false, context: undefined }
+      try {
+        const context = await desktopObserver.request()
+        return { enabled: desktopObserver.status().enabled, available: true, context, error: '' }
       }
-      return desktopObserver.status()
+      catch (cause) {
+        // No fresh response for this read: never substitute the cached latest.
+        return { enabled: desktopObserver.status().enabled, available: false,
+          error: cause instanceof Error ? cause.message : String(cause) }
+      }
     })
     ipcMain.handle('aisling:desktop-awareness:judge', async (event) => {
       if (!trusted(event))

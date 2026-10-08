@@ -51,7 +51,7 @@ export function blendExpression(value: number, parameter: ExpressionParameter, w
 }
 
 const SILENT = 0.001
-const JOY_EYE_PARAMETER = /^ParamEye[LR](Open|Smile)$/
+const JOY_EYE_PARAMETER = /^ParamEye[LR](?:Open|Smile)$/
 
 export function createEmotionLayer(options: {
   rig: Live2DRig

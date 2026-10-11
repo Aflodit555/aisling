@@ -29,7 +29,7 @@ export interface Live2DRig {
   isGesture(): boolean
 }
 
-/** pixi-live2d-display's MotionPriority.IDLE / NORMAL (kept numeric: the enum lives in the lazily imported module). */
+/** pixi-live2d-display's MotionPriority.IDLE / NORMAL / FORCE (kept numeric: the enum lives in the lazily imported module). */
 const IDLE_PRIORITY = 1
 const GESTURE_PRIORITY = 2
 const EMOTION_PRIORITY = 3

@@ -3,11 +3,11 @@
  * signal (0..1) and the `ParamMouthOpenY` value written to the Live2D model.
  *
  * The Mouth Signal / Mouth Controller already produce a correct *logical*
- * openness; this layer only compensates for the Hiyori model's visually weak
+ * openness; this layer only compensates for the model's visually weak
  * response. It applies a concave curve (exponent < 1 lifts low–mid levels so
  * quiet speech stays visible) plus a modest gain, then clamps to the model's
- * parameter ceiling. Strong speech therefore approaches — but does not sit at —
- * full openness, instead of being pinned at 1.0.
+ * parameter ceiling. Strong speech can reach the ceiling, while softer speech
+ * follows the calibrated curve.
  *
  * This is a pure value transform: it knows nothing about audio, providers,
  * ownership, Cubism or any specific parameter name.

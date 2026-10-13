@@ -73,8 +73,6 @@ export function createMouthController(options: MouthControllerOptions = {}): Mou
   let hasSignal = false
 
   function setState(next: MouthState): void {
-    if (next === state)
-      return
     state = next
   }
 

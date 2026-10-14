@@ -2,6 +2,7 @@
 // semantic-judge response so the smoke is deterministic and spends no API quota.
 process.env.AISLING_STAGE_URL = 'http://localhost:5174'
 process.env.TYPESAFE_API_KEY = 'smoke'
+const CANDIDATE_ONLY = process.argv.includes('--candidate')
 const NativeResponse = Response
 let judgeRequest
 let emotionRequest
@@ -48,7 +49,7 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     const stage = useStageStore()
     const settings = useSettingsStore()
     await settings.load()
-    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, cooldownSeconds: 15 })
+    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: 'smoke', cooldownSeconds: 15 })
     const initiallyOff = !(await window.aislingDesktop.readDesktopContext()).enabled
     const calls = []
     settings.activeChatProvider = { id: 'smoke', complete: async request => {
@@ -65,6 +66,17 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     for (let attempt = 0; attempt < 40 && !calls.length; attempt++)
       await new Promise(resolve => setTimeout(resolve, 250))
     for (let i = 0; i < 20; i++) await Promise.resolve()
+    if (${CANDIDATE_ONLY}) {
+      const delivered = stage.autonomous.decisions.filter(d => d.reason === 'output-delivered').at(-1)
+      const handledStatus = stage.autonomous.observations.find(o => o.candidateId === delivered?.candidateId)?.status
+      await stage.setDesktopAwarenessEnabled(false)
+      return {
+        nativeAvailable: native?.available,
+        kind: stage.lastTurn?.stimulus.kind,
+        candidateId: delivered?.candidateId, handledStatus,
+        stopped: !(await window.aislingDesktop.readDesktopContext()).enabled,
+      }
+    }
     await settings.saveConsciousness({
       providerType: 'openai-compatible', baseUrl: 'https://example.invalid/v1', apiKey: 'smoke', model: 'smoke-model', temperature: 1.1,
     })
@@ -72,22 +84,22 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     await router.push('/settings/consciousness')
     let temperature
     for (let attempt = 0; attempt < 50 && !temperature; attempt++) {
-      temperature = document.querySelector('.consciousness input[type=range]')?.value
+      temperature = document.querySelector('.settings-module input[type=range]')?.value
       if (!temperature) await new Promise(resolve => setTimeout(resolve, 50))
     }
     // Desktop Awareness toggle + cooldown live on their own module page.
     await router.push('/settings/desktop-awareness')
     let control
     for (let attempt = 0; attempt < 50 && !control; attempt++) {
-      control = document.querySelector('.desktop-awareness')
+      control = document.querySelector('[aria-label="Desktop Awareness cooldown"]')?.closest('.settings-module')
       if (!control) await new Promise(resolve => setTimeout(resolve, 50))
     }
     if (!control) throw new Error('Desktop Awareness settings did not render at ' + location.pathname + ': ' + document.body.innerText.slice(0, 300))
-    const uiOn = control?.querySelector('input[type=checkbox]')?.checked
+    const uiOn = control?.querySelector('.module-toggle input[type=checkbox]')?.checked
     const cooldownSetting = control?.querySelector('[aria-label="Desktop Awareness cooldown"]')?.value
-    const shouldInterrupt = stage.autonomous.scores?.shouldInterrupt
+    const shouldInterrupt = stage.autonomous.decisions.findLast(decision => decision.score !== undefined)?.score
     const firstKind = stage.lastTurn?.stimulus.kind
-    const hasContextPrompt = calls[0]?.messages.some(message => message.content?.includes('Current desktop context'))
+    const hasContextPrompt = calls[0]?.messages.some(message => message.content?.includes('Response candidate'))
     return {
       bridge: typeof window.aislingDesktop.readDesktopContext,
       nodeAccess: typeof window.require,
@@ -105,6 +117,20 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
     }
   })()`)
 
+  if (CANDIDATE_ONLY) {
+    assert.equal(result.nativeAvailable, true, 'Run on an unlocked interactive Windows desktop')
+    assert.equal(result.kind, 'autonomous')
+    assert.equal(result.handledStatus, 'handled')
+    assert.equal(result.stopped, true)
+    assert.ok(judgeRequest.state.candidate?.target)
+    assert.equal(typeof result.candidateId, 'string')
+    console.log(JSON.stringify({ ok: true, scope: 'candidate', ...result }))
+    clearTimeout(timeout)
+    win.destroy()
+    app.exit(0)
+    return
+  }
+
   assert.equal(result.bridge, 'function')
   assert.equal(result.nodeAccess, 'undefined')
   assert.equal(result.initiallyOff, true)
@@ -112,22 +138,11 @@ const timeout = setTimeout(() => { console.error('Desktop smoke timed out'); app
   assert.equal(Boolean(result.app), true)
   assert.equal(result.uiOn, true)
   assert.equal(result.shouldInterrupt, 0.9)
-  assert.deepEqual(Object.keys(judgeRequest.state), ['focus', 'screen_text', 'media', 'mic', 'idle_time'])
-  assert.deepEqual(Object.keys(judgeRequest.state.focus), ['app', 'title'])
-  assert.equal(typeof judgeRequest.state.screen_text, 'string')
-  assert.equal(Array.isArray(judgeRequest.state.media), true)
-  assert.equal(Array.isArray(judgeRequest.state.mic), true)
-  assert.equal(typeof judgeRequest.state.idle_time, 'number')
-  assert.deepEqual(judgeRequest.questions, {
-    should_interrupt: {
-      type: 'noul',
-      instructions: 'Would this be a natural moment for Aisling to make a brief unsolicited comment?',
-      criteria: {
-        true: 'The current context contains a concrete detail that gives Aisling a natural conversational opening. A brief reaction, observation, opinion, curiosity, or playful remark would feel appropriate. The moment does not need to be important or unusual.',
-        false: 'There is no concrete conversational hook, the context is repetitive or too thin to react to, or the user is clearly occupied in a way that would make speaking now intrusive.',
-      },
-    },
-  })
+  assert.deepEqual(Object.keys(judgeRequest.state), ['candidate', 'background'])
+  assert.equal(typeof judgeRequest.state.candidate.target.app, 'string')
+  assert.ok(['foreground', 'media'].includes(judgeRequest.state.candidate.source))
+  assert.deepEqual(Object.keys(judgeRequest.questions), ['should_interrupt'])
+  assert.equal(judgeRequest.questions.should_interrupt.type, 'noul')
   assert.equal(result.firstKind, 'autonomous')
   assert.equal(result.hasContextPrompt, true)
   assert.equal(result.callCount, 1)

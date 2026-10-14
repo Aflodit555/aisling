@@ -84,6 +84,7 @@ export const useSettingsStore = defineStore('settings', () => {
         ? Math.max(10, Math.min(300, Math.round(next.cooldownSeconds / 5) * 5))
         : current.cooldownSeconds,
       jevApiKey: typeof next.jevApiKey === 'string' ? next.jevApiKey : current.jevApiKey,
+      replyHistoryEnabled: next.replyHistoryEnabled === true,
     } }
     await persist()
   }

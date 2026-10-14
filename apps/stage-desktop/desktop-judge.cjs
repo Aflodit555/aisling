@@ -1,5 +1,6 @@
 const TYPESAFE_URL = 'https://api.typesafe.ai/v1/systemone'
 const TYPESAFE_MODEL = 'jev-latest'
+const { observationTextFingerprint } = require('./desktop-activity.cjs')
 
 // One category per expression the character model can show distinctly; neutral
 // is not a category but intensity 0 (see apps/stage-web/src/presentation/emotion-state.ts).
@@ -39,14 +40,51 @@ function normalizeConversation(value) {
     .map(turn => ({ speaker: turn.speaker, text: turn.text.slice(0, 600) }))
 }
 
+/** The candidate is bound to this capture, not to a freely chosen desktop detail. */
+function candidateForSnapshot(request, context) {
+  const value = request?.candidate
+  const snapshot = value?.snapshot
+  if (!snapshot || snapshot.capturedAt !== context.capturedAt || snapshot.targetHwnd !== context.targetHwnd || snapshot.sequence !== context.sequence)
+    throw new Error('Desktop snapshot changed before candidate judgment.')
+  if (!value || !['foreground', 'media'].includes(value.source) || !['appeared', 'content-changed', 'track-changed', 'idle'].includes(value.change)
+    || [value.id, value.objectId].some(id => typeof id !== 'string' || !id.trim() || id.length > 128))
+    throw new Error('Invalid desktop candidate.')
+  const target = value.target
+  if (!target || typeof target.app !== 'string' || typeof target.title !== 'string') throw new Error('Invalid candidate target.')
+  let normalized
+  if (value.source === 'foreground') {
+    if (target.app !== context.focus.app || target.title !== context.focus.title || target.text !== context.focus.text || !target.text.trim())
+      throw new Error('Foreground candidate does not match snapshot.')
+    normalized = { app: target.app, title: target.title, text: target.text }
+  }
+  else {
+    const identity = item => JSON.stringify([item.app.trim().toLowerCase().replace(/\.exe$/, ''), item.title.trim(), item.artist.trim()])
+    if (typeof target.artist !== 'string' || context.media.some(item => !item.app.trim() || !item.title.trim() || item.app.length >= 120 || item.title.length >= 300 || item.artist.length >= 200)
+      || new Set(context.media.map(identity)).size !== 1 || !context.media.some(item => identity(item) === identity(target)))
+      throw new Error('Media candidate is stale or ambiguous.')
+    normalized = { app: target.app, title: target.title, artist: target.artist }
+  }
+  return { id: value.id, objectId: value.objectId, source: value.source, change: value.change, target: normalized,
+    snapshot: { capturedAt: snapshot.capturedAt, targetHwnd: snapshot.targetHwnd, sequence: snapshot.sequence } }
+}
+function recentReplyForSnapshot(request, context, enabled) {
+  if (!enabled || request.recentReply === undefined) return undefined
+  const value = request.recentReply
+  if (!value || Object.keys(value).some(key => key !== 'deliveredAt' && key !== 'summary')
+    || !Number.isSafeInteger(value.deliveredAt) || value.deliveredAt < 0 || value.deliveredAt > context.capturedAt
+    || context.capturedAt - value.deliveredAt > 600_000 || typeof value.summary !== 'string' || !value.summary.trim() || value.summary.length > 240)
+    throw new Error('Invalid recent candidate reply.')
+  return { deliveredAt: value.deliveredAt, summary: value.summary }
+}
+
 function createTypeSafeJudge(options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   const questions = {
     should_interrupt: {
       type: 'noul',
-      instructions: 'Would this be a natural moment for Aisling to make a brief unsolicited comment?',
+      instructions: 'Would a brief unsolicited reaction to this specific candidate be natural now? Evaluate only candidate.target. Background is environment, not another response target. A recent_reply is a prior successful reply to this same target, not proof of its semantic content.',
       criteria: {
-        true: 'The current context contains a concrete detail that gives Aisling a natural conversational opening. A brief reaction, observation, opinion, curiosity, or playful remark would feel appropriate. The moment does not need to be important or unusual.',
+        true: 'The candidate target contains a concrete detail that gives Aisling a natural conversational opening. A brief reaction, observation, opinion, curiosity, or playful remark would feel appropriate. The moment does not need to be important or unusual.',
         false: 'There is no concrete conversational hook, the context is repetitive or too thin to react to, or the user is clearly occupied in a way that would make speaking now intrusive.',
       },
     },
@@ -58,16 +96,15 @@ function createTypeSafeJudge(options = {}) {
     return process.env.TYPESAFE_API_KEY
   }
 
-  async function judge(context, signal, apiKey) {
+  async function judge(context, signal, apiKey, candidate, recentReply) {
     const key = resolveKey(apiKey)
     if (!key)
       throw new Error('Desktop semantic judge unavailable: no Jev API Key configured.')
+    const bound = candidateForSnapshot({ candidate }, context)
     const state = {
-      focus: { app: context.focus.app, title: context.focus.title },
-      screen_text: context.focus.text,
-      media: context.media,
-      mic: context.mic,
-      idle_time: context.idleSeconds,
+      candidate: { source: bound.source, change: bound.change, target: bound.target },
+      background: { mic: context.mic, idle: context.idleSeconds >= 60 ? 'idle' : 'active' },
+      ...(recentReply ? { recent_reply: recentReplyForSnapshot({ recentReply }, context, true) } : {}),
     }
     const response = await fetchImpl(TYPESAFE_URL, {
       method: 'POST',
@@ -127,4 +164,4 @@ function createTypeSafeJudge(options = {}) {
   return { judge, judgeEmotion }
 }
 
-module.exports = { createTypeSafeJudge, normalizeConversation }
+module.exports = { createTypeSafeJudge, normalizeConversation, candidateForSnapshot, recentReplyForSnapshot }

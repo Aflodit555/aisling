@@ -24,6 +24,8 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
         const raw = storage.getItem(KEY)
         if (raw) {
           const parsed = JSON.parse(raw) as Partial<PlatformConfig>
+          // One-time consent migration; no old event-history state survives P1.
+          const oldAwareness = parsed.desktopAwareness as (Partial<PlatformConfig['desktopAwareness']> & { eventHistoryEnabled?: unknown }) | undefined
           const storedSpeech = parsed.speech as Partial<PlatformConfig['speech']> | undefined
           // v0.1.6 had only HTTP TTS and no transport field. Preserve that
           // behavior for existing users while new configurations default to WS.
@@ -41,6 +43,8 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
               jevApiKey: typeof parsed.desktopAwareness?.jevApiKey === 'string'
                 ? parsed.desktopAwareness.jevApiKey
                 : defaults.desktopAwareness.jevApiKey,
+              replyHistoryEnabled: oldAwareness?.replyHistoryEnabled === true
+                || (oldAwareness?.replyHistoryEnabled === undefined && oldAwareness?.eventHistoryEnabled === true),
             },
             speech: { ...defaults.speech, ...parsed.speech, enabled: storedSpeech?.enabled ?? (storedSpeech?.providerType !== undefined && storedSpeech.providerType !== 'none'), transport: migratedTransport },
             vision: { ...defaults.vision, ...parsed.vision, enabled: parsed.vision?.enabled ?? (parsed.vision?.providerType !== undefined && parsed.vision.providerType !== 'none') },
@@ -49,7 +53,7 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
           if (Object.hasOwn(parsed, 'hearing')
             || parsed.speech?.enabled === undefined || parsed.vision?.enabled === undefined || parsed.webSearch?.enabled === undefined
             || parsed.consciousness?.providerType !== 'openai-compatible'
-            || Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey')
+            || Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey' && key !== 'replyHistoryEnabled')
             || (parsed.webSearch && (parsed.webSearch.providerType !== webSearch.providerType || Object.keys(parsed.webSearch).some(key => key !== 'providerType' && key !== 'enabled'))))
             storage.setItem(KEY, JSON.stringify(config))
           return config

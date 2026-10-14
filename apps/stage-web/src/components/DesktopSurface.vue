@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { t } from '../i18n'
 import { storeToRefs } from 'pinia'
-import { onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { recognizeInteractionPreference } from '../runtime/interaction-preference'
 
 import { useSpeechStore } from '../stores/speech'
 import { useStageStore } from '../stores/stage'
@@ -61,6 +62,7 @@ const entered = ref(false)
 const inputVisible = ref(false)
 const bubble = ref('')
 const draft = ref('')
+const canSubmit = computed(() => Boolean(draft.value.trim()) && (!stage.sending || Boolean(recognizeInteractionPreference(draft.value))))
 const character = ref<InstanceType<typeof CharacterSurface>>()
 let pressed: { id: number; x: number; y: number; moved: boolean } | undefined
 let suppressClick = false
@@ -82,7 +84,7 @@ function onReady(): void {
 
 function submit(): void {
   const text = draft.value.trim()
-  if (!text || stage.sending) return
+  if (!canSubmit.value) return
   stage.send(text)
   draft.value = ''
 }
@@ -194,8 +196,8 @@ onUnmounted(() => {
     <div data-desktop-hit class="character-hit" @pointerdown="onCharacterDown" @pointermove="onCharacterMove" @pointerup="stopDrag" @pointercancel="stopDrag" @lostpointercapture="stopDrag" @click="onCharacterClick" />
     <SpeechBubble ref="speechBubble" :style="bubbleStyle" :text="bubble" :pending="stage.sending || stage.visionProcessing" :searching="stage.searching" :speaking="phase === 'buffering' || speaking" />
     <form v-if="inputVisible" data-desktop-hit class="desktop-composer" :style="composerStyle" @submit.prevent="submit">
-      <input v-model="draft" :aria-label="t('Message Aisling')" :placeholder="t('Say something…')" :disabled="stage.sending" @keydown.esc="inputVisible = false">
-      <button type="submit" :disabled="!draft.trim() || stage.sending" :aria-label="t('Send message')"><Icon name="send" :size="16" /></button>
+      <input v-model="draft" :aria-label="t('Message Aisling')" :placeholder="t('Say something…')" @keydown.esc="inputVisible = false">
+      <button type="submit" :disabled="!canSubmit" :aria-label="t('Send message')"><Icon name="send" :size="16" /></button>
     </form>
   </main>
 </template>

@@ -6,6 +6,7 @@ import { ref } from 'vue'
 import type { ConversationSession } from '../conversation/conversation-store'
 import type { SelectedImage } from '../image/file'
 import type { DisplayMessage } from '../stores/stage'
+import { recognizeInteractionPreference } from '../runtime/interaction-preference'
 
 import Composer from './Composer.vue'
 import Icon from './Icon.vue'
@@ -32,6 +33,10 @@ const emit = defineEmits<{
 const selectedImage = ref<SelectedImage>()
 
 function onSend(text: string): void {
+  if (recognizeInteractionPreference(text)) {
+    emit('send', text)
+    return
+  }
   if (selectedImage.value) {
     const { previewUrl: _preview, ...image } = selectedImage.value
     emit('image', { image, caption: text })

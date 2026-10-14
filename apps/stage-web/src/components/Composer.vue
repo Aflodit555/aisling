@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from '../i18n'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { recognizeInteractionPreference } from '../runtime/interaction-preference'
 
 import Icon from './Icon.vue'
 
@@ -13,10 +14,11 @@ const emit = defineEmits<{
 }>()
 
 const draft = ref('')
+const canSubmit = computed(() => Boolean(draft.value.trim()) && (!props.disabled || Boolean(recognizeInteractionPreference(draft.value))))
 
 function submit(): void {
   const text = draft.value.trim()
-  if (!text || props.disabled)
+  if (!canSubmit.value)
     return
 
   emit('send', text)
@@ -30,10 +32,9 @@ function submit(): void {
       v-model="draft"
       rows="1"
       :placeholder="t('Say something to Aisling…')"
-      :disabled="disabled"
       @keydown.enter.exact.prevent="submit"
     />
-    <button type="submit" class="icon-btn send" :aria-label="t('Send')" :disabled="disabled || !draft.trim()">
+    <button type="submit" class="icon-btn send" :aria-label="t('Send')" :disabled="!canSubmit">
       <Icon name="send" />
     </button>
   </form>

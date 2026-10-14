@@ -1,6 +1,6 @@
 import type { CharacterOutput, ChatMessage, ImageInput, Stimulus } from '@aisling/core'
 import { defineStore } from 'pinia'
-import { computed, reactive, ref, shallowRef } from 'vue'
+import { computed, reactive, ref, shallowRef, watch } from 'vue'
 
 import { createWebVisualStimulus } from '../adapter/vision'
 import { createWebTextStimulus } from '../adapter/web'
@@ -11,7 +11,9 @@ import {
   type ConversationSession,
 } from '../conversation/conversation-store'
 import { createAislingRuntime } from '../runtime/aisling'
-import { createAutonomousController, createAutonomousState } from '../runtime/autonomous'
+import { createAutonomousController, createAutonomousState, type DesktopJudgeRequest, type DesktopObserverStatus } from '../runtime/autonomous'
+import { mediaCandidateMatches, playingMedia } from '../runtime/desktop-observations'
+import { PREFERENCE_ACKNOWLEDGEMENTS, recognizeInteractionPreference } from '../runtime/interaction-preference'
 import { resolvePersistentStorage } from '../storage/desktop-storage'
 import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
@@ -109,16 +111,26 @@ export const useStageStore = defineStore('stage', () => {
     return connected
   }
 
+  let desktopRead: Promise<DesktopObserverStatus> | undefined
   async function readDesktopContext() {
     if (!refreshDesktopBridgeStatus())
       throw new Error('Desktop bridge is unavailable')
-    return window.aislingDesktop!.readDesktopContext()
+    // Polling and final media validation share the native observer's one read.
+    if (!desktopRead) desktopRead = window.aislingDesktop!.readDesktopContext().then(snapshot => {
+      if (activeAutonomous?.stimulus.candidate.source === 'media') {
+        if (!snapshot.available || !snapshot.context || !snapshot.context.media.length) cancelAutonomous('media-unavailable')
+        else if (!playingMedia(snapshot.context.media)) cancelAutonomous('media-ambiguous')
+        else if (!mediaCandidateMatches(activeAutonomous.stimulus.candidate, snapshot.context)) cancelAutonomous('media-changed')
+      }
+      return snapshot
+    }).finally(() => { desktopRead = undefined })
+    return desktopRead
   }
 
-  async function judgeDesktopContext() {
+  async function judgeDesktopContext(request: DesktopJudgeRequest) {
     if (!refreshDesktopBridgeStatus())
       throw new Error('Desktop bridge is unavailable')
-    return window.aislingDesktop!.judgeDesktopContext()
+    return window.aislingDesktop!.judgeDesktopContext(request)
   }
 
   const autonomousController = createAutonomousController({
@@ -129,7 +141,12 @@ export const useStageStore = defineStore('stage', () => {
     isReady: () => desktopAvailable.value && settings.loaded && Boolean(settings.activeChatProvider),
     getCooldownMs: () => settings.config.desktopAwareness.cooldownSeconds * 1000,
     trigger: sendStimulus,
+    getReplyHistoryEnabled: () => settings.config.desktopAwareness.replyHistoryEnabled === true,
+    diagnostic: window.aislingDesktop?.desktopDiagnostics?.enabled
+      ? record => window.aislingDesktop?.recordDesktopDiagnostic?.(record) : undefined,
+    diagnosticReplyText: window.aislingDesktop?.desktopDiagnostics?.replyText === true,
   })
+  watch(() => settings.config.desktopAwareness.replyHistoryEnabled, () => autonomousController.syncHistorySetting(), { flush: 'sync' })
 
   async function setDesktopAwarenessEnabled(enabled: boolean, persist = true): Promise<void> {
     const ticket = ++awarenessRevision
@@ -161,9 +178,21 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   let partialIndex = -1
+  let activeAutonomous: { stimulus: import('@aisling/core').AutonomousStimulus; cancelled: boolean; delivered: boolean } | undefined
+  let preferenceHistoryPending = false
+  function cancelAutonomous(reason: string): void {
+    if (!activeAutonomous || activeAutonomous.cancelled) return
+    activeAutonomous.cancelled = true
+    if (partialIndex >= 0) messages.value.splice(partialIndex, 1)
+    partialIndex = -1
+    autonomousController.recordDecision(activeAutonomous.stimulus.source, 'blocked', reason, activeAutonomous.stimulus.id, activeAutonomous.stimulus.candidate)
+    autonomousController.recordOutputDiagnostic(activeAutonomous.stimulus, 'chat-cancel-requested', { reason })
+  }
   runtime.onEvent((event) => {
+    if (event.type === 'provider:called' && activeAutonomous)
+      autonomousController.recordOutputDiagnostic(activeAutonomous.stimulus, 'chat-started', { turnId: event.turnId })
     if (event.type === 'output:partial') {
-      if (!sending.value) return
+      if (!sending.value || activeAutonomous?.cancelled) return
       if (!event.text.trim()) {
         if (partialIndex >= 0) messages.value.splice(partialIndex, 1)
         partialIndex = -1
@@ -198,10 +227,44 @@ export const useStageStore = defineStore('stage', () => {
   function sendStimulus(stimulus: Stimulus): void {
     if (stimulus.kind === 'user-text' || stimulus.kind === 'visual')
       autonomousController.noteHumanInteraction()
-    if (sending.value)
+    if (stimulus.kind === 'user-text') {
+      const preference = recognizeInteractionPreference(stimulus.text)
+      if (preference) {
+        autonomousController.setPreference(preference, stimulus.id)
+        if (preference === 'quiet') cancelAutonomous('quiet-in-flight')
+        const acknowledgement = [
+          { role: 'user' as const, content: stimulus.text },
+          { role: 'assistant' as const, content: PREFERENCE_ACKNOWLEDGEMENTS[preference] },
+        ]
+        messages.value = [...messages.value, ...acknowledgement]
+        sessionMessages.value = [...sessionMessages.value, ...acknowledgement]
+        persistActiveSession()
+        if (sending.value)
+          preferenceHistoryPending = true
+        else
+          runtime.resetHistory(sessionMessages.value.slice(-MODEL_CONTEXT_WINDOW))
+        return
+      }
+    }
+    if (stimulus.kind === 'autonomous' && autonomous.preference === 'quiet') {
+      autonomousController.recordDecision(stimulus.source, 'blocked', 'quiet', stimulus.id, stimulus.candidate)
+      autonomousController.recordOutputDiagnostic(stimulus, 'chat-blocked', { delivered: false })
       return
+    }
+    if (sending.value) {
+      if (stimulus.kind === 'autonomous')
+        autonomousController.recordOutputDiagnostic(stimulus, 'chat-busy', { delivered: false })
+      return
+    }
 
     sending.value = true
+    const autonomousTurn = stimulus.kind === 'autonomous' ? {
+      stimulus, cancelled: false, delivered: false,
+    } : undefined
+    activeAutonomous = autonomousTurn
+    if (activeAutonomous) {
+      autonomousController.recordDecision(stimulus.source, 'allowed', 'output-started', stimulus.id, activeAutonomous.stimulus.candidate)
+    }
     partialIndex = -1
     const userMessage = stimulusToUserMessage(stimulus)
     if (userMessage) {
@@ -215,11 +278,34 @@ export const useStageStore = defineStore('stage', () => {
       }
     }
 
-    void runtime.ingest(stimulus).then((turn) => {
+    void runtime.ingest(stimulus).then(async (turn) => {
+      if (autonomousTurn && !autonomousTurn.cancelled && stimulus.kind === 'autonomous' && stimulus.candidate.source === 'media'
+        && turn.status === 'completed' && turn.output?.text.trim()) {
+        try {
+          const checked = await readDesktopContext()
+          autonomousController.recordOutputDiagnostic(stimulus, 'media-delivery-check', {
+            checkedSnapshot: checked.context ? { capturedAt: checked.context.capturedAt, targetHwnd: checked.context.targetHwnd, sequence: checked.context.sequence } : undefined,
+          })
+        }
+        catch { cancelAutonomous('media-unavailable') }
+      }
+      if (autonomousTurn && stimulus.kind === 'autonomous') {
+        const status = autonomousTurn.cancelled ? 'chat-cancelled' : turn.status === 'failed' ? 'chat-failed'
+          : !turn.output?.text.trim() ? 'chat-empty' : 'chat-completed'
+        autonomousController.recordOutputDiagnostic(stimulus, status,
+          { turnId: turn.id, text: turn.output?.text, ...(status === 'chat-completed' ? {} : { delivered: false }) })
+      }
+      // No provider cancellation protocol: discard a revoked turn before any output side effects.
+      if (autonomousTurn?.cancelled) {
+        autonomousController.recordDecision(stimulus.source, 'blocked', 'cancelled-output', stimulus.id, autonomousTurn.stimulus.candidate)
+        return
+      }
+      // Foreground changes do not revoke accepted replies; obsolete media targets do.
       if (turn.status === 'completed' && turn.output) {
         lastTurn.value = { stimulus: turn.stimulus, output: turn.output }
         if (turn.stimulus.kind === 'autonomous' && !turn.output.text.trim()) {
           if (partialIndex >= 0) messages.value.splice(partialIndex, 1)
+          autonomousController.recordDecision(stimulus.source, 'blocked', 'empty-output', stimulus.id, autonomousTurn?.stimulus.candidate)
           return
         }
         if (partialIndex >= 0)
@@ -228,10 +314,20 @@ export const useStageStore = defineStore('stage', () => {
           messages.value.push({ role: 'assistant', content: turn.output.text })
         sessionMessages.value = [...sessionMessages.value, { role: 'assistant', content: turn.output.text }]
         persistActiveSession()
+        if (autonomousTurn) {
+          const replyHistoryWritten = autonomousController.completed(autonomousTurn.stimulus, true, turn.output.text)
+          autonomousController.recordDecision(stimulus.source, 'allowed', 'output-delivered', stimulus.id, autonomousTurn.stimulus.candidate)
+          autonomousTurn.delivered = true
+          autonomousController.recordOutputDiagnostic(autonomousTurn.stimulus, 'delivery', {
+            turnId: turn.id, text: turn.output.text, delivered: true, replyHistoryWritten,
+          })
+        }
         void speech.speak(turn.output.text)
         void emotion.judge(sessionMessages.value)
       }
       else {
+        if (autonomousTurn)
+          autonomousController.recordDecision(stimulus.source, 'blocked', 'output-failed', stimulus.id, autonomousTurn.stimulus.candidate)
         if (partialIndex >= 0) messages.value.splice(partialIndex, 1)
         messages.value = [...messages.value, {
           role: 'error',
@@ -239,10 +335,16 @@ export const useStageStore = defineStore('stage', () => {
         }]
       }
     }).finally(() => {
+      // Commands may arrive during generation; keep cancelled output out of Core history as well.
+      if (preferenceHistoryPending || autonomousTurn?.cancelled) {
+        runtime.resetHistory(sessionMessages.value.slice(-MODEL_CONTEXT_WINDOW))
+        preferenceHistoryPending = false
+      }
+      activeAutonomous = undefined
       partialIndex = -1
       sending.value = false
-      if (stimulus.kind === 'autonomous')
-        autonomousController.completed()
+      if (autonomousTurn && !autonomousTurn.delivered)
+        autonomousController.completed(autonomousTurn.stimulus, false)
     })
   }
 

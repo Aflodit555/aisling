@@ -6,6 +6,17 @@ const assert = require('node:assert/strict')
 const path = require('node:path')
 const os = require('node:os')
 const { writeFileSync } = require('node:fs')
+const candidateJudgeRequests = []
+if (process.env.AISLING_DESKTOP_CANDIDATE_SMOKE === '1') {
+  globalThis.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body)
+    const emotion = 'emotion' in request.questions
+    if (!emotion) candidateJudgeRequests.push(request)
+    return new Response(JSON.stringify({ answers: emotion
+      ? { emotion: { type: 'choice', choice: 'joy', confidence: 0.9 }, intensity: { type: 'score', score: 1 } }
+      : { should_interrupt: { type: 'noul', noul: 0.9 } } }))
+  }
+}
 const { startDesktop, enterDesktopMode, returnToStage } = require('./desktop-app.cjs')
 
 // The smoke runs hidden and may execute without a compositor/GPU; keep it
@@ -59,6 +70,36 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
   assert.equal(result.origin, 'aisling://stage')
   assert.ok(result.appChildCount > 0)
 
+  if (process.env.AISLING_DESKTOP_CANDIDATE_SMOKE === '1') {
+    const report = await contents.executeJavaScript(`(async () => {
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
+      const stage = pinia._s.get('stage'), settings = pinia._s.get('settings')
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: 'smoke', replyHistoryEnabled: true })
+      settings.activeChatProvider = { id: 'smoke', complete: async () => ({ text: 'One candidate comment. (smoke)' }) }
+      await stage.setDesktopAwarenessEnabled(true)
+      for (let n = 0; n < 120; n++) {
+        if (stage.autonomous.decisions.some(d => d.reason === 'output-delivered') && stage.autonomous.decisions.some(d => d.reason === 'duplicate')) break
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      const delivered = stage.autonomous.decisions.filter(d => d.reason === 'output-delivered')
+      const duplicate = stage.autonomous.decisions.find(d => d.reason === 'duplicate' && d.candidateId === delivered[0]?.candidateId)
+      const result = { deliveryCount: delivered.length, candidateId: delivered[0]?.candidateId, duplicateId: duplicate?.candidateId,
+        gate: duplicate?.reason, historyRecorded: !!stage.autonomous.observations.find(o => o.candidateId === delivered[0]?.candidateId)?.recentReply }
+      await stage.setDesktopAwarenessEnabled(false)
+      return result
+    })()`)
+    assert.equal(report.deliveryCount, 1)
+    assert.equal(report.duplicateId, report.candidateId)
+    assert.equal(report.gate, 'duplicate')
+    assert.equal(report.historyRecorded, true)
+    assert.ok(candidateJudgeRequests.some(request => request.state.candidate?.target))
+    console.log(JSON.stringify({ candidateSmoke: 'passed', realNativeCapture: true, modelResponses: 'mocked', ...report }))
+    clearTimeout(timeout)
+    win.destroy()
+    app.exit(0)
+    return
+  }
+
   if (process.env.AISLING_MINIMIZE_SMOKE === '1') {
     const view = win.contentView.children[0]
     const before = view.getBounds()
@@ -80,6 +121,41 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
   // Route transitions need a visible renderer; the smoke starts with a hidden Stage window.
   enterDesktopMode()
   returnToStage()
+  if (process.env.AISLING_HISTORY_SETTING_SMOKE === '1') {
+    const historySetting = await contents.executeJavaScript(`(async () => {
+    const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router
+    await router.push('/settings/desktop-awareness')
+    for (let n = 0; n < 50 && !document.querySelector('form .advanced-settings input[type=checkbox]'); n++)
+      await new Promise(resolve => setTimeout(resolve, 50))
+    const checkbox = document.querySelector('form .advanced-settings input[type=checkbox]')
+    if (!checkbox) throw new Error('Target reply history setting did not render')
+    const initiallyOff = !checkbox.checked
+    const results = []
+    for (const enabled of [true, false]) {
+      checkbox.click()
+      checkbox.closest('form').requestSubmit()
+      for (let n = 0; n < 50; n++) {
+        const saved = JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1'))
+        if (saved?.desktopAwareness.replyHistoryEnabled === enabled) {
+          results.push({ enabled, awarenessEnabled: saved.desktopAwareness.enabled })
+          break
+        }
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+    }
+    await router.push('/')
+    return { initiallyOff, results }
+  })()`)
+    assert.equal(historySetting.initiallyOff, true)
+    assert.deepEqual(historySetting.results, [
+      { enabled: true, awarenessEnabled: false }, { enabled: false, awarenessEnabled: false },
+    ])
+    console.log(JSON.stringify({ targetHistorySettingSmoke: 'passed', defaultOff: true, optInAndOptOut: true }))
+    clearTimeout(timeout)
+    win.destroy()
+    app.exit(0)
+    return
+  }
   const nativeFetch = globalThis.fetch
   let searchUrl = ''
   globalThis.fetch = async (url, options) => {
@@ -94,35 +170,40 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
   try {
     const searchUi = await contents.executeJavaScript(`(async () => {
       const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router
+      const settings = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('settings')
       await router.push('/settings/web-search')
-      for (let n = 0; n < 50 && !document.querySelector('.web-search form'); n++)
+      for (let n = 0; n < 50 && !document.querySelector('.settings-module .module-toggle input'); n++)
         await new Promise(resolve => setTimeout(resolve, 50))
-      const form = document.querySelector('.web-search form')
-      if (!form) throw new Error('Web Search settings did not render at ' + location.pathname)
-      const provider = form.querySelector('select').value
-      const hasKeyField = !!form.querySelector('input[type=password]')
-      form.querySelector('button[type=button]').click()
-      for (let n = 0; n < 50 && !form.querySelector('.results'); n++)
-        await new Promise(resolve => setTimeout(resolve, 50))
-      const titles = [...form.querySelectorAll('.results strong')].map(node => node.textContent)
-      const firstSnippet = form.querySelector('.results .snippet')?.textContent
-      const select = form.querySelector('select')
-      select.value = 'none'
-      select.dispatchEvent(new Event('change', { bubbles: true }))
-      await new Promise(resolve => setTimeout(resolve, 0))
-      form.requestSubmit()
-      await new Promise(resolve => setTimeout(resolve, 0))
-      const disabled = form.querySelector('button[type=button]').disabled
+      const module = document.querySelector('.settings-module')
+      const toggle = module?.querySelector('.module-toggle input')
+      if (!toggle) throw new Error('Web Search settings did not render at ' + location.pathname)
+      const provider = settings.config.webSearch.providerType
+      const hasKeyField = !!module.querySelector('input[type=password]')
+      const initiallyOn = toggle.checked
+      toggle.click()
+      for (let n = 0; n < 50 && settings.activeWebSearchTool; n++)
+        await new Promise(resolve => setTimeout(resolve, 20))
+      const disabledBeforeSearch = !settings.activeWebSearchTool
+      toggle.click()
+      for (let n = 0; n < 50 && !settings.activeWebSearchTool; n++)
+        await new Promise(resolve => setTimeout(resolve, 20))
+      if (!settings.activeWebSearchTool) throw new Error('Web Search toggle did not enable the tool')
+      const results = await settings.activeWebSearchTool.run({ query: 'OpenAI' })
+      toggle.click()
+      for (let n = 0; n < 50 && settings.activeWebSearchTool; n++)
+        await new Promise(resolve => setTimeout(resolve, 20))
+      const toolDisabled = !settings.activeWebSearchTool
       const savedSearch = JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).webSearch
       await router.push('/')
-      return { provider, hasKeyField, titles, firstSnippet, disabled, savedSearch }
+      return { provider, hasKeyField, initiallyOn, disabledBeforeSearch, results, toolDisabled, savedSearch }
     })()`)
     assert.equal(searchUi.provider, 'duckduckgo')
     assert.equal(searchUi.hasKeyField, false)
-    assert.deepEqual(searchUi.titles, ['Title 1', 'Title 2', 'Title 3', 'Title 4', 'Title 5'])
-    assert.equal(searchUi.firstSnippet, 'Snippet 1')
-    assert.equal(searchUi.disabled, true)
-    assert.deepEqual(searchUi.savedSearch, { providerType: 'none' })
+    assert.equal(searchUi.initiallyOn, true)
+    assert.equal(searchUi.disabledBeforeSearch, true)
+    assert.equal(searchUi.results, Array.from({ length: 5 }, (_, index) => `Title ${index + 1}\nSnippet ${index + 1}`).join('\n\n'))
+    assert.equal(searchUi.toolDisabled, true)
+    assert.deepEqual(searchUi.savedSearch, { providerType: 'duckduckgo', enabled: false })
     assert.equal(new URL(searchUrl).searchParams.get('q'), 'OpenAI')
   }
   finally {
@@ -205,10 +286,12 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       await new Promise(resolve => setTimeout(resolve, 300))
       writeFileSync(entryScreenshot, (await contents.capturePage()).toPNG())
       await new Promise(resolve => setTimeout(resolve, 600))
-      assert.equal(await contents.executeJavaScript('!document.querySelector(".desktop-surface .bubble, .desktop-surface .desktop-composer")'), true)
+      assert.equal(await contents.executeJavaScript('!document.querySelector(".desktop-surface .speech-bubble:not([hidden]), .desktop-surface .desktop-composer")'), true)
       contents.send('aisling:desktop-pointer', 'character')
       await new Promise(resolve => setTimeout(resolve, 350))
       const desktopUi = await contents.executeJavaScript(`(async () => {
+        const settings = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('settings')
+        settings.activeChatProvider = { id: 'smoke', complete: async request => ({ text: 'Echo: ' + request.messages.at(-1).content }) }
         const root = document.querySelector('.desktop-surface')
         const composer = root.querySelector('.desktop-composer')
         const composerWidth = composer?.getBoundingClientRect().width
@@ -219,9 +302,9 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
           input.dispatchEvent(new Event('input', { bubbles: true }))
           composer.requestSubmit()
         }
-        for (let n = 0; n < 40 && !root.querySelector('.bubble'); n++)
+        for (let n = 0; n < 40 && !root.querySelector('.speech-bubble .line'); n++)
           await new Promise(resolve => setTimeout(resolve, 50))
-        const reply = root.querySelector('.bubble')?.textContent
+        const reply = root.querySelector('.speech-bubble .line')?.textContent
         return { entered: !!root.querySelector('.character.entered'), composerShown: !!composer, composerWidth, reply }
       })()`)
       assert.equal(desktopUi.entered, true)

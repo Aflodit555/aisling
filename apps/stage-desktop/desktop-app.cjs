@@ -1,8 +1,10 @@
 const { app, BaseWindow, WebContentsView, Menu, Tray, ipcMain, nativeImage, nativeTheme, screen } = require('electron')
 const path = require('node:path')
+const fs = require('node:fs')
+const { randomUUID } = require('node:crypto')
 const ICON_PATH = path.join(__dirname, 'assets', 'desktop-mode.png')
 const { createDesktopObserver } = require('./desktop-activity.cjs')
-const { createTypeSafeJudge, normalizeConversation } = require('./desktop-judge.cjs')
+const { createTypeSafeJudge, normalizeConversation, candidateForSnapshot, recentReplyForSnapshot } = require('./desktop-judge.cjs')
 const {
   buildStageUrl,
   isBuiltRendererAvailable,
@@ -18,6 +20,52 @@ registerStageScheme()
 const DEFAULT_STAGE_URL = 'http://localhost:5174'
 const desktopObserver = createDesktopObserver()
 const semanticJudge = createTypeSafeJudge()
+const desktopDiagnosticsEnabled = process.env.AISLING_DESKTOP_DIAGNOSTICS === '1'
+const desktopDiagnosticReplyText = process.env.AISLING_DESKTOP_DIAGNOSTICS_REPLY_TEXT === '1'
+const desktopDiagnosticFile = path.join(__dirname, '..', '..', '.local', 'desktop-awareness-diagnostics.jsonl')
+const desktopDiagnosticSession = desktopDiagnosticsEnabled ? randomUUID() : undefined
+/** @type {import('node:fs').WriteStream | undefined} */
+let desktopDiagnosticStream
+let desktopDiagnosticFailed = false
+
+function desktopDiagnosticArguments() {
+  return desktopDiagnosticsEnabled ? ['--aisling-desktop-diagnostics',
+    ...(desktopDiagnosticReplyText ? ['--aisling-desktop-diagnostics-reply-text'] : [])] : []
+}
+
+/** Local JSONL only. A broken diagnostic sink must not affect capture or models. */
+function writeDesktopDiagnostic(record) {
+  if (!desktopDiagnosticsEnabled || desktopDiagnosticFailed || !record || typeof record.type !== 'string') return
+  try {
+    // Whitelist excludes prompts, desktop bodies, conversation and credentials.
+    const keys = ['at', 'type', 'sampleId', 'judgmentId', 'judgmentSampleId', 'candidateId', 'objectId', 'candidateSource', 'targetFingerprint', 'change', 'intendedTarget', 'stimulusId', 'turnId',
+      'snapshot', 'checkedSnapshot', 'changedFields', 'initial', 'semanticChange',
+      'app', 'titleFingerprint', 'uiaLength', 'uiaFingerprint', 'mediaCount', 'mediaFingerprints', 'micActive',
+      'idleSeconds', 'observation', 'mode', 'historyRequested', 'historyIncluded',
+      'score', 'reason', 'outcome', 'enabled', 'preference', 'replyTarget', 'replyLength',
+      'replyFingerprint', 'delivered', 'replyHistoryWritten']
+    const safe = Object.fromEntries(keys.filter(key => record[key] !== undefined).map(key => [key, record[key]]))
+    if (desktopDiagnosticReplyText && record.type === 'delivery' && record.delivered === true && typeof record.replyText === 'string') {
+      safe.replyText = record.replyText.slice(0, 2000)
+      safe.replyTextTruncated = record.replyText.length > 2000 || record.replyTextTruncated === true
+    }
+    const line = JSON.stringify({ ...safe, at: Number.isFinite(record.at) ? record.at : Date.now(), sessionId: desktopDiagnosticSession })
+    if (line.length > 16000) return
+    if (!desktopDiagnosticStream) {
+      fs.mkdirSync(path.dirname(desktopDiagnosticFile), { recursive: true })
+      desktopDiagnosticStream = fs.createWriteStream(desktopDiagnosticFile, { flags: 'a' })
+      desktopDiagnosticStream.on('error', () => {
+        desktopDiagnosticFailed = true
+        console.warn('[desktop-awareness] diagnostic file unavailable; diagnostic logging stopped.')
+      })
+      console.log(`[desktop-awareness] diagnostics: ${desktopDiagnosticFile}`)
+      desktopDiagnosticStream.write(`${JSON.stringify({ at: Date.now(), type: 'diagnostics-started', sessionId: desktopDiagnosticSession,
+        schema: 'desktop-candidate-v1', replyTextEnabled: desktopDiagnosticReplyText })}\n`)
+    }
+    desktopDiagnosticStream.write(`${line}\n`)
+  }
+  catch { desktopDiagnosticFailed = true }
+}
 /** @type {AbortController | undefined} */
 let judgeAbort
 /** @type {AbortController | undefined} */
@@ -38,6 +86,12 @@ function resolveJevApiKey() {
   if (typeof saved === 'string' && saved.trim())
     return saved.trim()
   return process.env.TYPESAFE_API_KEY || ''
+}
+
+function isReplyHistoryEnabled() {
+  const awareness = readStoredConfig()?.desktopAwareness
+  return Boolean(awareness && typeof awareness === 'object'
+    && /** @type {Record<string, unknown>} */ (awareness).replyHistoryEnabled === true)
 }
 
 // Matches the renderer's paper/ink --bg so the window does not flash before the Stage paints.
@@ -376,6 +430,7 @@ async function createWindow(options = {}) {
   stageView = new WebContentsView({ webPreferences: {
     preload: preloadPath, contextIsolation: true, nodeIntegration: false,
     sandbox: true, backgroundThrottling: false,
+    additionalArguments: desktopDiagnosticArguments(),
   } })
   stageView.setBackgroundColor(stageBackground())
   window.contentView.addChildView(stageView)
@@ -496,6 +551,9 @@ async function startDesktop(options = {}) {
     const trusted = event => Boolean(stageView && event.sender === stageView.webContents
       && event.senderFrame === stageView.webContents.mainFrame
       && stageOriginOf(event.senderFrame.url) === allowedOrigin)
+    ipcMain.on('aisling:desktop-awareness:diagnostic', (event, record) => {
+      if (desktopDiagnosticsEnabled && trusted(event)) writeDesktopDiagnostic(record)
+    })
     ipcMain.on('aisling:language:set', (event, language) => {
       if (!trusted(event) || (language !== 'en' && language !== 'zh-CN')) return
       refreshWindowMenu()
@@ -551,12 +609,14 @@ async function startDesktop(options = {}) {
           error: cause instanceof Error ? cause.message : String(cause) }
       }
     })
-    ipcMain.handle('aisling:desktop-awareness:judge', async (event) => {
+    ipcMain.handle('aisling:desktop-awareness:judge', async (event, request) => {
       if (!trusted(event))
         throw new Error('Untrusted desktop awareness request')
       const snapshot = desktopObserver.status()
       if (!snapshot.enabled || !snapshot.context)
         throw new Error(snapshot.error || 'Desktop observer has no current context.')
+      const candidate = candidateForSnapshot(request, snapshot.context)
+      const recentReply = recentReplyForSnapshot(request, snapshot.context, isReplyHistoryEnabled())
       const apiKey = resolveJevApiKey()
       if (!apiKey)
         throw new Error('Desktop semantic judge unavailable: no Jev API Key configured.')
@@ -564,7 +624,17 @@ async function startDesktop(options = {}) {
       const abort = new AbortController()
       judgeAbort = abort
       try {
-        return { context: snapshot.context, scores: await semanticJudge.judge(snapshot.context, abort.signal, apiKey) }
+        if (desktopDiagnosticsEnabled) {
+          const ids = request?.diagnostic
+          const validIds = ids && [ids.sampleId, ids.judgmentId].every(id => typeof id === 'string' && /^[a-f0-9-]{36}$/.test(id))
+          writeDesktopDiagnostic({ type: 'jev-call', mode: 'actual-call',
+            ...(validIds ? { sampleId: ids.sampleId, judgmentId: ids.judgmentId } : {}), candidateId: candidate.id, objectId: candidate.objectId,
+            candidateSource: candidate.source, change: candidate.change,
+            snapshot: { capturedAt: snapshot.context.capturedAt, targetHwnd: snapshot.context.targetHwnd, sequence: snapshot.context.sequence },
+            historyIncluded: Boolean(recentReply) })
+        }
+        return { context: snapshot.context, scores: await semanticJudge.judge(snapshot.context, abort.signal, apiKey, candidate, recentReply),
+          historyIncluded: Boolean(recentReply) }
       }
       finally {
         if (judgeAbort === abort)
@@ -605,4 +675,4 @@ async function startDesktop(options = {}) {
   return createWindow({ ...options, stageUrl: target.url })
 }
 
-module.exports = { DEFAULT_STAGE_URL, createWindow, startDesktop, enterDesktopMode, returnToStage }
+module.exports = { DEFAULT_STAGE_URL, createWindow, startDesktop, enterDesktopMode, returnToStage, writeDesktopDiagnostic, desktopDiagnosticArguments }

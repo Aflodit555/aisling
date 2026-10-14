@@ -72,6 +72,7 @@ export { createCharacterRuntime } from './runtime'
 export type {
   AutonomousStimulus,
   DesktopActivitySnapshot,
+  DesktopCandidate,
   DesktopFocusSnapshot,
   DesktopMediaSnapshot,
   CreateStimulusOptions,

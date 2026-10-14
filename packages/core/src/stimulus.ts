@@ -45,7 +45,7 @@ export interface VisualStimulus extends StimulusBase<'visual'> {
   readonly caption?: string
 }
 
-/** Every stimulus the runtime can receive today. */
+/** Bounded foreground content from one desktop capture. */
 export interface DesktopFocusSnapshot {
   readonly app: string
   readonly title: string
@@ -65,6 +65,8 @@ export interface DesktopActivitySnapshot {
   readonly targetHwnd: string
   /** Request sequence; null for the startup report. */
   readonly sequence: number | null
+  /** SHA-256 of whitespace-normalized UIA text, computed by the desktop bridge. */
+  readonly textFingerprint?: string
   readonly idleSeconds: number
   readonly focus: DesktopFocusSnapshot
   readonly media: readonly DesktopMediaSnapshot[]
@@ -72,9 +74,17 @@ export interface DesktopActivitySnapshot {
   readonly headphones: string
 }
 
-/** Runtime observation, never a message authored by the user. */
+/** One snapshot-bound response opportunity with a single foreground or media target. */
+export type DesktopCandidate = {
+  readonly id: string
+  readonly objectId: string
+  readonly change: 'appeared' | 'content-changed' | 'track-changed' | 'idle'
+  readonly snapshot: Pick<DesktopActivitySnapshot, 'capturedAt' | 'targetHwnd' | 'sequence'>
+} & ({ readonly source: 'foreground'; readonly target: DesktopFocusSnapshot }
+  | { readonly source: 'media'; readonly target: DesktopMediaSnapshot })
+
 export interface AutonomousStimulus extends StimulusBase<'autonomous'> {
-  readonly activity: DesktopActivitySnapshot
+  readonly candidate: DesktopCandidate
 }
 
 export type Stimulus = UserTextStimulus | SystemStimulus | VisualStimulus | AutonomousStimulus
@@ -93,14 +103,14 @@ function defaultId(): string {
 }
 
 export function createAutonomousStimulus(
-  input: { activity: DesktopActivitySnapshot } & CreateStimulusOptions,
+  input: { candidate: DesktopCandidate } & CreateStimulusOptions,
 ): AutonomousStimulus {
   return {
     id: input.id ?? defaultId(),
-    source: 'desktop-idle',
+    source: 'desktop',
     kind: 'autonomous',
     at: input.at ?? Date.now(),
-    activity: input.activity,
+    candidate: input.candidate,
   }
 }
 

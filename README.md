@@ -18,6 +18,10 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 - Settings pages: General, Consciousness, Speech, Vision, Web Search, Desktop Awareness
 - Provider Settings UI for model configuration
 - Multi-conversation persistence (localStorage)
+- Desktop Situation Understanding P1/P1.1: explicit foreground/media candidates,
+  bounded observation continuity, target-bound Jev judgment and Chat generation,
+  media freshness checks and successful-delivery attribution
+- Explicit interaction preference commands (`/quiet`, `/normal`, `/invited`)
 - Browser / System Speech (`speechSynthesis`)
 - Alibaba Native HTTP TTS
 - Live2D idle life (blinks, gaze, posture) and Jev-judged emotion with a stabilizing state machine ([docs/emotion.md](docs/emotion.md))
@@ -52,13 +56,16 @@ pnpm dev
 
 Open <http://localhost:5174>.
 
-Configure providers inside the Electron window, then expand **Autonomous Speak**
-in the conversation dock. It is off by default; the threshold defaults to 90
-seconds with a 180-second cooldown. Desktop keyboard/mouse activity resets
-silence. The ordinary browser Stage cannot read desktop activity.
+Configure Consciousness and the Jev key in Settings, then enable **Desktop
+Awareness**. It is off by default. The renderer polls every two seconds; an
+eligible foreground or media candidate goes through Jev, the 0.65 score boundary
+and a global cooldown (30 seconds by default, configurable from 10–300).
+Idle can offer a finite opportunity; elapsed silence alone is not the trigger.
+The ordinary browser Stage cannot read desktop activity.
 
 See [Desktop host and data lifecycle](docs/desktop-host.md) and the
-[autonomous speaking vertical slice](docs/autonomous-speaking.md).
+[Desktop Situation Understanding](docs/desktop-situation.md) and
+[local diagnostics](docs/desktop-diagnostics.md).
 
 Provider credentials are configured from the Settings UI — there is no `.env`
 setup, and keys are never required in source code or the terminal.
@@ -67,10 +74,11 @@ setup, and keys are never required in source code or the terminal.
 
 ```
 apps/stage-web   — Vue 3 + Vite Stage (/settings modules)
-apps/stage-desktop — minimal Windows Electron host (foreground app/title + idle IPC)
+apps/stage-desktop — Windows Electron host, native snapshot IPC, Jev and storage
 packages/core    — framework-agnostic runtime: Stimulus, Character, Capability,
                    Provider, Output, PlatformConfig/ConfigStore, tool domain,
                    and chat/speech/vision/search providers
+external/kernel_c — pinned native Windows collector (UIA, media, mic, idle, audio device)
 ```
 
 ## Configuration & key boundary
@@ -89,11 +97,24 @@ packages/core    — framework-agnostic runtime: Stimulus, Character, Capability
 ```bash
 pnpm install       # install workspace
 pnpm dev:desktop   # Desktop (primary): start renderer → wait ready → launch Electron
+pnpm start         # alias for pnpm dev:desktop
 pnpm start:desktop # Desktop against the built renderer (aisling://stage)
 pnpm dev           # browser Stage dev server on http://localhost:5174
 pnpm typecheck     # tsc (core) + vue-tsc (app) + Electron JS checkJs
 pnpm test          # vitest (core + Stage autonomous integration)
 pnpm build         # vite build (app)
+node --test apps/stage-desktop/*.test.cjs # Desktop bridge/judge/diagnostic regressions
+cmake --build external/kernel_c/build --config Release # native collector
 ```
 
 Aisling runs on a fixed port **5174** so it can run alongside AIRI (5173).
+
+After cloning, initialize the native submodule with `git submodule update --init`
+and build it using the Windows C++23/MSVC instructions in
+[Desktop host](docs/desktop-host.md). The native executable is not committed.
+
+The user reports preliminary P1/P1.1 desktop acceptance was good; automated tests
+use Mock models and do not establish full semantic situation understanding.
+Current limits and verification results are recorded in
+[the P1.1 baseline report](docs/p1.1-baseline.md). The existing Live2D
+`idle-life.test.ts:87` mismatch is recorded separately from the desktop work.

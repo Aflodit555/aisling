@@ -1,8 +1,14 @@
 const { spawn } = require('node:child_process')
 const path = require('node:path')
 const readline = require('node:readline')
+const { createHash } = require('node:crypto')
 
 const REQUEST_TIMEOUT_MS = 5000
+
+/** Exact normalized text identity; no topic inference or removal of changing numbers. */
+function observationTextFingerprint(text) {
+  return createHash('sha256').update(text.replace(/\s+/g, ' ').trim()).digest('hex')
+}
 
 /** Keep the native wire format out of the renderer and cap every text field. */
 function normalizeKernelState(value) {
@@ -19,6 +25,7 @@ function normalizeKernelState(value) {
     capturedAt: state.capturedAt,
     targetHwnd: state.targetHwnd,
     sequence,
+    textFingerprint: observationTextFingerprint(text(focus.text, 2000)),
     idleSeconds: Number.isFinite(state.idle_s) && state.idle_s >= 0 ? state.idle_s : 0,
     focus: {
       app: text(focus.app, 120),
@@ -155,4 +162,4 @@ function createDesktopObserver(options = {}) {
   return { start, stop, status, request }
 }
 
-module.exports = { createDesktopObserver, normalizeKernelState }
+module.exports = { createDesktopObserver, normalizeKernelState, observationTextFingerprint }

@@ -1,80 +1,15 @@
 # Desktop Awareness
 
-## Runtime chain
+The active target/identity/cache/temporal design is [Desktop Situation Understanding P1](./desktop-situation.md). [Local diagnostics](./desktop-diagnostics.md) explains development flags and manual testing.
 
-```text
-Settings toggle
-  → preload IPC
-  → Electron main starts external/kernel_c/build/Release/kernel.exe <own_pid>
-  → startup report, then renderer read → stdin sequence → WM_APP → UIA report
-  → JSONL DesktopContext (capturedAt / targetHwnd / sequence)
-  → SemanticJudge
-  → should_interrupt probability
-  → thin trigger
-  → existing AutonomousStimulus / Character / ChatProvider / Speech
-```
+Renderer polls every two seconds through preload/IPC. Kernel receives a stdin sequence and reports current foreground UIA plus system media, mic, idle and headphones; foreground hook only updates HWND. Main caps fields and rejects unavailable reads rather than substituting cached context. Native capture limits are unchanged.
 
-The setting defaults to OFF and is persisted in the existing `PlatformConfig` store.
-Browser-only Stage shows the control as unavailable and never attempts desktop capture.
+A bounded target candidate reaches Jev (jev-latest, TypeSafe System One), then the existing Character Runtime/ChatProvider. Jev has a ten-second deadline and strict should_interrupt noul probability validation. Threshold remains 0.65. Quiet disables autonomous capture/judgment. Local duplicate, ready and busy gates run before Jev; threshold and configured cooldown run before generation. Normal user questions remain independent.
 
-Electron main owns the native child process. Toggle OFF, window close, renderer teardown,
-and app quit stop the process; OFF also aborts an in-flight semantic request. Raw desktop
-text is kept only in memory and is passed to the character as ephemeral system context.
+Cooldown defaults to 30 seconds (10–300 in settings), applies across sources/windows and starts at trigger and completion. Failed/empty/revoked results release reservation after cooldown. Same candidate is not permanently prohibited; finite retention and later idle episodes define reopening. Raw idle growth does not invalidate an equivalent judgment.
 
-The foreground hook only updates the target HWND. The kernel has no collection
-timer; each renderer read requests a new capture and waits up to 5 seconds for
-the matching sequence. Startup reports have a null sequence. A failed read
-returns unavailable without substituting the cached latest context. Capture
-metadata is not part of the judge input or the autonomous content signature.
+Awareness is OFF by default. Browser Stage does not collect desktops. OFF aborts collection and an in-flight Jev request. Media requests are revalidated before Chat and delivery; foreground changes do not unconditionally cancel accepted replies.
 
-## Semantic judge
+Settings retain enabled/cooldownSeconds/jevApiKey/replyHistoryEnabled. The old history-consent key migrates once. Reply summaries are optional and bound to response targets, not to an unrelated foreground window. Default temperature remains 1.0, adjustable 0–2 and passed to the OpenAI-compatible request.
 
-`desktop-judge.cjs` is the current `SemanticJudge` implementation. It calls TypeSafe
-System One with `jev-latest`, reads `TYPESAFE_API_KEY`, and returns only:
-
-```ts
-{ shouldInterrupt: number }
-```
-
-The only question is `should_interrupt: { type: 'noul', ... }`. State contains
-`focus.app`, `focus.title`, `screen_text`, `media`, `mic`, and `idle_time`.
-The response must contain `answers.should_interrupt` with type `noul` and a finite
-numeric `noul` probability in [0, 1]. Requests time out after 10 seconds; errors are
-shown in Desktop Awareness and the next poll retries. Electron must inherit
-`TYPESAFE_API_KEY` from its launching environment.
-
-## Trigger
-
-- Renderer request interval: 2 seconds (no independent kernel polling)
-- `shouldInterrupt >= 0.65`
-- Current bounded `app + title + full text + media + mic + idleSeconds` signature differs from the last trigger
-- Existing runtime is ready and not generating a reply, processing vision, or speaking
-- Cooldown: configured seconds (default 30, range 10–300)
-
-Unchanged state is not judged repeatedly. Any judge input change, including idle time
-or microphone activity, invalidates the cached decision. No planner, event bus,
-semantic diff, or desktop memory is involved. Awareness persistence contains only
-`enabled` and `cooldownSeconds`; obsolete fields are removed when loading settings.
-
-## Temperature
-
-Settings → Consciousness exposes `temperature` from 0.0 to 2.0 in 0.1 steps. The default
-is 1.0. The value is stored in `PlatformConfig`, passed by `buildChatProvider`, and written
-to the real OpenAI-compatible `/chat/completions` request body.
-
-## Checks
-
-```powershell
-pnpm typecheck
-pnpm test
-pnpm build
-node --test apps/stage-desktop/desktop-judge.test.cjs
-pnpm dev # keep running in one terminal
-pnpm --filter @aisling/stage-desktop test:smoke
-pnpm --filter @aisling/stage-desktop test:smoke:prod
-```
-
-The desktop smoke uses the real kernel process and a local TypeSafe-protocol response. It
-checks default OFF, start, context collection, judge scores, one existing-runtime message,
-refresh restoration, temperature persistence, stop, and absence of a remaining process.
-Use a real `TYPESAFE_API_KEY` for content-quality acceptance against Jev.
+Checks: pnpm -r run typecheck; pnpm test; pnpm build; node --test apps/stage-desktop/desktop-activity.test.cjs apps/stage-desktop/desktop-judge.test.cjs apps/stage-desktop/desktop-diagnostics.test.cjs. Optional native candidate smoke uses AISLING_DESKTOP_CANDIDATE_SMOKE=1 with production smoke and Mock model responses, requiring a stable accessible foreground or unambiguous media target.

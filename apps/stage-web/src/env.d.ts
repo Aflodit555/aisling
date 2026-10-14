@@ -13,7 +13,9 @@ interface Window {
     onModeChange(callback: (mode: 'stage' | 'desktop') => void): () => void
     setDesktopAwareness(enabled: boolean): Promise<import('./runtime/autonomous').DesktopObserverStatus>
     readDesktopContext(): Promise<import('./runtime/autonomous').DesktopObserverStatus>
-    judgeDesktopContext(): Promise<import('./runtime/autonomous').DesktopJudgeResult>
+    judgeDesktopContext(request: import('./runtime/autonomous').DesktopJudgeRequest): Promise<import('./runtime/autonomous').DesktopJudgeResult>
+    desktopDiagnostics?: { enabled: boolean; replyText: boolean }
+    recordDesktopDiagnostic?(record: import('./runtime/autonomous').DesktopDiagnosticRecord): void
     /** Jev emotion judge over recent turns (+ desktop while Desktop Awareness is on). */
     judgeEmotion?(conversation: import('./stores/emotion').EmotionTurn[]): Promise<{ emotion: string; confidence: number; intensity: number } | null>
     /** Minimal `localStorage`-shaped bridge backed by Electron userData. */

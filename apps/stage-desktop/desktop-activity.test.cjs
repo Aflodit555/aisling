@@ -2,11 +2,18 @@ const assert = require('node:assert/strict')
 const { EventEmitter } = require('node:events')
 const { PassThrough } = require('node:stream')
 const { test } = require('node:test')
-const { createDesktopObserver, normalizeKernelState } = require('./desktop-activity.cjs')
+const { createDesktopObserver, normalizeKernelState, observationTextFingerprint } = require('./desktop-activity.cjs')
 
 const packet = (sequence = null) => ({
   capturedAt: 1_800_000_000_000, targetHwnd: '18446744073709551615', sequence,
   idle_s: 2, focus: { app: 'Code', title: 'test', text: 'screen' },
+})
+
+test('text fingerprints normalize whitespace, retain changed numbers and cover the actual capped sample', () => {
+  assert.equal(observationTextFingerprint('A\n detail  42 '), observationTextFingerprint('A detail 42'))
+  assert.notEqual(observationTextFingerprint('A detail 42'), observationTextFingerprint('A detail 43'))
+  const context = normalizeKernelState({ ...packet(), focus: { text: 'x'.repeat(2000) + 'uncaptured' } })
+  assert.equal(context.textFingerprint, observationTextFingerprint(context.focus.text))
 })
 
 function setup(t) {

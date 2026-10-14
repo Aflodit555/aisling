@@ -24,6 +24,8 @@ export interface DesktopAwarenessConfig {
   cooldownSeconds: number
   /** TypeSafe / Jev API key for the desktop semantic judge (kept out of git and logs). */
   jevApiKey: string
+  /** Explicit opt-in: bounded successful replies to this candidate target may be sent to Jev. */
+  replyHistoryEnabled?: boolean
 }
 
 export interface SpeechConfig {
@@ -76,7 +78,7 @@ export function createDefaultConsciousnessConfig(): ConsciousnessConfig {
 export function createDefaultPlatformConfig(): PlatformConfig {
   return {
     consciousness: createDefaultConsciousnessConfig(),
-    desktopAwareness: { enabled: false, cooldownSeconds: 30, jevApiKey: '' },
+    desktopAwareness: { enabled: false, cooldownSeconds: 30, jevApiKey: '', replyHistoryEnabled: false },
     speech: {
       enabled: false,
       providerType: 'none',

@@ -70,6 +70,76 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
   assert.equal(result.origin, 'aisling://stage')
   assert.ok(result.appChildCount > 0)
 
+  if (process.env.AISLING_SPEECH_SMOKE === '1') {
+    // Local tone only: exercise the production relay, audio decoder and real mouth source without paid calls.
+    const samples = 22050, audio = Buffer.alloc(44 + samples * 2)
+    audio.write('RIFF'); audio.writeUInt32LE(audio.length - 8, 4); audio.write('WAVEfmt ', 8)
+    audio.writeUInt32LE(16, 16); audio.writeUInt16LE(1, 20); audio.writeUInt16LE(1, 22)
+    audio.writeUInt32LE(22050, 24); audio.writeUInt32LE(44100, 28)
+    audio.writeUInt16LE(2, 32); audio.writeUInt16LE(16, 34); audio.write('data', 36); audio.writeUInt32LE(samples * 2, 40)
+    for (let n = 0; n < samples; n++) audio.writeInt16LE(Math.round(Math.sin(n * 2 * Math.PI * 440 / 22050) * 8000), 44 + n * 2)
+    const nativeFetch = globalThis.fetch
+    let upstreamCalls = 0
+    globalThis.fetch = async url => {
+      upstreamCalls++
+      if (String(url) === 'https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer')
+        return Response.json({ output: { audio: { url: 'https://audio.aliyuncs.com/offline-smoke.wav' } } })
+      if (String(url) === 'https://audio.aliyuncs.com/offline-smoke.wav') return new Response(audio)
+      throw new Error('Unexpected network request in offline speech smoke')
+    }
+    contents.setAudioMuted(true)
+    try {
+      const report = await contents.executeJavaScript(`(async () => {
+        const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
+        const settings = pinia._s.get('settings'), speech = pinia._s.get('speech')
+        function mouthSource(vnode) {
+          if (!vnode || typeof vnode !== 'object') return
+          const source = vnode.component?.props?.sources?.find(source => source.id === 'speech-mouth')
+          if (source) return source
+          const nested = mouthSource(vnode.component?.subTree)
+          if (nested) return nested
+          for (const child of Array.isArray(vnode.children) ? vnode.children : []) {
+            const found = mouthSource(child)
+            if (found) return found
+          }
+        }
+        let mouth
+        for (let n = 0; n < 200 && !mouth; n++) {
+          mouth = mouthSource(document.querySelector('#app')._vnode)
+          if (!mouth) await new Promise(resolve => setTimeout(resolve, 25))
+        }
+        if (!mouth) throw new Error('Live2D mouth source did not become ready')
+        await settings.saveSpeech({ ...settings.config.speech, providerType: 'alibaba', apiKey: 'MOCK_ONLY', model: 'mock', voice: 'mock',
+          transport: 'http', endpoint: 'https://dashscope.aliyuncs.com/api/v1' })
+        await settings.setModuleEnabled('speech', true)
+        let done = false, playing = false, peak = 0, mouthOpen = 0
+        const spoken = speech.speak('Offline speech smoke').finally(() => { done = true })
+        for (let n = 0; n < 400 && !done; n++) {
+          playing ||= speech.speaking
+          peak = Math.max(peak, speech.readLevel() ?? 0)
+          const frame = mouth.sample({ readBase: () => 0, dtMs: 16 })
+          if (frame) for (const value of frame.values()) mouthOpen = Math.max(mouthOpen, value)
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        if (!done) { speech.stop(); throw new Error('Speech did not finish') }
+        await spoken
+        await settings.setModuleEnabled('speech', false)
+        return { playing, peak, mouthOpen, phase: speech.phase }
+      })()`, true)
+      assert.equal(upstreamCalls, 2)
+      assert.equal(report.playing, true)
+      assert.ok(report.peak > 0.01, 'real decoded audio must reach the analyser')
+      assert.ok(report.mouthOpen > 0.01, 'the existing speech mouth source must produce an open mouth')
+      assert.equal(report.phase, 'idle')
+      console.log(JSON.stringify({ productionSpeechSmoke: 'passed', upstream: 'mocked', ...report }))
+    }
+    finally { globalThis.fetch = nativeFetch }
+    clearTimeout(timeout)
+    win.destroy()
+    app.exit(0)
+    return
+  }
+
   if (process.env.AISLING_DESKTOP_CANDIDATE_SMOKE === '1') {
     const report = await contents.executeJavaScript(`(async () => {
       const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia

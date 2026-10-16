@@ -36,6 +36,18 @@ export function buildChatProvider(config: ConsciousnessConfig): ChatProvider | u
   return undefined
 }
 
+/** P2-only route policy; no change to the shared Provider or ordinary chat defaults. */
+export function situationEnableThinking(config: Pick<ConsciousnessConfig, 'providerType' | 'baseUrl' | 'model'>): false | undefined {
+  try {
+    const url = new URL(config.baseUrl)
+    if (config.providerType === 'openai-compatible' && config.model === 'qwen/qwen3.8-flash'
+      && url.origin === 'https://api.ppio.com' && ['/openai', '/openai/v1'].includes(url.pathname.replace(/\/+$/, ''))
+      && !url.search && !url.hash) return false
+  }
+  catch { /* An unrecognized endpoint keeps its own defaults. */ }
+  return undefined
+}
+
 export function buildSpeechProvider(config: SpeechConfig): SpeechProvider | undefined {
   if (!config.enabled) return undefined
   if (config.providerType === 'browser')

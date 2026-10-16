@@ -38,15 +38,26 @@ pnpm install
 pnpm dev:desktop
 ```
 
-`pnpm dev:desktop` is the single Desktop entry: it starts the Stage renderer
-(Vite), waits until it is ready, launches Electron, and cleans the renderer
-process up when Electron exits. No second terminal is required.
+`pnpm dev:desktop` is the current default for development and desktop testing:
+it starts the Stage renderer (Vite), waits until it is ready, launches Electron,
+and cleans the renderer process up when Electron exits. Code changes can update
+the running UI. No second terminal is required.
 
-To run the Desktop against the **built** renderer instead of the dev server:
+To test the Desktop as a **built application**, closer to how a future
+distributed app would run:
 
 ```bash
 pnpm start:desktop
 ```
+
+This command builds the renderer first, then launches Electron without the Vite
+server. Run it again after changing code. It still requires this source checkout
+and its dependencies; it does not create an installer or mean the app is a stable
+release. Both Desktop modes share saved settings and conversations and are
+intended to offer the same features; both paths need their own verification.
+
+**Naming note:** `pnpm start` currently aliases `pnpm dev:desktop`, not
+`pnpm start:desktop`.
 
 The plain browser Stage remains available for lightweight development:
 
@@ -96,9 +107,9 @@ external/kernel_c — pinned native Windows collector (UIA, media, mic, idle, au
 
 ```bash
 pnpm install       # install workspace
-pnpm dev:desktop   # Desktop (primary): start renderer → wait ready → launch Electron
+pnpm dev:desktop   # development / current desktop testing, with live UI updates
 pnpm start         # alias for pnpm dev:desktop
-pnpm start:desktop # Desktop against the built renderer (aisling://stage)
+pnpm start:desktop # build first → launch built Desktop; no Vite server or installer
 pnpm dev           # browser Stage dev server on http://localhost:5174
 pnpm typecheck     # tsc (core) + vue-tsc (app) + Electron JS checkJs
 pnpm test          # vitest (core + Stage autonomous integration)
@@ -107,7 +118,8 @@ node --test apps/stage-desktop/*.test.cjs # Desktop bridge/judge/diagnostic regr
 cmake --build external/kernel_c/build --config Release # native collector
 ```
 
-Aisling runs on a fixed port **5174** so it can run alongside AIRI (5173).
+The development server runs on fixed port **5174** so it can run alongside AIRI
+(5173). The built Desktop uses `aisling://stage` instead.
 
 After cloning, initialize the native submodule with `git submodule update --init`
 and build it using the Windows C++23/MSVC instructions in
@@ -116,5 +128,4 @@ and build it using the Windows C++23/MSVC instructions in
 The user reports preliminary P1/P1.1 desktop acceptance was good; automated tests
 use Mock models and do not establish full semantic situation understanding.
 Current limits and verification results are recorded in
-[the P1.1 baseline report](docs/p1.1-baseline.md). The existing Live2D
-`idle-life.test.ts:87` mismatch is recorded separately from the desktop work.
+[the P1.1 baseline report](docs/p1.1-baseline.md).

@@ -44,7 +44,39 @@ function writeDesktopDiagnostic(record) {
       'idleSeconds', 'observation', 'mode', 'historyRequested', 'historyIncluded',
       'score', 'reason', 'outcome', 'enabled', 'preference', 'replyTarget', 'replyLength',
       'replyFingerprint', 'delivered', 'replyHistoryWritten']
-    const safe = Object.fromEntries(keys.filter(key => record[key] !== undefined).map(key => [key, record[key]]))
+    let safe = Object.fromEntries(keys.filter(key => record[key] !== undefined).map(key => [key, record[key]]))
+    if (record.type.startsWith('p2-')) {
+      if (!['p2-a-update-start', 'p2-a-update-end', 'p2-a-settled', 'p2-a-http', 'p2-b-context', 'p2-b-request-start', 'p2-b-request-end', 'p2-b-delivery'].includes(record.type)) return
+      // P2 never accepts raw scope strings, errors, prompts or content, even with reply-text opt-in.
+      safe = { type: record.type }
+      for (const key of ['updateId', 'scopeId', 'conversationId', 'turnId', 'activeAUpdateId']) {
+        if (typeof record[key] === 'string' && /^[a-f0-9-]{36}$/i.test(record[key])) safe[key] = record[key]
+      }
+      if (typeof record.requestId === 'string' && /^[a-f0-9-]{36}:\d+$/i.test(record.requestId)) safe.requestId = record.requestId
+      for (const key of ['startedAt', 'finishedAt', 'durationMs', 'previousRevision', 'revision', 'availableRevision',
+        'batchCount', 'observationCount', 'contextChars', 'round', 'aCalls', 'aCallsAtStart', 'aCallsDuringTurn', 'httpStatus',
+        'firstReceivedAt', 'lastReceivedAt', 'scheduledAt', 'queueDelayMs', 'snapshotToCommitMs', 'latestSnapshotToCommitMs',
+        'contentChars', 'reasoningChars', 'contentDeltaCount', 'reasoningDeltaCount', 'streamEventCount']) {
+        if (Number.isFinite(record[key]) && record[key] >= 0) safe[key] = record[key]
+      }
+      for (const key of ['committed', 'usable', 'executorReturned', 'settled', 'injected', 'delivered', 'statePresent', 'abortRequested',
+        'doneReceived', 'unsupportedContent']) {
+        if (typeof record[key] === 'boolean') safe[key] = record[key]
+      }
+      if (typeof record.scopeMatched === 'boolean' || record.scopeMatched === 'unknown') safe.scopeMatched = record.scopeMatched
+      if (['stop', 'length', 'tool_calls', 'function_call', 'content_filter', 'other', 'unknown'].includes(record.finishReason)) safe.finishReason = record.finishReason
+      if (['empty-content', 'whitespace-only', 'markdown-fence', 'non-json-prefix', 'json-syntax', 'non-syntax-error'].includes(record.jsonParseFailure)) safe.jsonParseFailure = record.jsonParseFailure
+      if (['provider-enter', 'fetch-start', 'headers-received', 'response-json-start', 'response-json-end', 'response-json-failed',
+        'first-text', 'stream-end', 'result-ready', 'aborted', 'failed', 'model-json-start', 'model-json-end', 'model-json-failed'].includes(record.event)) safe.event = record.event
+      if (['provider', 'fetch', 'response-json', 'response-shape', 'stream', 'model-json'].includes(record.stage)) safe.stage = record.stage
+      if (['fetch-error', 'http-error', 'response-json-error', 'response-shape-error', 'stream-error', 'provider-error', 'model-json-error'].includes(record.errorKind)) safe.errorKind = record.errorKind
+      if (['user-text', 'autonomous', 'visual', 'system'].includes(record.source)) safe.source = record.source
+      if (['updated', 'failed', 'timeout', 'cancelled', 'invalidated', 'validation-rejected', 'returned', 'delivered', 'empty', 'generation-failed', 'not-delivered'].includes(record.outcome)) safe.outcome = record.outcome
+      if (['committed', 'deadline', 'invalid-output', 'input-limit', 'executor-error', 'incompatible-result', 'disabled', 'disposed', 'reset',
+        'invalid-observation', 'scope-changed', 'stale-observation', 'provider-changed', 'session-invalidated', 'feature-disabled',
+        'no-ready-state', 'scope-unknown', 'state-expired', 'evidence-pending', 'target-mismatch',
+        'context-limit', 'context-error', 'context-unavailable', 'unsupported-source', 'injected'].includes(record.reason)) safe.reason = record.reason
+    }
     if (desktopDiagnosticReplyText && record.type === 'delivery' && record.delivered === true && typeof record.replyText === 'string') {
       safe.replyText = record.replyText.slice(0, 2000)
       safe.replyTextTruncated = record.replyText.length > 2000 || record.replyTextTruncated === true

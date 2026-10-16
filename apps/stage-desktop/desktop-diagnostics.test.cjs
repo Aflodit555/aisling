@@ -88,6 +88,53 @@ test('stream failure disables only diagnostic output', () => {
   assert.equal(f.lines.length, 2)
 })
 
+test('P2 uses the existing opt-in sink and accepts only bounded metadata, never content or raw scope', () => {
+  const record = { type: 'p2-b-request-start', at: 100, updateId: '11111111-1111-4111-8111-111111111111',
+    turnId: '22222222-2222-4222-8222-222222222222', requestId: '22222222-2222-4222-8222-222222222222:0',
+    scopeId: '33333333-3333-4333-8333-333333333333', injected: true, revision: 1, contextChars: 120,
+    aWaitMs: 0, usage: 'unknown', source: 'user-text', reason: 'injected',
+    scope: 'Private title with URL token', text: 'Private desktop', prompt: 'Private prompt', replyText: 'Private reply',
+    versions: [{ id: 'o1', kind: 'observation', version: 'a'.repeat(64), at: 99, text: 'Private quote' }] }
+  const off = fixture(false); off.api.writeDesktopDiagnostic(record)
+  assert.deepEqual(off.counters(), { directories: 0, streams: 0 })
+  const on = fixture(true, true); on.api.writeDesktopDiagnostic(record)
+  assert.equal(on.lines[1].updateId, record.updateId)
+  assert.equal(on.lines[1].revision, 1); assert.equal(on.lines[1].contextChars, 120)
+  assert.equal(on.lines[1].aWaitMs, undefined); assert.equal(on.lines[1].usage, undefined)
+  assert.equal(JSON.stringify(on.lines).includes('Private'), false)
+  assert.equal(on.lines[1].versions, undefined)
+  on.api.writeDesktopDiagnostic({ type: 'p2-b-context', reason: 'Private reason', updateId: 'Private ID',
+    scopeId: 'Private title', durationMs: Infinity, versions: [{ id: 'Private text', kind: 'observation', version: 'secret', at: 1 }] })
+  assert.equal(on.lines[2].reason, undefined); assert.equal(on.lines[2].scopeId, undefined)
+  assert.equal(on.lines[2].durationMs, undefined); assert.equal(on.lines[2].versions, undefined)
+})
+
+test('P2 request phase timing is opt-in metadata with no URL, headers or body', () => {
+  const record = { type: 'p2-a-http', at: 100, updateId: '11111111-1111-4111-8111-111111111111',
+    event: 'headers-received', stage: 'fetch', httpStatus: 429, abortRequested: false, bodyReadFinishedAt: 'unknown',
+    errorKind: 'http-error', url: 'Private URL token', headers: { Authorization: 'Private key' }, body: 'Private body' }
+  const off = fixture(false); off.api.writeDesktopDiagnostic(record)
+  assert.deepEqual(off.lines, [])
+  const on = fixture(true); on.api.writeDesktopDiagnostic(record)
+  assert.equal(on.lines[1].event, 'headers-received'); assert.equal(on.lines[1].httpStatus, 429)
+  assert.equal(on.lines[1].stage, 'fetch'); assert.equal(on.lines[1].abortRequested, false)
+  assert.equal(on.lines[1].bodyReadFinishedAt, undefined)
+  assert.equal(JSON.stringify(on.lines).includes('Private'), false)
+  on.api.writeDesktopDiagnostic({ ...record, event: 'first-text', stage: 'stream', queueDelayMs: 1500,
+    snapshotToCommitMs: 4500, latestSnapshotToCommitMs: 4000, firstReceivedAt: 10, lastReceivedAt: 510, scheduledAt: 10 })
+  assert.equal(on.lines[2].event, 'first-text'); assert.equal(on.lines[2].queueDelayMs, 1500)
+  assert.equal(on.lines[2].snapshotToCommitMs, 4500); assert.equal(on.lines[2].scheduledAt, 10)
+  on.api.writeDesktopDiagnostic({ ...record, event: 'result-ready', stage: 'stream', contentChars: 0, reasoningChars: 50,
+    finishReason: 'length', contentDeltaCount: 0, reasoningDeltaCount: 10, streamEventCount: 11, doneReceived: true,
+    unsupportedContent: false, jsonParseFailure: 'empty-content', reasoning: 'Private reasoning', error: 'Private syntax error' })
+  assert.equal(on.lines[3].finishReason, 'length'); assert.equal(on.lines[3].reasoningChars, 50)
+  assert.equal(on.lines[3].doneReceived, true); assert.equal(on.lines[3].jsonParseFailure, 'empty-content')
+  assert.equal(JSON.stringify(on.lines).includes('Private'), false)
+  on.api.writeDesktopDiagnostic({ ...record, finishReason: 'Private finish', jsonParseFailure: 'Private parse', contentChars: -1, reasoningChars: Infinity })
+  assert.equal(on.lines[4].finishReason, undefined); assert.equal(on.lines[4].jsonParseFailure, undefined)
+  assert.equal(on.lines[4].contentChars, undefined); assert.equal(on.lines[4].reasoningChars, undefined)
+})
+
 test('main distinguishes an actual Jev call, validates snapshot first, and keeps model input unchanged', async () => {
   const f = fixture(true)
   await assert.rejects(f.api.startDesktop({ stageUrl: 'http://localhost:5174' }), /fixture stops/)

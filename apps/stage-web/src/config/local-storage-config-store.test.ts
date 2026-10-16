@@ -2,6 +2,18 @@ import { expect, it } from 'vitest'
 import { createDefaultPlatformConfig } from '@aisling/core'
 import { createLocalStorageConfigStore } from './local-storage-config-store'
 
+it('requires explicit P2 opt-in, retains it in the existing config and defaults old configs to off', async () => {
+  for (const value of [undefined, false, 'true', true]) {
+    let raw = JSON.stringify({ ...createDefaultPlatformConfig(), desktopAwareness: {
+      ...createDefaultPlatformConfig().desktopAwareness, situationEnabled: value } })
+    const store = createLocalStorageConfigStore({ getItem: () => raw, setItem: (_key, text) => { raw = text } })
+    const result = await store.get()
+    expect(result.desktopAwareness.situationEnabled === true).toBe(value === true)
+    await store.set(result)
+    expect(JSON.parse(raw).desktopAwareness.situationEnabled === true).toBe(value === true)
+  }
+})
+
 it('removes obsolete awareness settings from memory and persistence on load', async () => {
   const config = createDefaultPlatformConfig()
   let raw = JSON.stringify({ ...config, desktopAwareness: {

@@ -1,6 +1,6 @@
-# Desktop Awareness：本地运行诊断（P1/P1.1）
+# Desktop Awareness：本地运行诊断（P1/P1.1/P2）
 
-诊断机制始于 P0.5，目前只记录 P1/P1.1 执行路径；开关本身不改变采集、候选、缓存、模型输入、门控或交付行为。模型没有输出判断对象；所有自主回复都记录 `replyTarget: "unknown"`。字段变化不是已证明的语义变化。
+诊断机制始于 P0.5，记录 P1/P1.1 执行路径及 P2 预览的更新、消费和延迟；开关本身不改变模型输入、门控或交付行为。P2 元数据与最小验收见 [短期情境认识](./p2-minimal-loop.md)。模型没有输出判断对象；所有自主回复都记录 `replyTarget: "unknown"`。字段变化不是已证明的语义变化。
 
 ## 开关与位置
 
@@ -26,7 +26,7 @@ $env:AISLING_DESKTOP_DIAGNOSTICS_REPLY_TEXT = '1'
 
 ```powershell
 # 在另一个 PowerShell 查看
-Get-Content -LiteralPath 'D:\Project\demo\project_Aisling\.local\desktop-awareness-diagnostics.jsonl' -Tail 40 -Wait
+Get-Content -LiteralPath 'D:\Project\demo\project_Aisling\.local\desktop-awareness-diagnostics.jsonl' -Encoding UTF8 -Tail 40 -Wait
 
 # 完全退出 Electron；删除当前 shell 的开关，再重新启动
 Remove-Item Env:AISLING_DESKTOP_DIAGNOSTICS -ErrorAction SilentlyContinue
@@ -64,7 +64,7 @@ P1 session 的 diagnostics-started 标明 schema=desktop-candidate-v1。既有�
 
 ```powershell
 $diagPath = 'D:\Project\demo\project_Aisling\.local\desktop-awareness-diagnostics.jsonl'
-Get-Content -LiteralPath $diagPath | ForEach-Object { $_ | ConvertFrom-Json } |
+Get-Content -LiteralPath $diagPath -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json } |
   Where-Object { $_.judgmentId -eq '<judgmentId>' } |
   Format-Table at,type,sampleId,candidateId,objectId,stimulusId,score,reason
 ```

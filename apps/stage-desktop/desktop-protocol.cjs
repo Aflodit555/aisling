@@ -2,6 +2,8 @@ const { protocol, net } = require('electron')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { existsSync, statSync } = require('node:fs')
+const { Readable, PassThrough } = require('node:stream')
+const { handleAlibabaTts } = require('../stage-web/relay/alibaba-tts.cjs')
 
 /**
  * Production Stage loader. Instead of `file://` (which has no origin and would
@@ -53,6 +55,8 @@ function resolveAssetPath(requestUrl) {
 async function handleStageRequest(request) {
   try {
     const url = new URL(request.url)
+    if (url.hostname === HOST && url.pathname === '/api/relay/alibaba-tts')
+      return await handleSpeechRequest(request)
     if (url.hostname === HOST && url.pathname === '/api/relay/web-search') {
       const query = url.searchParams.get('q')?.trim() ?? ''
       if (!query || query.length > 500)
@@ -75,6 +79,31 @@ async function handleStageRequest(request) {
   catch {
     return new Response('Not found', { status: 404 })
   }
+}
+
+/** Adapt Electron's Fetch protocol to the existing HTTP relay without opening a server. */
+async function handleSpeechRequest(request) {
+  const input = Object.assign(Readable.from([Buffer.from(await request.arrayBuffer())]), { method: request.method })
+  const body = new PassThrough()
+  const stream = Readable.toWeb(body)
+  return new Promise((resolve, reject) => {
+    const output = Object.assign(body, {
+      headersSent: false,
+      writeHead(status, headers) {
+        this.headersSent = true
+        resolve(new Response(stream, { status, headers }))
+        return this
+      },
+    })
+    const abort = () => { body.destroy(); reject(new Error('Speech request cancelled')) }
+    request.signal.addEventListener('abort', abort, { once: true })
+    body.once('close', () => request.signal.removeEventListener('abort', abort))
+    if (request.signal.aborted) { abort(); return }
+    void handleAlibabaTts(
+      /** @type {import('node:http').IncomingMessage} */ (/** @type {unknown} */ (input)),
+      /** @type {import('node:http').ServerResponse} */ (/** @type {unknown} */ (output)),
+    ).catch(error => { body.destroy(error); reject(error) })
+  })
 }
 
 let protocolRegistered = false

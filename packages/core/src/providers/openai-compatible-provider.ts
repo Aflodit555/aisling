@@ -3,6 +3,7 @@ import type {
   ChatCompletionResult,
   ChatMessage,
   ChatProvider,
+  ChatRequestTiming,
   ToolCall,
   ToolDefinition,
 } from '../provider'
@@ -41,8 +42,10 @@ interface WireToolCall {
 
 interface OpenAICompletionResponse {
   choices?: Array<{
+    finish_reason?: string | null
     message?: {
       content?: string | null
+      reasoning_content?: string | null
       tool_calls?: WireToolCall[]
     }
   }>
@@ -50,8 +53,10 @@ interface OpenAICompletionResponse {
 
 interface OpenAIStreamChunk {
   choices?: Array<{
+    finish_reason?: string | null
     delta?: {
       content?: string | null
+      reasoning_content?: string | null
       tool_calls?: Array<{
         index: number
         id?: string
@@ -60,6 +65,14 @@ interface OpenAIStreamChunk {
     }
   }>
   error?: { message?: string }
+}
+
+type ResponseMetadata = Pick<ChatRequestTiming, 'contentChars' | 'reasoningChars' | 'contentDeltaCount' |
+  'reasoningDeltaCount' | 'streamEventCount' | 'doneReceived' | 'unsupportedContent' | 'finishReason'>
+function finishReason(value: unknown): ChatRequestTiming['finishReason'] {
+  if (value === null || value === undefined) return 'unknown'
+  return ['stop', 'length', 'tool_calls', 'function_call', 'content_filter'].includes(value as string)
+    ? value as ChatRequestTiming['finishReason'] : 'other'
 }
 
 function endpoint(baseUrl: string): string {
@@ -94,56 +107,115 @@ export async function openAIChatCompletion(
   onText?: (text: string) => void,
 ): Promise<ChatCompletionResult> {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
-
-  const body: Record<string, unknown> = {
-    model: options.model,
-    messages: request.messages.map(toWireMessage),
-    stream: Boolean(onText),
+  let stage: ChatRequestTiming['stage'] = 'provider'
+  let httpStatus: number | undefined
+  const metadata: ResponseMetadata | undefined = request.onTiming ? {} : undefined
+  function timing(event: ChatRequestTiming['event'], errorKind?: ChatRequestTiming['errorKind']): void {
+    if (!request.onTiming) return
+    try { request.onTiming({ at: Date.now(), event, stage, httpStatus, ...metadata,
+      abortRequested: request.signal?.aborted === true, errorKind }) }
+    catch { /* A timing sink must never alter a request or its errors. */ }
   }
-  if (Number.isFinite(options.temperature))
-    body.temperature = Math.max(0, Math.min(2, options.temperature!))
-  if (request.tools && request.tools.length > 0)
-    body.tools = toWireTools(request.tools)
-
-  let response: Response
+  const onAbort = () => timing('aborted')
+  timing('provider-enter')
+  if (request.onTiming && request.signal) {
+    if (request.signal.aborted) onAbort()
+    else request.signal.addEventListener('abort', onAbort, { once: true })
+  }
   try {
-    response = await fetchImpl(endpoint(options.baseUrl), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${options.apiKey}`,
-      },
-      body: JSON.stringify(body),
-    })
+    const body: Record<string, unknown> = {
+      model: options.model,
+      messages: request.messages.map(toWireMessage),
+      stream: Boolean(onText),
+    }
+    const temperature = request.temperature ?? options.temperature
+    if (Number.isFinite(temperature))
+      body.temperature = Math.max(0, Math.min(2, temperature!))
+    if (request.enableThinking !== undefined)
+      body.enable_thinking = request.enableThinking
+    if (request.tools && request.tools.length > 0)
+      body.tools = toWireTools(request.tools)
+    if (request.maxOutputTokens !== undefined) {
+      if (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens < 1)
+        throw new Error('Invalid completion token limit')
+      body.max_completion_tokens = request.maxOutputTokens
+    }
+
+    let response: Response
+    stage = 'fetch'; timing('fetch-start')
+    try {
+      response = await fetchImpl(endpoint(options.baseUrl), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${options.apiKey}`,
+        },
+        body: JSON.stringify(body),
+        ...(request.signal ? { signal: request.signal } : {}),
+      })
+    }
+    catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      throw new ProviderRequestError(0, `Could not reach the provider (${detail})`)
+    }
+    httpStatus = response.status
+    timing('headers-received')
+    if (!response.ok) {
+      stage = 'response-json'
+      throw new ProviderRequestError(response.status, describeFailure(response.status, await readErrorBody(response, request.onTiming ? timing : undefined)))
+    }
+
+    if (onText && !response.headers.get('content-type')?.includes('application/json')) {
+      stage = 'stream'
+      let first = true
+      const result = await readStream(response, text => {
+        if (first) { first = false; timing('first-text') }
+        onText(text)
+      }, metadata)
+      timing('stream-end')
+      timing('result-ready')
+      return result
+    }
+
+    stage = 'response-json'; timing('response-json-start')
+    let data: OpenAICompletionResponse
+    try {
+      data = await response.json() as OpenAICompletionResponse
+      timing('response-json-end')
+    }
+    catch (error) { timing('response-json-failed', 'response-json-error'); throw error }
+    stage = 'response-shape'
+    const message = data.choices?.[0]?.message
+    const text = typeof message?.content === 'string' ? message.content : ''
+    if (metadata) Object.assign(metadata, { contentChars: text.length,
+      reasoningChars: typeof message?.reasoning_content === 'string' ? message.reasoning_content.length : 0,
+      unsupportedContent: message?.content != null && typeof message.content !== 'string',
+      finishReason: finishReason(data.choices?.[0]?.finish_reason) })
+    const toolCalls = message?.tool_calls?.map(call => ({
+      id: call.id,
+      name: call.function.name,
+      arguments: call.function.arguments,
+    }))
+
+    if (onText && text) {
+      timing('first-text')
+      onText(text)
+    }
+    timing('result-ready')
+    return toolCalls && toolCalls.length > 0
+      ? { text, toolCalls }
+      : { text }
   }
   catch (error) {
-    const detail = error instanceof Error ? error.message : String(error)
-    throw new ProviderRequestError(0, `Could not reach the provider (${detail})`)
+    timing('failed', stage === 'stream' ? 'stream-error' : error instanceof ProviderRequestError
+      ? error.status === 0 ? 'fetch-error' : 'http-error'
+      : stage === 'response-json' ? 'response-json-error' : stage === 'response-shape' ? 'response-shape-error' : 'provider-error')
+    throw error
   }
-
-  if (!response.ok)
-    throw new ProviderRequestError(response.status, describeFailure(response.status, await readErrorBody(response)))
-
-  if (onText && !response.headers.get('content-type')?.includes('application/json'))
-    return readStream(response, onText)
-
-  const data = await response.json() as OpenAICompletionResponse
-  const message = data.choices?.[0]?.message
-  const text = typeof message?.content === 'string' ? message.content : ''
-  const toolCalls = message?.tool_calls?.map(call => ({
-    id: call.id,
-    name: call.function.name,
-    arguments: call.function.arguments,
-  }))
-
-  if (onText && text)
-    onText(text)
-  return toolCalls && toolCalls.length > 0
-    ? { text, toolCalls }
-    : { text }
+  finally { if (request.onTiming) request.signal?.removeEventListener('abort', onAbort) }
 }
 
-async function readStream(response: Response, onText: (text: string) => void): Promise<ChatCompletionResult> {
+async function readStream(response: Response, onText: (text: string) => void, metadata?: ResponseMetadata): Promise<ChatCompletionResult> {
   if (!response.body)
     throw new ProviderRequestError(response.status, 'Provider returned an empty stream')
 
@@ -153,14 +225,20 @@ async function readStream(response: Response, onText: (text: string) => void): P
   let text = ''
   let buffer = ''
   let dataLines: string[] = []
+  let completed = false
+  if (metadata) Object.assign(metadata, { contentChars: 0, reasoningChars: 0, contentDeltaCount: 0,
+    reasoningDeltaCount: 0, streamEventCount: 0, doneReceived: false, unsupportedContent: false, finishReason: 'unknown' })
 
   function dispatch(): void {
     if (!dataLines.length)
       return
     const payload = dataLines.join('\n')
     dataLines = []
-    if (payload === '[DONE]')
+    if (payload === '[DONE]') {
+      completed = true
+      if (metadata) metadata.doneReceived = true
       return
+    }
     let chunk: OpenAIStreamChunk
     try {
       chunk = JSON.parse(payload) as OpenAIStreamChunk
@@ -170,9 +248,17 @@ async function readStream(response: Response, onText: (text: string) => void): P
     }
     if (chunk.error)
       throw new ProviderRequestError(response.status, chunk.error.message ?? 'Provider stream failed')
+    if (metadata) {
+      metadata.streamEventCount!++
+      const choice = chunk.choices?.[0], reasoning = choice?.delta?.reasoning_content
+      if (choice?.finish_reason != null) metadata.finishReason = finishReason(choice.finish_reason)
+      if (typeof reasoning === 'string' && reasoning) { metadata.reasoningChars! += reasoning.length; metadata.reasoningDeltaCount!++ }
+      if (choice?.delta?.content != null && typeof choice.delta.content !== 'string') metadata.unsupportedContent = true
+    }
     const delta = chunk.choices?.[0]?.delta
     if (typeof delta?.content === 'string' && delta.content) {
       text += delta.content
+      if (metadata) { metadata.contentChars = text.length; metadata.contentDeltaCount!++ }
       onText(text)
     }
     for (const part of delta?.tool_calls ?? []) {
@@ -187,7 +273,7 @@ async function readStream(response: Response, onText: (text: string) => void): P
   function consume(chunk: string): void {
     buffer += chunk
     let end: number
-    while ((end = buffer.indexOf('\n')) !== -1) {
+    while (!completed && (end = buffer.indexOf('\n')) !== -1) {
       const line = buffer.slice(0, end).replace(/\r$/, '')
       buffer = buffer.slice(end + 1)
       if (!line) dispatch()
@@ -200,12 +286,17 @@ async function readStream(response: Response, onText: (text: string) => void): P
       const { done, value } = await reader.read()
       if (done) break
       consume(decoder.decode(value, { stream: true }))
+      if (completed) break
     }
-    consume(decoder.decode())
-    if (buffer) consume('\n')
-    dispatch()
+    if (!completed) {
+      consume(decoder.decode())
+      if (buffer) consume('\n')
+      dispatch()
+    }
   }
   finally {
+    // DONE, parse failure and consumer refusal must all release the HTTP body.
+    void reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 
@@ -213,12 +304,15 @@ async function readStream(response: Response, onText: (text: string) => void): P
   return toolCalls.length ? { text, toolCalls } : { text }
 }
 
-async function readErrorBody(response: Response): Promise<string> {
+async function readErrorBody(response: Response, timing?: (event: ChatRequestTiming['event'], errorKind?: ChatRequestTiming['errorKind']) => void): Promise<string> {
+  timing?.('response-json-start')
   try {
     const data = await response.json() as OpenAIErrorBody
+    timing?.('response-json-end')
     return data.error?.message ?? ''
   }
   catch {
+    timing?.('response-json-failed', 'response-json-error')
     return ''
   }
 }

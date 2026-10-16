@@ -64,6 +64,241 @@ describe('Stage desktop awareness integration', () => {
     vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context: snapshot, scores: { shouldInterrupt: 0.9 } })
   }
 
+  it.each([
+    ['https://api.ppio.com/openai', 'qwen/qwen3.8-flash', false],
+    ['https://other.invalid/v1', 'qwen/qwen3.8-flash', undefined],
+    ['https://api.ppio.com/openai', 'other-model', undefined],
+  ] as const)('only A receives the route-specific thinking override (%s, %s)', async (baseUrl, model, expected) => {
+    vi.useFakeTimers()
+    try {
+      const { settings, stage, complete } = await prepareStage()
+      settings.config.consciousness = { ...settings.config.consciousness, baseUrl, model }
+      complete.mockImplementation(async request => {
+        if (!request.maxOutputTokens) return { text: 'B reply' }
+        const i = JSON.parse(request.messages[1]!.content!), e = i.incoming[0]
+        return { text: JSON.stringify({ scope: i.scope, baseRevision: i.baseRevision, covered: i.incoming.map((e: { id: string }) => e.id),
+          claims: [{ kind: 'fact', text: 'Source reports a value', evidence: [{ id: e.id, version: e.version, quote: e.text }] }], retracted: [], unknowns: [] }) }
+      })
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: true })
+      vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context, scores: { shouldInterrupt: 0.1 } })
+      await stage.tickAutonomous(); await vi.advanceTimersByTimeAsync(1500)
+      const a = complete.mock.calls.find(([r]) => !!r.maxOutputTokens)![0]
+      expect(a.enableThinking).toBe(expected); expect(a.maxOutputTokens).toBe(800)
+      if (expected === undefined) expect(a).not.toHaveProperty('enableThinking')
+      stage.send('An ordinary message'); await settle()
+      const b = complete.mock.calls.find(([r]) => !r.maxOutputTokens)![0]
+      expect(b).not.toHaveProperty('enableThinking')
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: false })
+      stage.send('Another ordinary message'); await settle()
+      expect(complete.mock.calls.at(-1)![0]).not.toHaveProperty('enableThinking')
+      const count = complete.mock.calls.length
+      await vi.advanceTimersByTimeAsync(20_000); expect(complete).toHaveBeenCalledTimes(count)
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('runs opted-in A after a declined Jev, feeds ready context to B and clears it on OFF', async () => {
+    vi.useFakeTimers()
+    try {
+      const records: DesktopDiagnosticRecord[] = []
+      window.aislingDesktop!.desktopDiagnostics = { enabled: true, replyText: false }
+      window.aislingDesktop!.recordDesktopDiagnostic = r => records.push(r)
+      const { settings, stage, complete } = await prepareStage()
+      const inputs: import('../runtime/situation-working-state').SituationInput[] = []
+      complete.mockImplementation(async request => {
+        if (request.maxOutputTokens) {
+          const input = JSON.parse(request.messages[1]!.content!) as import('../runtime/situation-working-state').SituationInput
+          inputs.push(input)
+          const e = input.incoming.at(-1) ?? input.evidence[0]!
+          return { text: JSON.stringify({ scope: input.scope, baseRevision: input.baseRevision, covered: input.incoming.map(e => e.id),
+            claims: [{ kind: 'fact', text: `Source reports ${e.text}`, evidence: [{ id: e.id, version: e.version, quote: e.text }] }],
+            retracted: [], unknowns: [] }) }
+        }
+        return { text: 'A delivered remark.' }
+      })
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: true })
+      vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context, scores: { shouldInterrupt: 0.1 } })
+      await stage.tickAutonomous()
+      expect(complete).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(stage.situationStatus.revision).toBe(1)
+      stage.send('解释当前页面的变化')
+      await settle()
+      expect(stage.sending).toBe(false)
+      const b = complete.mock.calls.find(([r]) => !r.maxOutputTokens)![0]
+      expect(JSON.stringify(b.messages)).toContain('[Short-term understanding]')
+      expect(JSON.stringify(stage.runtime.history)).not.toContain('[Short-term understanding]')
+      const aEnd = records.find(r => r.type === 'p2-a-update-end')!, bContext = records.find(r => r.type === 'p2-b-context')!
+      expect(aEnd).toMatchObject({ committed: true, revision: 1 })
+      expect(bContext).toMatchObject({ injected: true, revision: 1, updateId: aEnd.updateId, scopeId: aEnd.scopeId, scopeMatched: true })
+      expect(records.find(r => r.type === 'p2-b-delivery')).toMatchObject({ turnId: bContext.turnId, revision: 1, updateId: aEnd.updateId, delivered: true })
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(inputs).toHaveLength(1)
+      expect(JSON.stringify(inputs)).not.toContain('A delivered remark.')
+      expect(stage.situationStatus.calls).toBe(1)
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: false })
+      expect(stage.situationStatus.enabled).toBe(false); expect(stage.situationStatus.pending).toBe(0)
+      stage.send('解释当前页面')
+      await settle()
+      expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toContain('[Short-term understanding]')
+      expect(records.filter(r => r.type === 'p2-b-context').at(-1)).toMatchObject({ injected: false, reason: 'feature-disabled', contextChars: 0 })
+      expect(JSON.stringify(records.filter(r => r.type.startsWith('p2-')))).not.toContain('const answer')
+      const count = complete.mock.calls.length
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(complete).toHaveBeenCalledTimes(count)
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('does not feed cancelled autonomous output to A; session changes invalidate old understanding', async () => {
+    vi.useFakeTimers()
+    try {
+      const { settings, stage, complete } = await prepareStage()
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: true })
+      let finish!: (result: ChatCompletionResult) => void
+      complete.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      await stage.tickAutonomous()
+      stage.send('/quiet'); finish({ text: 'Revoked claim' }); await settle()
+      expect(stage.situationStatus.pending).toBe(1)
+      stage.newConversation()
+      expect(stage.situationStatus.pending).toBe(0)
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(complete).toHaveBeenCalledOnce()
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('a hanging then timed-out real-provider A request does not block B; OFF rejects its late return', async () => {
+    vi.useFakeTimers()
+    try {
+      const records: DesktopDiagnosticRecord[] = []
+      window.aislingDesktop!.desktopDiagnostics = { enabled: true, replyText: false }
+      window.aislingDesktop!.recordDesktopDiagnostic = r => records.push(r)
+      const { settings, stage, complete } = await prepareStage()
+      let finish!: (result: ChatCompletionResult) => void
+      complete.mockImplementation(request => request.maxOutputTokens
+        ? new Promise(resolve => { finish = resolve }) : Promise.resolve({ text: 'Immediate B reply' }))
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: true })
+      vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context, scores: { shouldInterrupt: 0.1 } })
+      await stage.tickAutonomous(); await vi.advanceTimersByTimeAsync(10_000)
+      expect(stage.situationStatus.running).toBe(true)
+      stage.send('A normal new question'); await settle()
+      expect(stage.sending).toBe(false); expect(stage.messages.at(-1)!.content).toBe('Immediate B reply')
+      const b = records.find(r => r.type === 'p2-b-request-start')!, a = records.find(r => r.type === 'p2-a-update-start')!
+      expect(b).toMatchObject({ reason: 'no-ready-state', injected: false, activeAUpdateId: a.updateId })
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(stage.situationStatus.lastEvent).toBe('timeout')
+      const end = records.find(r => r.type === 'p2-a-update-end')!
+      expect(end).toMatchObject({ outcome: 'timeout', committed: false })
+      expect(Number(a.startedAt)).toBeLessThanOrEqual(Number(b.startedAt))
+      expect(Number(end.finishedAt)).toBeGreaterThan(Number(b.startedAt))
+      const request = complete.mock.calls.find(([r]) => !!r.maxOutputTokens)![0]
+      expect(request.signal!.aborted).toBe(true)
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: false })
+      finish({ text: '{}' }); await settle()
+      expect(stage.situationStatus.revision).toBe(0); expect(stage.situationStatus.running).toBe(false)
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('invalidates ready understanding when the desktop source becomes unavailable', async () => {
+    vi.useFakeTimers()
+    try {
+      const { settings, stage, complete } = await prepareStage()
+      complete.mockImplementation(async request => {
+        if (!request.maxOutputTokens) return { text: 'B reply' }
+        const input = JSON.parse(request.messages[1]!.content!), e = input.incoming[0]
+        return { text: JSON.stringify({ scope: input.scope, baseRevision: input.baseRevision, covered: [e.id],
+          claims: [{ kind: 'fact', text: 'Source reports a value', evidence: [{ id: e.id, version: e.version, quote: e.text }] }],
+          retracted: [], unknowns: [] }) }
+      })
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: true })
+      vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context, scores: { shouldInterrupt: 0.1 } })
+      await stage.tickAutonomous(); await vi.advanceTimersByTimeAsync(1500)
+      expect(stage.situationStatus.revision).toBe(1)
+      vi.mocked(window.aislingDesktop!.readDesktopContext).mockResolvedValue({ enabled: true, available: false })
+      await stage.tickAutonomous()
+      expect(stage.situationStatus.revision).toBe(0); expect(stage.situationStatus.pending).toBe(0)
+      stage.send('解释当前页面'); await settle()
+      expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toContain('[Short-term understanding]')
+      stage.$dispose()
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('aborts the previous provider update and rejects its late result after a provider change', async () => {
+    vi.useFakeTimers()
+    try {
+      const { settings, stage, complete } = await prepareStage()
+      let finish!: (result: ChatCompletionResult) => void
+      complete.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: true })
+      vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context, scores: { shouldInterrupt: 0.1 } })
+      await stage.tickAutonomous(); await vi.advanceTimersByTimeAsync(1500)
+      const request = complete.mock.calls[0]![0], input = JSON.parse(request.messages[1]!.content!), e = input.incoming[0]
+      const next = vi.fn(async () => ({ text: 'New provider reply' }))
+      settings.activeChatProvider = { id: 'next-provider', complete: next }
+      expect(request.signal!.aborted).toBe(true)
+      finish({ text: JSON.stringify({ scope: input.scope, baseRevision: input.baseRevision, covered: [e.id],
+        claims: [{ kind: 'fact', text: 'Old provider claim', evidence: [{ id: e.id, version: e.version, quote: e.text }] }],
+        retracted: [], unknowns: [] }) })
+      await settle()
+      expect(stage.situationStatus.revision).toBe(0); expect(stage.situationStatus.pending).toBe(0)
+      stage.send('解释当前页面'); await settle()
+      expect(next).toHaveBeenCalledOnce()
+      expect(JSON.stringify(next.mock.calls)).not.toContain('Old provider claim')
+      stage.$dispose()
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it.each(['failed', 'cancelled'] as const)('keeps injected revision trace when B is %s instead of delivered', async outcome => {
+    vi.useFakeTimers()
+    try {
+      const records: DesktopDiagnosticRecord[] = []
+      window.aislingDesktop!.desktopDiagnostics = { enabled: true, replyText: false }
+      window.aislingDesktop!.recordDesktopDiagnostic = r => records.push(r)
+      const { settings, stage, complete } = await prepareStage()
+      complete.mockImplementation(async request => {
+        if (!request.maxOutputTokens) return { text: 'Reply' }
+        const i = JSON.parse(request.messages[1]!.content!) as import('../runtime/situation-working-state').SituationInput
+        const e = i.incoming[0]!
+        return { text: JSON.stringify({ scope: i.scope, baseRevision: i.baseRevision, covered: i.incoming.map(e => e.id),
+          claims: [{ kind: 'fact', text: 'Source reports a definition', evidence: [{ id: e.id, version: e.version, quote: e.text }] }], retracted: [], unknowns: [] }) }
+      })
+      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, situationEnabled: true })
+      vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context, scores: { shouldInterrupt: 0.1 } })
+      await stage.tickAutonomous(); await vi.advanceTimersByTimeAsync(10_000)
+      const a = records.find(r => r.type === 'p2-a-update-end')!
+      let finish!: (r: ChatCompletionResult) => void
+      if (outcome === 'failed') complete.mockRejectedValueOnce(new Error('Private provider error'))
+      else complete.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      stage.sendStimulus(createAutonomousStimulus({ candidate: { id: 'c', objectId: 'o', source: 'foreground', change: 'appeared', snapshot: context, target: context.focus } }))
+      if (outcome === 'cancelled') { stage.send('/quiet'); finish({ text: 'Private cancelled reply' }) }
+      await settle()
+      expect(records.find(r => r.type === 'p2-b-context')).toMatchObject({ injected: true, updateId: a.updateId, revision: 1 })
+      expect(records.find(r => r.type === 'p2-b-request-end')).toMatchObject({ outcome: outcome === 'failed' ? 'failed' : 'returned' })
+      expect(records.find(r => r.type === 'p2-b-delivery')).toMatchObject({ delivered: false, updateId: a.updateId,
+        outcome: outcome === 'failed' ? 'generation-failed' : 'cancelled' })
+      expect(JSON.stringify(records.filter(r => r.type.startsWith('p2-')))).not.toContain('Private')
+      stage.newConversation()
+      stage.send('解释当前页面'); await settle()
+      const after = records.filter(r => r.type === 'p2-b-context').at(-1)!
+      expect(after).toMatchObject({ injected: false, reason: 'session-invalidated' })
+      expect(after.updateId).toBeUndefined()
+    }
+    finally { vi.useRealTimers() }
+  })
+
+  it('a failing diagnostic bridge cannot affect normal delivery', async () => {
+    window.aislingDesktop!.desktopDiagnostics = { enabled: true, replyText: false }
+    window.aislingDesktop!.recordDesktopDiagnostic = () => { throw new Error('disk unavailable') }
+    const { stage, complete } = await prepareStage()
+    stage.send('An ordinary question'); await settle()
+    expect(stage.sending).toBe(false); expect(complete).toHaveBeenCalledOnce()
+    expect(stage.messages.at(-1)?.content).toBe('A reply.')
+  })
+
   it.each([false, true])('binds successful delivery to the candidate with diagnostics enabled=%s', async enabled => {
     const logs: DesktopDiagnosticRecord[] = []
     window.aislingDesktop!.desktopDiagnostics = { enabled, replyText: false }

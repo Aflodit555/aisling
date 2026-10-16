@@ -25,6 +25,35 @@ export interface ChatMessage {
 export interface ChatCompletionRequest {
   readonly messages: readonly ChatMessage[]
   readonly tools?: readonly ToolDefinition[]
+  /** Optional limits for background work; ordinary chat requests omit these. */
+  readonly signal?: AbortSignal
+  readonly maxOutputTokens?: number
+  /** Per-request override for bounded background work; ordinary chat omits it. */
+  readonly temperature?: number
+  /** Explicit per-request switch; omitted preserves the endpoint's default thinking mode. */
+  readonly enableThinking?: boolean
+  /** Optional local phase timing; never serialized into a model request. */
+  readonly onTiming?: (record: ChatRequestTiming) => void
+}
+
+export interface ChatRequestTiming {
+  at: number
+  event: 'provider-enter' | 'fetch-start' | 'headers-received' | 'response-json-start' | 'response-json-end'
+    | 'response-json-failed' | 'first-text' | 'stream-end' | 'result-ready' | 'aborted' | 'failed' | 'model-json-start' | 'model-json-end' | 'model-json-failed'
+  stage: 'provider' | 'fetch' | 'response-json' | 'response-shape' | 'stream' | 'model-json'
+  httpStatus?: number
+  abortRequested?: boolean
+  errorKind?: 'fetch-error' | 'http-error' | 'response-json-error' | 'response-shape-error' | 'stream-error' | 'provider-error' | 'model-json-error'
+  /** Observed response metadata only; never contains content, reasoning text or raw parser errors. */
+  contentChars?: number
+  reasoningChars?: number
+  contentDeltaCount?: number
+  reasoningDeltaCount?: number
+  streamEventCount?: number
+  doneReceived?: boolean
+  unsupportedContent?: boolean
+  finishReason?: 'stop' | 'length' | 'tool_calls' | 'function_call' | 'content_filter' | 'other' | 'unknown'
+  jsonParseFailure?: 'empty-content' | 'whitespace-only' | 'markdown-fence' | 'non-json-prefix' | 'json-syntax' | 'non-syntax-error'
 }
 
 export interface ChatCompletionResult {

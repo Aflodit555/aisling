@@ -25,6 +25,8 @@ export const zh: Record<string, string> = {
   'Choose Aisling’s voice.': '为 Aisling 选择声音。',
   'Voice output': '语音输出',
   'Advanced settings': '高级设置',
+  'Short-term understanding (preview)': '短期情境认识（预览）',
+  'Off by default. With Desktop Awareness on, sends foreground text and explicit corrections to your Chat model. Replies never wait; turning off clears understanding. Preview usage is limited.': '默认关闭。桌面感知开启时，将前台文字和明确纠正发送给 Chat 模型。回复无需等待，关闭即清空认识。预览期间有调用限制。',
   'Include recent reply in Jev judgment': '判断时参考近期回复',
   'Lets Jev refer to a recent successful reply to this candidate target (up to 240 characters, with basic credential redaction). Off by default; turning off clears summaries. Normal chat is never included.': '让 Jev 参考同一候选目标近期成功回复（最多 240 字符，含常见凭据脱敏）。默认关闭；关闭后清除摘要。不发送普通聊天历史。',
   'Response targets are locally deduplicated even when reply context is off. A real content or track change can open a new opportunity.': '即使关闭近期回复参考，本地仍按回应目标去重。正文或曲目的有效变化可产生新机会。',

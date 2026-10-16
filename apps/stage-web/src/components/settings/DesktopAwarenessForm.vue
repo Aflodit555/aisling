@@ -13,8 +13,11 @@ const { saved, flashSaved } = useSaveFlash()
 const key = ref(settings.config.desktopAwareness.jevApiKey)
 const cooldown = ref(settings.config.desktopAwareness.cooldownSeconds)
 const replyHistory = ref(settings.config.desktopAwareness.replyHistoryEnabled === true)
+const situationEnabled = ref(settings.config.desktopAwareness.situationEnabled === true)
 const dirty = computed(() => key.value.trim() !== settings.config.desktopAwareness.jevApiKey || cooldown.value !== settings.config.desktopAwareness.cooldownSeconds
-  || replyHistory.value !== (settings.config.desktopAwareness.replyHistoryEnabled === true))
+  || replyHistory.value !== (settings.config.desktopAwareness.replyHistoryEnabled === true)
+  || situationEnabled.value !== (settings.config.desktopAwareness.situationEnabled === true))
+watch(() => settings.config.desktopAwareness.situationEnabled, next => { situationEnabled.value = next === true })
 watch(() => settings.config.desktopAwareness.replyHistoryEnabled, next => { replyHistory.value = next === true })
 watch(() => settings.config.desktopAwareness.jevApiKey, (next) => {
   key.value = next
@@ -25,7 +28,7 @@ watch(() => settings.config.desktopAwareness.cooldownSeconds, (next) => {
 
 async function save(): Promise<void> {
   await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: key.value.trim(), cooldownSeconds: cooldown.value,
-    replyHistoryEnabled: replyHistory.value })
+    replyHistoryEnabled: replyHistory.value, situationEnabled: situationEnabled.value })
   if (!key.value.trim() && stage.autonomous.enabled)
     await stage.setDesktopAwarenessEnabled(false)
   flashSaved()
@@ -49,6 +52,11 @@ async function save(): Promise<void> {
           <span class="label">{{ t('Include recent reply in Jev judgment') }}</span>
           <input v-model="replyHistory" type="checkbox" :aria-label="t('Include recent reply in Jev judgment')" />
           <span class="hint">{{ t('Lets Jev refer to a recent successful reply to this candidate target (up to 240 characters, with basic credential redaction). Off by default; turning off clears summaries. Normal chat is never included.') }}</span>
+        </label>
+        <label class="field long-label">
+          <span class="label">{{ t('Short-term understanding (preview)') }}</span>
+          <input v-model="situationEnabled" type="checkbox" :aria-label="t('Short-term understanding (preview)')" />
+          <span class="hint">{{ t('Off by default. With Desktop Awareness on, sends foreground text and explicit corrections to your Chat model. Replies never wait; turning off clears understanding. Preview usage is limited.') }}</span>
         </label>
         <label class="field long-label" style="--i: 1">
           <span class="label">{{ t('Autonomous reply interval') }}: {{ cooldown }} s</span>

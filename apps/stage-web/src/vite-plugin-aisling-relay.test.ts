@@ -3,6 +3,21 @@ import { expect, it, vi } from 'vitest'
 
 import { aislingRelayPlugin } from '../vite-plugin-aisling-relay'
 
+it('keeps the shared speech relay available in the development server', async () => {
+  const server = await createServer({ configFile: false, plugins: [aislingRelayPlugin()], server: { host: '127.0.0.1', port: 0 } })
+  try {
+    await server.listen()
+    const address = server.httpServer?.address()
+    if (!address || typeof address === 'string') throw new Error('No test server address')
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/relay/alibaba-tts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    })
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toContain('missing text/endpoint/model/voice/apiKey')
+  }
+  finally { await server.close() }
+})
+
 it('serves DuckDuckGo Lite through the web search relay without a key', async () => {
   const nativeFetch = globalThis.fetch
   const upstream = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<a class="result-link">A</a>'))

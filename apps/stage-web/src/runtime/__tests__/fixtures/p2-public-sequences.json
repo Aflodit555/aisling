@@ -1,0 +1,101 @@
+{
+  "note": "Public regression fixture from aisling-situation-lab; editorial replay, not UIA or recorded user activity. No semantic gold labels.",
+  "sources": [
+    {
+      "id": "memgpt",
+      "title": "MemGPT: Towards LLMs as Operating Systems",
+      "url": "https://arxiv.org/html/2310.08560v2",
+      "authors": "Charles Packer et al.",
+      "version": "2310.08560v2, 12 Feb 2024",
+      "license": "CC BY 4.0"
+    },
+    {
+      "id": "acl",
+      "title": "Lost in the Middle: How Language Models Use Long Contexts",
+      "url": "https://aclanthology.org/2024.tacl-1.9/",
+      "authors": "Nelson F. Liu et al.",
+      "version": "TACL 2024, 12:157–173",
+      "license": "CC BY 4.0"
+    }
+  ],
+  "cases": [
+    {
+      "id": "S04",
+      "provenance": "curated-public-source-sequence",
+      "orderBasis": "Editor-selected presentation order, not recorded user actions/timestamps",
+      "observations": [
+        {
+          "refs": [
+            "memgpt:58"
+          ],
+          "transform": "none",
+          "text": "In this paper, we study how to provide the illusion of an infinite context while continuing to use fixed-context models. Our approach borrows from the idea of virtual memory paging that was developed to enable applications to work on datasets that far exceed the available memory by paging data between main memory and disk."
+        },
+        {
+          "refs": [
+            "memgpt:60"
+          ],
+          "transform": "none",
+          "text": "These capabilities allow LLMs to effective “page” in and out information between context windows (analogous to “main memory” in operating systems) and external storage, similar to hierarchical memory in traditional OSes. In addition, function calls can be leveraged to manage control flow between context management, response generation, and user interactions."
+        },
+        {
+          "refs": [
+            "memgpt:71"
+          ],
+          "transform": "none",
+          "text": "MemGPT’s OS-inspired multi-level memory architecture delineates between two primary memory types: main context (analogous to main memory/physical memory/RAM) and external context (analogous to disk memory/disk storage). Main context consists of the LLM prompt tokens—anything in main context is considered in-context and can be accessed by the LLM processor during inference. External context refers to any information that is held outside of the LLMs fixed context window."
+        }
+      ]
+    },
+    {
+      "id": "S05",
+      "provenance": "curated-public-source-sequence",
+      "orderBasis": "Editor-selected presentation order, not recorded user actions/timestamps",
+      "observations": [
+        {
+          "refs": [
+            "memgpt:71"
+          ],
+          "transform": "none",
+          "text": "MemGPT’s OS-inspired multi-level memory architecture delineates between two primary memory types: main context (analogous to main memory/physical memory/RAM) and external context (analogous to disk memory/disk storage). Main context consists of the LLM prompt tokens—anything in main context is considered in-context and can be accessed by the LLM processor during inference. External context refers to any information that is held outside of the LLMs fixed context window."
+        },
+        {
+          "refs": [
+            "memgpt:72"
+          ],
+          "transform": "none",
+          "text": "This out-of-context data must always be explicitly moved into main context in order for it to be passed to the LLM processor during inference. MemGPT provides function calls that the LLM processor to manage its own memory without any user intervention."
+        },
+        {
+          "refs": [
+            "memgpt:71"
+          ],
+          "transform": "none",
+          "text": "MemGPT’s OS-inspired multi-level memory architecture delineates between two primary memory types: main context (analogous to main memory/physical memory/RAM) and external context (analogous to disk memory/disk storage). Main context consists of the LLM prompt tokens—anything in main context is considered in-context and can be accessed by the LLM processor during inference. External context refers to any information that is held outside of the LLMs fixed context window."
+        }
+      ]
+    },
+    {
+      "id": "S06",
+      "provenance": "curated-public-source-sequence",
+      "orderBasis": "Editor-selected presentation order, not recorded user actions/timestamps",
+      "observations": [
+        {
+          "refs": [
+            "memgpt:71"
+          ],
+          "transform": "none",
+          "text": "MemGPT’s OS-inspired multi-level memory architecture delineates between two primary memory types: main context (analogous to main memory/physical memory/RAM) and external context (analogous to disk memory/disk storage). Main context consists of the LLM prompt tokens—anything in main context is considered in-context and can be accessed by the LLM processor during inference. External context refers to any information that is held outside of the LLMs fixed context window."
+        },
+        {
+          "refs": [
+            "acl:58",
+            "acl:59"
+          ],
+          "transform": "none",
+          "text": "While recent language models have the ability to take long contexts as input, relatively little is known about how well they use longer context. We analyze the performance of language models on two tasks that require identifying relevant information in their input contexts: multi-document question answering and key-value retrieval.\nWe find that performance can degrade significantly when changing the position of relevant information, indicating that current language models do not robustly make use of information in long input contexts. In particular, we observe that performance is often highest when relevant information occurs at the beginning or end of the input context, and significantly degrades when models must access relevant information in the middle of long contexts, even for explicitly long-context models."
+        }
+      ]
+    }
+  ]
+}

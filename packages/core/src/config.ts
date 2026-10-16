@@ -26,6 +26,8 @@ export interface DesktopAwarenessConfig {
   jevApiKey: string
   /** Explicit opt-in: bounded successful replies to this candidate target may be sent to Jev. */
   replyHistoryEnabled?: boolean
+  /** Experimental opt-in: send bounded foreground evidence to the current ChatProvider. */
+  situationEnabled?: boolean
 }
 
 export interface SpeechConfig {

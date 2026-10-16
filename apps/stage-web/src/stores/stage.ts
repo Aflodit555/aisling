@@ -1,6 +1,6 @@
 import type { CharacterOutput, ChatMessage, ImageInput, Stimulus } from '@aisling/core'
 import { defineStore } from 'pinia'
-import { computed, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
 
 import { createWebVisualStimulus } from '../adapter/vision'
 import { createWebTextStimulus } from '../adapter/web'
@@ -15,6 +15,8 @@ import { createAutonomousController, createAutonomousState, type DesktopJudgeReq
 import { mediaCandidateMatches, playingMedia } from '../runtime/desktop-observations'
 import { PREFERENCE_ACKNOWLEDGEMENTS, recognizeInteractionPreference } from '../runtime/interaction-preference'
 import { resolvePersistentStorage } from '../storage/desktop-storage'
+import { createSituationWorkingState, isSituationCorrection, providerSituationExecutor } from '../runtime/situation-working-state'
+import { situationEnableThinking } from '../runtime/provider-factory'
 import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
@@ -89,10 +91,35 @@ export const useStageStore = defineStore('stage', () => {
   const sessionMessages = ref<ChatMessage[]>([...activeSession.messages])
   const sessionsList = ref<ConversationSession[]>(conversationStore.list())
 
+  const diagnostic = window.aislingDesktop?.desktopDiagnostics?.enabled
+    ? (record: import('../runtime/autonomous').DesktopDiagnosticRecord) => {
+        try { window.aislingDesktop?.recordDesktopDiagnostic?.(record) }
+        catch { /* The diagnostic bridge cannot affect production behavior. */ }
+      } : undefined
+  const turnDiagnostics = new Map<string, Record<string, unknown>>()
+  const situation = createSituationWorkingState({ execute: providerSituationExecutor(() => settings.activeChatProvider,
+    { getEnableThinking: () => situationEnableThinking(settings.config.consciousness) }), diagnostic })
+  const situationStatus = situation.status
+  onScopeDispose(() => situation.dispose())
+
   const runtime = createAislingRuntime({
     getChatProvider: () => settings.activeChatProvider,
     getTools: () => settings.activeTools,
     history: activeSession.messages.slice(-MODEL_CONTEXT_WINDOW),
+    getSituationContext: (stimulus, turnId) => situation.contextFor(stimulus, diagnostic && turnId
+      ? selection => { turnDiagnostics.set(turnId, { ...selection }) } : undefined),
+    diagnostic: diagnostic ? record => {
+      if (record.type === 'p2-b-context') {
+        const selected = turnDiagnostics.get(record.turnId)
+        turnDiagnostics.set(record.turnId, { ...selected, injected: record.injected, contextChars: record.contextChars,
+          reason: record.reason === 'context-error' || record.reason === 'context-limit' ? record.reason : selected?.reason ?? record.reason,
+          revision: record.injected ? selected?.revision : undefined, updateId: record.injected ? selected?.updateId : undefined,
+          conversationId: activeSessionId.value, aCallsAtStart: situation.status.calls })
+      }
+      const trace = turnDiagnostics.get(record.turnId)
+      diagnostic({ ...trace, ...record, reason: trace?.reason ?? record.reason,
+        aCalls: situation.status.calls, activeAUpdateId: situation.activeUpdateId() })
+    } : undefined,
   })
 
   const messages = ref<DisplayMessage[]>(historyToDisplay(activeSession.messages))
@@ -142,11 +169,14 @@ export const useStageStore = defineStore('stage', () => {
     getCooldownMs: () => settings.config.desktopAwareness.cooldownSeconds * 1000,
     trigger: sendStimulus,
     getReplyHistoryEnabled: () => settings.config.desktopAwareness.replyHistoryEnabled === true,
-    diagnostic: window.aislingDesktop?.desktopDiagnostics?.enabled
-      ? record => window.aislingDesktop?.recordDesktopDiagnostic?.(record) : undefined,
+    onSnapshot: snapshot => situation.observe(snapshot),
+    diagnostic,
     diagnosticReplyText: window.aislingDesktop?.desktopDiagnostics?.replyText === true,
   })
   watch(() => settings.config.desktopAwareness.replyHistoryEnabled, () => autonomousController.syncHistorySetting(), { flush: 'sync' })
+  watch(() => settings.config.desktopAwareness.situationEnabled === true && autonomous.enabled,
+    enabled => situation.setEnabled(enabled), { flush: 'sync', immediate: true })
+  watch(() => settings.activeChatProvider, () => situation.reset('provider-changed'), { flush: 'sync' })
 
   async function setDesktopAwarenessEnabled(enabled: boolean, persist = true): Promise<void> {
     const ticket = ++awarenessRevision
@@ -258,6 +288,8 @@ export const useStageStore = defineStore('stage', () => {
     }
 
     sending.value = true
+    if (stimulus.kind === 'user-text' && isSituationCorrection(stimulus.text))
+      situation.feedback(stimulus.text, situation.currentScope())
     const autonomousTurn = stimulus.kind === 'autonomous' ? {
       stimulus, cancelled: false, delivered: false,
     } : undefined
@@ -278,7 +310,11 @@ export const useStageStore = defineStore('stage', () => {
       }
     }
 
+    let diagnosticTurnId: string | undefined, diagnosticDelivered = false
+    let diagnosticOutcome = 'not-delivered'
     void runtime.ingest(stimulus).then(async (turn) => {
+      diagnosticTurnId = turn.id
+      diagnosticOutcome = turn.status === 'failed' ? 'generation-failed' : 'empty'
       if (autonomousTurn && !autonomousTurn.cancelled && stimulus.kind === 'autonomous' && stimulus.candidate.source === 'media'
         && turn.status === 'completed' && turn.output?.text.trim()) {
         try {
@@ -297,6 +333,7 @@ export const useStageStore = defineStore('stage', () => {
       }
       // No provider cancellation protocol: discard a revoked turn before any output side effects.
       if (autonomousTurn?.cancelled) {
+        diagnosticOutcome = 'cancelled'
         autonomousController.recordDecision(stimulus.source, 'blocked', 'cancelled-output', stimulus.id, autonomousTurn.stimulus.candidate)
         return
       }
@@ -314,6 +351,7 @@ export const useStageStore = defineStore('stage', () => {
           messages.value.push({ role: 'assistant', content: turn.output.text })
         sessionMessages.value = [...sessionMessages.value, { role: 'assistant', content: turn.output.text }]
         persistActiveSession()
+        diagnosticDelivered = true; diagnosticOutcome = 'delivered'
         if (autonomousTurn) {
           const replyHistoryWritten = autonomousController.completed(autonomousTurn.stimulus, true, turn.output.text)
           autonomousController.recordDecision(stimulus.source, 'allowed', 'output-delivered', stimulus.id, autonomousTurn.stimulus.candidate)
@@ -335,6 +373,13 @@ export const useStageStore = defineStore('stage', () => {
         }]
       }
     }).finally(() => {
+      if (diagnostic && diagnosticTurnId) {
+        const trace = turnDiagnostics.get(diagnosticTurnId)
+        diagnostic({ ...trace, type: 'p2-b-delivery', at: Date.now(), turnId: diagnosticTurnId,
+          source: stimulus.kind, delivered: diagnosticDelivered, outcome: diagnosticOutcome,
+          aCallsDuringTurn: situation.status.calls - Number(trace?.aCallsAtStart ?? situation.status.calls) })
+        turnDiagnostics.delete(diagnosticTurnId)
+      }
       // Commands may arrive during generation; keep cancelled output out of Core history as well.
       if (preferenceHistoryPending || autonomousTurn?.cancelled) {
         runtime.resetHistory(sessionMessages.value.slice(-MODEL_CONTEXT_WINDOW))
@@ -387,6 +432,7 @@ export const useStageStore = defineStore('stage', () => {
     if (!session)
       return
     activeSessionId.value = id
+    situation.reset()
     conversationStore.setActiveId(id)
     sessionMessages.value = [...session.messages]
     messages.value = historyToDisplay(session.messages)
@@ -400,6 +446,7 @@ export const useStageStore = defineStore('stage', () => {
       return
     const session = conversationStore.create()
     activeSessionId.value = session.id
+    situation.reset()
     sessionMessages.value = []
     messages.value = []
     runtime.resetHistory([])
@@ -424,6 +471,7 @@ export const useStageStore = defineStore('stage', () => {
 
   return {
     autonomous,
+    situationStatus,
     desktopBridgeState,
     desktopAvailable,
     refreshDesktopBridgeStatus,

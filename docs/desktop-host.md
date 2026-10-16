@@ -14,9 +14,20 @@ cmake --build external/kernel_c/build --config Release
 pnpm dev:desktop
 ```
 
-scripts/dev-desktop.mjs 启动 Vite（5174），轮询 HTTP ready 后启动 Electron，并在 Electron 退出时结束自己启动的子进程树。pnpm start 是 pnpm dev:desktop 的别名。pnpm start:desktop 先构建 renderer，再运行 built 路径。
+当前仍是需要源码和开发依赖的早期项目，没有面向普通用户的安装包。当前开发和桌面实机调试默认使用 `pnpm dev:desktop`；检查构建后的应用运行方式时使用 `pnpm start:desktop`。
 
-desktop-app.cjs 优先使用 AISLING_STAGE_URL，否则使用已有的 stage-web/dist，无构建时回退 dev URL。desktop-protocol.cjs 通过标准 secure scheme aisling://stage 提供 built renderer、SPA 路由和已有 Web Search relay。
+| 命令 | 用途与运行方式 |
+| --- | --- |
+| `pnpm dev:desktop` | 边改边运行：启动本地开发服务器，再打开桌面窗口；界面代码修改通常自动更新 |
+| `pnpm start:desktop` | 检查构建后的应用：先构建，再打开桌面窗口；不运行开发服务器，修改后需重新执行该命令 |
+| `pnpm start` | 当前是 `pnpm dev:desktop` 的别名，仍属于开发启动 |
+| `pnpm dev` | 只打开浏览器开发入口，不具备原生桌面采集能力 |
+
+`start:desktop` 更接近未来用户安装后运行应用的形态，但当前不会生成安装包，也不代表功能已正式验收。两种桌面启动方式应当具有相同功能，共用已保存的设置和聊天记录；切换入口不应改变可用功能。开发服务器提供的转发接口不会自动进入构建产物，因此生产宿主也必须提供对应接口，并分别测试两条启动路径。
+
+scripts/dev-desktop.mjs 在开发模式下启动 Vite（5174），等待就绪后启动 Electron，并在 Electron 退出时清理自己启动的子进程。生产模式下先构建 renderer，再交给 Electron 直接加载。
+
+desktop-app.cjs 优先使用 AISLING_STAGE_URL，否则使用已有的 stage-web/dist，无构建时回退 dev URL。desktop-protocol.cjs 通过标准 secure scheme aisling://stage 提供 built renderer、SPA 路由、Web Search 及 Alibaba 语音转发。
 
 ## 采集与边界
 
@@ -52,6 +63,6 @@ pnpm --filter @aisling/stage-desktop test:smoke:prod
 
 ## 已知宿主限制
 
-built renderer 的协议目前提供 Web Search relay，未提供 Alibaba HTTP TTS 的 Vite relay。默认 WebSocket TTS 与 HTTP transport 要分别看其实际连接路径；本轮未修改 Speech。桌面 UIA／媒体采样边界以 desktop-situation.md 为准。
+built renderer 的协议提供 Web Search 和 Alibaba TTS relay。语音的 HTTP 与实时 WebSocket 两种传输均复用开发入口的服务端逻辑，生产启动无需额外运行 Vite；API Key 通过认证头发给供应端，不放进 WebSocket URL。桌面 UIA／媒体采样边界以 desktop-situation.md 为准。
 
 installer、签名、自动更新等发布能力不在本阶段范围内。旧的“双终端、readActivity、PowerShell 前台标题”说明已被本页替代。

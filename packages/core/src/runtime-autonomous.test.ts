@@ -6,6 +6,25 @@ import { createCharacterRuntime } from './runtime'
 import { createAutonomousStimulus, createUserTextStimulus } from './stimulus'
 
 describe('autonomous runtime observation', () => {
+  it('consumes ready scoped understanding ephemerally and rejects oversized or failed context', async () => {
+    const complete = vi.fn(async (_request: ChatCompletionRequest) => ({ text: 'Bounded reply.' }))
+    let context: string | undefined = 'inference: the source refines a previously seen definition'
+    const runtime = createCharacterRuntime({ character: createCharacter({ id: 'a', name: 'A', persona: '', capabilities: [] }),
+      getChatProvider: () => ({ id: 'mock', complete }), getSituationContext: () => context })
+    const stimulus = createAutonomousStimulus({ candidate: { id: 'c', objectId: 'o', source: 'foreground', change: 'appeared',
+      snapshot: { capturedAt: 1, targetHwnd: '123', sequence: 1 }, target: { app: 'browser', title: 'Paper', text: 'Current definition' } } })
+    await runtime.ingest(stimulus)
+    expect(JSON.stringify(complete.mock.calls[0]![0])).toContain('[Short-term understanding]')
+    expect(JSON.stringify(complete.mock.calls[0]![0])).toContain('never change the response candidate')
+    expect(JSON.stringify(runtime.history)).not.toContain('definition')
+    context = undefined; await runtime.ingest(stimulus)
+    expect(JSON.stringify(complete.mock.calls[1]![0])).not.toContain('[Short-term understanding]')
+    context = 'x'.repeat(3001); await runtime.ingest(stimulus)
+    expect(JSON.stringify(complete.mock.calls[2]![0])).not.toContain('[Short-term understanding]')
+    const broken = createCharacterRuntime({ character: runtime.character, getChatProvider: () => ({ id: 'mock', complete }),
+      getSituationContext: () => { throw new Error('optional context unavailable') } })
+    expect((await broken.ingest(stimulus)).status).toBe('completed')
+  })
   it('uses only the candidate in an autonomous prompt and persists only the assistant output', async () => {
     const complete = vi.fn(async (_request: ChatCompletionRequest) => ({ text: 'Take a small break from that file?' }))
     const history = [{ role: 'user' as const, content: 'I am working on Aisling.' }]

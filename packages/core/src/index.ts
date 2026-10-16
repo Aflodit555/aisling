@@ -30,6 +30,7 @@ export type {
   ChatCompletionResult,
   ChatMessage,
   ChatProvider,
+  ChatRequestTiming,
   ToolCall,
   ToolDefinition,
 } from './provider'
@@ -65,6 +66,7 @@ export { createWebSearchTool } from './tools/web-search-tool'
 export type {
   CharacterRuntime,
   CharacterRuntimeOptions,
+  ChatRuntimeDiagnostic,
   RuntimeEvent,
   TurnRecord,
 } from './runtime'

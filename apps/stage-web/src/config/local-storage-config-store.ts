@@ -45,6 +45,7 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
                 : defaults.desktopAwareness.jevApiKey,
               replyHistoryEnabled: oldAwareness?.replyHistoryEnabled === true
                 || (oldAwareness?.replyHistoryEnabled === undefined && oldAwareness?.eventHistoryEnabled === true),
+              ...(oldAwareness?.situationEnabled === true ? { situationEnabled: true } : {}),
             },
             speech: { ...defaults.speech, ...parsed.speech, enabled: storedSpeech?.enabled ?? (storedSpeech?.providerType !== undefined && storedSpeech.providerType !== 'none'), transport: migratedTransport },
             vision: { ...defaults.vision, ...parsed.vision, enabled: parsed.vision?.enabled ?? (parsed.vision?.providerType !== undefined && parsed.vision.providerType !== 'none') },
@@ -53,7 +54,7 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
           if (Object.hasOwn(parsed, 'hearing')
             || parsed.speech?.enabled === undefined || parsed.vision?.enabled === undefined || parsed.webSearch?.enabled === undefined
             || parsed.consciousness?.providerType !== 'openai-compatible'
-            || Object.keys(parsed.desktopAwareness ?? {}).some(key => key !== 'enabled' && key !== 'cooldownSeconds' && key !== 'jevApiKey' && key !== 'replyHistoryEnabled')
+            || Object.keys(parsed.desktopAwareness ?? {}).some(key => !['enabled', 'cooldownSeconds', 'jevApiKey', 'replyHistoryEnabled', 'situationEnabled'].includes(key))
             || (parsed.webSearch && (parsed.webSearch.providerType !== webSearch.providerType || Object.keys(parsed.webSearch).some(key => key !== 'providerType' && key !== 'enabled'))))
             storage.setItem(KEY, JSON.stringify(config))
           return config

@@ -6,6 +6,8 @@ import {
   type ChatMessage,
   type ChatProvider,
   type Tool,
+  type Stimulus,
+  type ChatRuntimeDiagnostic,
 } from '@aisling/core'
 
 const AISLING_PERSONA = [
@@ -35,11 +37,15 @@ export function createAislingRuntime(deps: {
   getTools: () => readonly Tool[]
   /** Seed conversation context (restored history). */
   history?: ChatMessage[]
+  getSituationContext?: (stimulus: Stimulus, turnId?: string) => string | undefined
+  diagnostic?: (record: ChatRuntimeDiagnostic) => void
 }): CharacterRuntime {
   return createCharacterRuntime({
     character: createAislingCharacter(),
     getChatProvider: deps.getChatProvider,
     getTools: deps.getTools,
     history: deps.history,
+    getSituationContext: deps.getSituationContext,
+    diagnostic: deps.diagnostic,
   })
 }

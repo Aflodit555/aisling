@@ -37,6 +37,7 @@ export function createAutonomousController(options: {
   state: AutonomousState; readDesktop: () => Promise<DesktopObserverStatus>; judgeDesktop: (request: DesktopJudgeRequest) => Promise<DesktopJudgeResult>
   isBusy: () => boolean; isReady: () => boolean; getCooldownMs: () => number; trigger: (stimulus: AutonomousStimulus) => void
   getReplyHistoryEnabled?: () => boolean; diagnostic?: (record: DesktopDiagnosticRecord) => void; diagnosticReplyText?: boolean; now?: () => number
+  onSnapshot?: (snapshot: DesktopActivitySnapshot | undefined) => void
 }) {
   const { state } = options
   const now = options.now ?? Date.now
@@ -141,6 +142,8 @@ export function createAutonomousController(options: {
       const sample = await options.readDesktop()
       if (!state.enabled || ticket !== revision) { block('invalidated'); return }
       state.error = sample.error ?? ''
+      try { options.onSnapshot?.(sample.enabled && sample.available ? sample.context : undefined) }
+      catch { /* Optional slow processing must not affect the existing gates. */ }
       if (!sample.enabled || !sample.available || !sample.context) { observations.interrupt(); block('desktop-unavailable'); return }
       const observed = observations.observe(sample.context)
       candidate = observed.candidate

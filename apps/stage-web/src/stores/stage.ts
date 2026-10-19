@@ -1,4 +1,4 @@
-import type { CharacterOutput, ChatMessage, ImageInput, Stimulus } from '@aisling/core'
+import { createAutonomousContext, type CharacterOutput, type ChatMessage, type ConversationMessage, type ImageInput, type Stimulus } from '@aisling/core'
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
 
@@ -8,11 +8,12 @@ import {
   createLocalStorageConversationStore,
   DEFAULT_SESSION_TITLE,
   truncateTitle,
+  type ConversationPersistenceError,
   type ConversationSession,
 } from '../conversation/conversation-store'
 import { createAislingRuntime } from '../runtime/aisling'
 import { createAutonomousController, createAutonomousState, type DesktopJudgeRequest, type DesktopObserverStatus } from '../runtime/autonomous'
-import { mediaCandidateMatches, playingMedia } from '../runtime/desktop-observations'
+import { CAPTURE_MAX_GAP_MS, mediaCandidateMatches, playingMedia } from '../runtime/desktop-observations'
 import { PREFERENCE_ACKNOWLEDGEMENTS, recognizeInteractionPreference } from '../runtime/interaction-preference'
 import { resolvePersistentStorage } from '../storage/desktop-storage'
 import { createSituationWorkingState, isSituationCorrection, providerSituationExecutor } from '../runtime/situation-working-state'
@@ -27,8 +28,8 @@ export interface DisplayMessage {
   content: string
 }
 
-const MODEL_CONTEXT_WINDOW = 40
-const MAX_SESSION_MESSAGES = 200
+const SAVE_WARNING = 'Conversation history could not be saved. Changes are kept in memory for this run and may be lost on restart. Check available storage.'
+const READ_WARNING = 'Conversation storage could not be read. Existing stored data will not be overwritten. New changes are only in memory and may be lost on restart.'
 
 export type DesktopBridgeState = 'connected' | 'unavailable'
 
@@ -88,7 +89,7 @@ export const useStageStore = defineStore('stage', () => {
 
   const activeSession = ensureActiveSession()
   const activeSessionId = ref<string>(activeSession.id)
-  const sessionMessages = ref<ChatMessage[]>([...activeSession.messages])
+  const sessionMessages = ref<ConversationMessage[]>([...activeSession.messages])
   const sessionsList = ref<ConversationSession[]>(conversationStore.list())
 
   const diagnostic = window.aislingDesktop?.desktopDiagnostics?.enabled
@@ -105,7 +106,7 @@ export const useStageStore = defineStore('stage', () => {
   const runtime = createAislingRuntime({
     getChatProvider: () => settings.activeChatProvider,
     getTools: () => settings.activeTools,
-    history: activeSession.messages.slice(-MODEL_CONTEXT_WINDOW),
+    history: activeSession.messages,
     getSituationContext: (stimulus, turnId) => situation.contextFor(stimulus, diagnostic && turnId
       ? selection => { turnDiagnostics.set(turnId, { ...selection }) } : undefined),
     diagnostic: diagnostic ? record => {
@@ -117,12 +118,14 @@ export const useStageStore = defineStore('stage', () => {
           conversationId: activeSessionId.value, aCallsAtStart: situation.status.calls })
       }
       const trace = turnDiagnostics.get(record.turnId)
-      diagnostic({ ...trace, ...record, reason: trace?.reason ?? record.reason,
+      diagnostic({ ...trace, ...record, reason: record.type === 'context-assembled' ? record.reason : trace?.reason ?? record.reason,
         aCalls: situation.status.calls, activeAUpdateId: situation.activeUpdateId() })
     } : undefined,
   })
 
   const messages = ref<DisplayMessage[]>(historyToDisplay(activeSession.messages))
+  const persistenceError = shallowRef<ConversationPersistenceError>()
+  syncPersistenceStatus()
   const sending = ref(false)
   const searching = ref(false)
   const visionProcessing = ref(false)
@@ -146,6 +149,7 @@ export const useStageStore = defineStore('stage', () => {
     if (!desktopRead) desktopRead = window.aislingDesktop!.readDesktopContext().then(snapshot => {
       if (activeAutonomous?.stimulus.candidate.source === 'media') {
         if (!snapshot.available || !snapshot.context || !snapshot.context.media.length) cancelAutonomous('media-unavailable')
+        else if (snapshot.context.capturedAt > Date.now() || Date.now() - snapshot.context.capturedAt > CAPTURE_MAX_GAP_MS) cancelAutonomous('media-stale')
         else if (!playingMedia(snapshot.context.media)) cancelAutonomous('media-ambiguous')
         else if (!mediaCandidateMatches(activeAutonomous.stimulus.candidate, snapshot.context)) cancelAutonomous('media-changed')
       }
@@ -209,7 +213,6 @@ export const useStageStore = defineStore('stage', () => {
 
   let partialIndex = -1
   let activeAutonomous: { stimulus: import('@aisling/core').AutonomousStimulus; cancelled: boolean; delivered: boolean } | undefined
-  let preferenceHistoryPending = false
   function cancelAutonomous(reason: string): void {
     if (!activeAutonomous || activeAutonomous.cancelled) return
     activeAutonomous.cancelled = true
@@ -242,14 +245,23 @@ export const useStageStore = defineStore('stage', () => {
       searching.value = false
   })
 
+  function syncPersistenceStatus(): void {
+    persistenceError.value = conversationStore.getPersistenceError()
+    if (!persistenceError.value) return
+    const content = persistenceError.value.operation === 'read' ? READ_WARNING : SAVE_WARNING
+    if (!messages.value.some(message => message.role === 'error' && message.content === content))
+      messages.value.push({ role: 'error', content })
+  }
+
   function persistActiveSession(): void {
     const session = conversationStore.get(activeSessionId.value)
     if (!session)
       return
-    session.messages = sessionMessages.value.slice(-MAX_SESSION_MESSAGES)
+    session.messages = [...sessionMessages.value]
     session.updatedAt = Date.now()
     conversationStore.save(session)
     sessionsList.value = conversationStore.list()
+    syncPersistenceStatus()
   }
 
   const characterName = computed(() => runtime.character.name)
@@ -269,10 +281,8 @@ export const useStageStore = defineStore('stage', () => {
         messages.value = [...messages.value, ...acknowledgement]
         sessionMessages.value = [...sessionMessages.value, ...acknowledgement]
         persistActiveSession()
-        if (sending.value)
-          preferenceHistoryPending = true
-        else
-          runtime.resetHistory(sessionMessages.value.slice(-MODEL_CONTEXT_WINDOW))
+        if (!sending.value)
+          runtime.resetHistory(sessionMessages.value)
         return
       }
     }
@@ -308,6 +318,7 @@ export const useStageStore = defineStore('stage', () => {
         session.title = truncateTitle(userMessage.content)
         conversationStore.save(session)
       }
+      persistActiveSession()
     }
 
     let diagnosticTurnId: string | undefined, diagnosticDelivered = false
@@ -339,17 +350,20 @@ export const useStageStore = defineStore('stage', () => {
       }
       // Foreground changes do not revoke accepted replies; obsolete media targets do.
       if (turn.status === 'completed' && turn.output) {
-        lastTurn.value = { stimulus: turn.stimulus, output: turn.output }
-        if (turn.stimulus.kind === 'autonomous' && !turn.output.text.trim()) {
+        if (!turn.output.text.trim()) {
           if (partialIndex >= 0) messages.value.splice(partialIndex, 1)
-          autonomousController.recordDecision(stimulus.source, 'blocked', 'empty-output', stimulus.id, autonomousTurn?.stimulus.candidate)
+          if (autonomousTurn)
+            autonomousController.recordDecision(stimulus.source, 'blocked', 'empty-output', stimulus.id, autonomousTurn.stimulus.candidate)
           return
         }
+        lastTurn.value = { stimulus: turn.stimulus, output: turn.output }
         if (partialIndex >= 0)
           messages.value[partialIndex] = { role: 'assistant', content: turn.output.text }
         else
           messages.value.push({ role: 'assistant', content: turn.output.text })
-        sessionMessages.value = [...sessionMessages.value, { role: 'assistant', content: turn.output.text }]
+        const delivered: ConversationMessage = { role: 'assistant', content: turn.output.text,
+          ...(autonomousTurn ? { autonomousContext: createAutonomousContext(autonomousTurn.stimulus.candidate, Date.now()) } : {}) }
+        sessionMessages.value = [...sessionMessages.value, delivered]
         persistActiveSession()
         diagnosticDelivered = true; diagnosticOutcome = 'delivered'
         if (autonomousTurn) {
@@ -380,11 +394,8 @@ export const useStageStore = defineStore('stage', () => {
           aCallsDuringTurn: situation.status.calls - Number(trace?.aCallsAtStart ?? situation.status.calls) })
         turnDiagnostics.delete(diagnosticTurnId)
       }
-      // Commands may arrive during generation; keep cancelled output out of Core history as well.
-      if (preferenceHistoryPending || autonomousTurn?.cancelled) {
-        runtime.resetHistory(sessionMessages.value.slice(-MODEL_CONTEXT_WINDOW))
-        preferenceHistoryPending = false
-      }
+      // The session owns delivered history, including commands received during generation.
+      runtime.resetHistory(sessionMessages.value)
       activeAutonomous = undefined
       partialIndex = -1
       sending.value = false
@@ -436,8 +447,9 @@ export const useStageStore = defineStore('stage', () => {
     conversationStore.setActiveId(id)
     sessionMessages.value = [...session.messages]
     messages.value = historyToDisplay(session.messages)
-    runtime.resetHistory(session.messages.slice(-MODEL_CONTEXT_WINDOW))
+    runtime.resetHistory(session.messages)
     sessionsList.value = conversationStore.list()
+    syncPersistenceStatus()
   }
 
   function newConversation(): void {
@@ -451,6 +463,7 @@ export const useStageStore = defineStore('stage', () => {
     messages.value = []
     runtime.resetHistory([])
     sessionsList.value = conversationStore.list()
+    syncPersistenceStatus()
   }
 
   function deleteSession(id: string): void {
@@ -467,6 +480,7 @@ export const useStageStore = defineStore('stage', () => {
       else
         newConversation()
     }
+    syncPersistenceStatus()
   }
 
   return {
@@ -485,6 +499,7 @@ export const useStageStore = defineStore('stage', () => {
     characterName,
     lastTurn,
     messages,
+    persistenceError,
     newConversation,
     runtime,
     searching,

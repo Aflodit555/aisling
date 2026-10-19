@@ -8,7 +8,7 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 [AIRI](https://github.com/moeru-ai/airi) as an engineering reference. Aisling is
 **not** an AIRI fork and has no official relationship with either project.
 
-> **Current version:** v0.3.3 · **Status:** early development. The architecture
+> **Current version:** v0.3.5 · **Status:** early development. The architecture
 > and public APIs may still change.
 
 ## What exists today
@@ -17,17 +17,44 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 - Character / Stimulus domain model
 - Settings pages: General, Consciousness, Speech, Vision, Web Search, Desktop Awareness
 - Provider Settings UI for model configuration
-- Multi-conversation persistence (localStorage)
+- Unified interaction history within each conversation session, with switching
+  and restart recovery (localStorage in the browser; file-backed on Desktop)
+- Context Phase One: a bounded, estimated-token history window; user replies can
+  follow up on delivered autonomous speech and its compact, redacted trigger
+  evidence, without extra Context LLM calls
+- Persistence hardening: unsaved history stays in memory with a visible warning;
+  Desktop writes replace the stored file only after a temporary write succeeds
 - Desktop Situation Understanding P1/P1.1: explicit foreground/media candidates,
   bounded observation continuity, target-bound Jev judgment and Chat generation,
   media freshness checks and successful-delivery attribution
 - Explicit interaction preference commands (`/quiet`, `/normal`, `/invited`)
+- P2 short-term situation understanding preview, off by default: bounded,
+  scoped understanding from foreground evidence via the existing Chat Provider;
+  replies only consume ready understanding and never wait for its update
 - Browser / System Speech (`speechSynthesis`)
 - Alibaba Native HTTP TTS
 - Live2D idle life (blinks, gaze, posture) and Jev-judged emotion with a stabilizing state machine ([docs/emotion.md](docs/emotion.md))
 
 **Verified end-to-end:** Consciousness, Vision, Browser Speech, Alibaba TTS,
 conversation persistence.
+
+**v0.3.5:** brings Context Phase One and conversation/autonomous-speech continuity,
+token-budgeted history selection, persistence hardening, and the existing P2
+preview into one version. Users have reported successful manual checks of
+conversation continuity, speech follow-ups, event attribution, session isolation,
+and cooperation with P2 enabled; these are not comprehensive performance or
+long-running desktop validation. P2 remains a preview and can make separately
+bounded background model calls when enabled.
+
+Context is not long-term Memory: history outside the selected token window is
+not semantically recalled, and there is no cross-session memory or three-tier
+compression. Token counts are estimates; full persisted history can still reach
+storage limits. The optional native Candidate smoke remains inconclusive.
+
+Design, verification and limits:
+[Context Phase One](docs/context-phase-one.md),
+[Context Hardening](docs/context-hardening.md), and
+[P2 preview](docs/p2-minimal-loop.md).
 
 ## Quick start
 

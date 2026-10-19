@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { createCharacter } from './character'
 import { createCharacterRuntime } from './runtime'
-import { createUserTextStimulus } from './stimulus'
+import { createUserTextStimulus, createVisualStimulus } from './stimulus'
 
 function makeRuntime() {
   const provider = {
@@ -30,6 +30,15 @@ function makeRuntime() {
 }
 
 describe('character runtime minimal loop', () => {
+  it.each(['user', 'visual'])('does not record whitespace-only %s output as spoken history', async kind => {
+    const { runtime: template } = makeRuntime()
+    const runtime = createCharacterRuntime({ character: template.character,
+      getChatProvider: () => ({ id: 'empty', complete: async () => ({ text: ' \n\t' }) }) })
+    await runtime.ingest(kind === 'user' ? createUserTextStimulus({ source: 'web', text: 'question' })
+      : createVisualStimulus({ source: 'web', observation: 'a cat', caption: 'question' }))
+    expect(runtime.history.filter(message => message.role === 'assistant')).toEqual([])
+    expect(runtime.history).toHaveLength(1)
+  })
   it('turns a web user-text stimulus into a character text output via the chat provider', async () => {
     const { runtime } = makeRuntime()
     const events: string[] = []

@@ -3,6 +3,7 @@ import { createCharacter } from './character'
 import type { ChatCompletionRequest } from './provider'
 import type { DesktopCandidate } from './stimulus'
 import { createCharacterRuntime } from './runtime'
+import { createAutonomousContext } from './context'
 import { createAutonomousStimulus, createUserTextStimulus } from './stimulus'
 
 describe('autonomous runtime observation', () => {
@@ -25,7 +26,7 @@ describe('autonomous runtime observation', () => {
       getSituationContext: () => { throw new Error('optional context unavailable') } })
     expect((await broken.ingest(stimulus)).status).toBe('completed')
   })
-  it('uses only the candidate in an autonomous prompt and persists only the assistant output', async () => {
+  it('uses only the candidate and waits for delivery confirmation before committing speech', async () => {
     const complete = vi.fn(async (_request: ChatCompletionRequest) => ({ text: 'Take a small break from that file?' }))
     const history = [{ role: 'user' as const, content: 'I am working on Aisling.' }]
     const runtime = createCharacterRuntime({
@@ -43,11 +44,15 @@ describe('autonomous runtime observation', () => {
     expect(request.messages.filter(message => message.role === 'user')).toEqual([])
     expect(request.messages.at(-1)).toEqual({ role: 'system', content: expect.stringContaining('not a user message') })
     expect(request.messages.at(-2)!.content).toContain('main.ts - project_Aisling')
-    expect(runtime.history).toEqual([...history, { role: 'assistant', content: turn.output!.text }])
+    expect(runtime.history).toEqual(history)
     expect(eventTypes).toContain('output:produced')
     expect(eventTypes).toContain('turn:completed')
 
+    if (turn.stimulus.kind !== 'autonomous') throw new Error('Expected autonomous turn')
+    runtime.resetHistory([...history, { role: 'assistant', content: turn.output!.text,
+      autonomousContext: createAutonomousContext(turn.stimulus.candidate, 2000) }])
     await runtime.ingest(createUserTextStimulus({ source: 'web', text: 'Thanks!' }))
+    expect(JSON.stringify(complete.mock.calls[1]![0])).toContain('[Past autonomous utterance basis]')
     expect(complete.mock.calls[1]![0].messages.some(message => message.content?.includes('Desktop-triggered'))).toBe(false)
     expect(runtime.history.at(-2)).toEqual({ role: 'user', content: 'Thanks!' })
   })

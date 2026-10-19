@@ -1,4 +1,4 @@
-import type { ChatMessage } from '@aisling/core'
+import { normalizeAutonomousContext, type ChatMessage, type ConversationMessage } from '@aisling/core'
 
 import type { PersistentStorage } from '../storage/desktop-storage'
 
@@ -8,20 +8,26 @@ export interface ConversationSession {
   createdAt: number
   updatedAt: number
   /** Full UI/persistence history (longer than the model context window). */
-  messages: ChatMessage[]
+  messages: ConversationMessage[]
 }
 
 const KEY = 'aisling.conversations.v1'
 const LEGACY_KEY = 'aisling.conversation.v1'
-const MAX_SESSION_MESSAGES = 200
-const MAX_SESSIONS = 50
 
 interface PersistedState {
   sessions: ConversationSession[]
   activeId: string | null
 }
 
+export interface ConversationPersistenceError {
+  operation: 'read' | 'write'
+  reason: 'QuotaExceededError' | 'SecurityError' | 'SyntaxError' | 'TypeError' | 'StorageError'
+  at: number
+  serializedChars?: number
+}
+
 export interface ConversationStore {
+  getPersistenceError(): ConversationPersistenceError | undefined
   list(): ConversationSession[]
   get(id: string): ConversationSession | undefined
   save(session: ConversationSession): void
@@ -46,13 +52,24 @@ function isChatMessage(value: unknown): value is ChatMessage {
     && (typeof record.content === 'string' || record.content === null)
 }
 
+function normalizeMessages(messages: unknown[]): ConversationMessage[] {
+  return messages.filter(isChatMessage).map((message) => {
+    const context = message.role === 'assistant'
+      ? normalizeAutonomousContext((message as ConversationMessage).autonomousContext) : undefined
+    return { role: message.role, content: message.content,
+      ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
+      ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
+      ...(context ? { autonomousContext: context } : {}) }
+  })
+}
+
 function normalizeSession(value: unknown): ConversationSession | undefined {
   if (!value || typeof value !== 'object')
     return undefined
   const record = value as Record<string, unknown>
   if (typeof record.id !== 'string')
     return undefined
-  const messages = Array.isArray(record.messages) ? record.messages.filter(isChatMessage).slice(-MAX_SESSION_MESSAGES) : []
+  const messages = Array.isArray(record.messages) ? normalizeMessages(record.messages) : []
   return {
     id: record.id,
     title: typeof record.title === 'string' && record.title ? record.title : DEFAULT_SESSION_TITLE,
@@ -63,7 +80,24 @@ function normalizeSession(value: unknown): ConversationSession | undefined {
 }
 
 export function createLocalStorageConversationStore(storage: PersistentStorage = window.localStorage): ConversationStore {
+  let pendingState: PersistedState | undefined
+  let lastKnownState: PersistedState = { sessions: [], activeId: null }
+  let readFailed = false
+  let persistenceError: ConversationPersistenceError | undefined
+
+  function remember(state: PersistedState): PersistedState {
+    lastKnownState = state
+    return state
+  }
+
+  function failure(operation: 'read' | 'write', error: unknown, serializedChars?: number): void {
+    const name = error && typeof error === 'object' && 'name' in error ? error.name : undefined
+    const reason = name === 'QuotaExceededError' || name === 'SecurityError' || name === 'SyntaxError' || name === 'TypeError' ? name : 'StorageError'
+    persistenceError = { operation, reason, at: Date.now(), serializedChars }
+  }
+
   function readState(): PersistedState {
+    if (pendingState) return pendingState
     try {
       const raw = storage.getItem(KEY)
       if (raw) {
@@ -71,7 +105,7 @@ export function createLocalStorageConversationStore(storage: PersistentStorage =
         const sessions = (Array.isArray(parsed.sessions) ? parsed.sessions : [])
           .map(normalizeSession)
           .filter((session): session is ConversationSession => session !== undefined)
-        return { sessions: sessions.slice(-MAX_SESSIONS), activeId: typeof parsed.activeId === 'string' ? parsed.activeId : null }
+        return remember({ sessions, activeId: typeof parsed.activeId === 'string' ? parsed.activeId : null })
       }
 
       // Migrate the legacy single-conversation array (v0.1.6) into one session.
@@ -79,7 +113,7 @@ export function createLocalStorageConversationStore(storage: PersistentStorage =
       if (legacy) {
         const parsed = JSON.parse(legacy) as unknown
         if (Array.isArray(parsed)) {
-          const messages = parsed.filter(isChatMessage).slice(-MAX_SESSION_MESSAGES)
+          const messages = normalizeMessages(parsed)
           const now = Date.now()
           const session: ConversationSession = {
             id: crypto.randomUUID(),
@@ -88,23 +122,37 @@ export function createLocalStorageConversationStore(storage: PersistentStorage =
             updatedAt: now,
             messages,
           }
-          return { sessions: [session], activeId: session.id }
+          // Keep the migrated identity stable until the first successful write.
+          pendingState = remember({ sessions: [session], activeId: session.id })
+          return pendingState
         }
       }
 
-      return { sessions: [], activeId: null }
+      return remember({ sessions: [], activeId: null })
     }
-    catch {
-      return { sessions: [], activeId: null }
+    catch (error) {
+      failure('read', error)
+      readFailed = true
+      pendingState = lastKnownState
+      return pendingState
     }
   }
 
   function writeState(state: PersistedState): void {
+    pendingState = state
+    // Never overwrite unknown stored data after a read failure; keep this run in memory.
+    if (readFailed) return
+    let serialized: string | undefined
     try {
-      storage.setItem(KEY, JSON.stringify(state))
+      serialized = JSON.stringify(state)
+      // Desktop's synchronous bridge reports failure with false; localStorage throws.
+      if ((storage.setItem(KEY, serialized) as unknown) === false) throw new Error('Conversation storage write failed')
+      remember(state)
+      pendingState = undefined
+      persistenceError = undefined
     }
-    catch {
-      // storage full or unavailable — persistence is best-effort
+    catch (error) {
+      failure('write', error, serialized?.length)
     }
   }
 
@@ -114,6 +162,7 @@ export function createLocalStorageConversationStore(storage: PersistentStorage =
   }
 
   return {
+    getPersistenceError: () => persistenceError,
     list() {
       return readState().sessions
         .slice()

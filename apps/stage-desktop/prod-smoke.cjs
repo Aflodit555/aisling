@@ -140,6 +140,50 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     return
   }
 
+  if (process.env.AISLING_CONTEXT_SMOKE === '1') {
+    const report = await contents.executeJavaScript(`(async () => {
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
+      const stage = pinia._s.get('stage'), settings = pinia._s.get('settings'), requests = []
+      settings.activeChatProvider = { id: 'context-smoke', complete: async request => {
+        requests.push(request); return { text: '这首歌听起来有些忧伤。' }
+      } }
+      async function settled() {
+        for (let n = 0; n < 200 && stage.sending; n++) await new Promise(resolve => setTimeout(resolve, 10))
+        if (stage.sending) throw new Error('Context smoke did not settle')
+      }
+      const sessionId = stage.activeSessionId, observedAt = Date.now() - 1000
+      stage.sendStimulus({ id: 'context-smoke', kind: 'autonomous', source: 'desktop', at: Date.now(), candidate: {
+        id: 'candidate-smoke', objectId: 'object-smoke', source: 'foreground', change: 'appeared',
+        snapshot: { capturedAt: observedAt, targetHwnd: '123', sequence: 1 },
+        target: { app: 'Synthetic player', title: 'Amber Lantern / Mira Vale', text: 'Public synthetic observation. '.repeat(100) }
+      } })
+      await settled()
+      const saved = () => JSON.parse(window.aislingDesktop.storage.getItem('aisling.conversations.v1')).sessions
+      const speech = saved().find(session => session.id === sessionId).messages[0]
+      stage.send('你刚才说的是什么歌？'); await settled()
+      const followUp = requests[1].messages
+      stage.newConversation(); stage.send('新的会话'); await settled()
+      const isolated = !JSON.stringify(requests[2]).includes('Amber Lantern')
+      stage.switchSession(sessionId)
+      const restored = stage.runtime.history[0].autonomousContext?.objectId === 'object-smoke'
+      stage.deleteSession(sessionId)
+      return { delivered: speech.content === '这首歌听起来有些忧伤。',
+        basisSaved: speech.autonomousContext?.observedAt === observedAt && speech.autonomousContext?.deliveredAt >= observedAt,
+        excerptBounded: speech.autonomousContext?.excerpt.length <= 240,
+        basisInjected: followUp.some(message => message.content?.includes('[Past autonomous utterance basis]')),
+        protocolClean: followUp.every(message => !('autonomousContext' in message)), isolated, restored,
+        deleted: !saved().some(session => session.id === sessionId), calls: requests.length }
+    })()`)
+    for (const key of ['delivered', 'basisSaved', 'excerptBounded', 'basisInjected', 'protocolClean', 'isolated', 'restored', 'deleted'])
+      assert.equal(report[key], true, key)
+    assert.equal(report.calls, 3)
+    console.log(JSON.stringify({ contextSmoke: 'passed', modelResponses: 'mocked', ...report }))
+    clearTimeout(timeout)
+    win.destroy()
+    app.exit(0)
+    return
+  }
+
   if (process.env.AISLING_DESKTOP_CANDIDATE_SMOKE === '1') {
     const report = await contents.executeJavaScript(`(async () => {
       const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia

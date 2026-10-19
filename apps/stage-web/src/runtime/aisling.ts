@@ -3,7 +3,7 @@ import {
   createCharacterRuntime,
   type Character,
   type CharacterRuntime,
-  type ChatMessage,
+  type ConversationMessage,
   type ChatProvider,
   type Tool,
   type Stimulus,
@@ -36,7 +36,7 @@ export function createAislingRuntime(deps: {
   getChatProvider: () => ChatProvider | undefined
   getTools: () => readonly Tool[]
   /** Seed conversation context (restored history). */
-  history?: ChatMessage[]
+  history?: ConversationMessage[]
   getSituationContext?: (stimulus: Stimulus, turnId?: string) => string | undefined
   diagnostic?: (record: ChatRuntimeDiagnostic) => void
 }): CharacterRuntime {

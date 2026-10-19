@@ -22,6 +22,8 @@ $env:AISLING_DESKTOP_DIAGNOSTICS_REPLY_TEXT = '1'
 
 默认只记录回复长度与指纹。正文开关只允许记录成功交付的自主回复，最多 2000 字符，超出标明 `replyTextTruncated`；不记录普通对话、桌面正文、标题原文、媒体名称、完整 Prompt、API Key 或音频。
 
+Context 新增 `context-assembled`（每次实际请求前的历史估算 Token、必需输入估算 Token、选择／省略消息数、依据数量、组装毫秒数、`session-window` 或 `candidate-only`）和 `chat-first-text`（当前请求到首个非空文本的毫秒数）。两者经过 main 的严格元数据白名单，不保存历史正文或触发依据。`p2-b-request-start/end` 继续记录各轮实际模型请求耗时；`omittedMessages` 表示此次未选择的历史总数，不表示删除记录。
+
 日志固定追加至 `D:\Project\demo\project_Aisling\.local\desktop-awareness-diagnostics.jsonl`，已由现有 `.gitignore` 的 `.local/` 忽略。main 首次写入时打印完整位置；默认关闭不创建目录/文件、不发诊断 IPC、不保留诊断采样或关联表。关闭不删除之前的日志。
 
 ```powershell

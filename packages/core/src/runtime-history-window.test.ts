@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { createCharacter } from './character'
 import type { ChatProvider } from './provider'
 import { createCharacterRuntime } from './runtime'
 import { createUserTextStimulus } from './stimulus'
+import { estimateMessageTokens } from './context'
 
 const provider: ChatProvider = {
   id: 'stub',
@@ -13,21 +14,24 @@ const provider: ChatProvider = {
 }
 
 describe('runtime history window', () => {
-  it('caps the model context to maxHistoryMessages', async () => {
+  it('slides by tokens without deleting the full session history', async () => {
     const character = createCharacter({ id: 'a', name: 'A', persona: 'p', capabilities: [] })
+    const complete = vi.fn(async (_request: import('./provider').ChatCompletionRequest) => ({ text: 'ok' }))
     const runtime = createCharacterRuntime({
       character,
       createId: () => 't',
-      getChatProvider: () => provider,
-      maxHistoryMessages: 2,
+      getChatProvider: () => ({ id: 'capture', complete }),
+      historyTokenBudget: estimateMessageTokens({ role: 'user', content: 'two' }) + estimateMessageTokens({ role: 'assistant', content: 'ok' }),
     })
 
     await runtime.ingest(createUserTextStimulus({ source: 'web', text: 'one' }))
     await runtime.ingest(createUserTextStimulus({ source: 'web', text: 'two' }))
-
-    expect(runtime.history.length).toBe(2)
-    expect(runtime.history[0]).toEqual({ role: 'user', content: 'two' })
-    expect(runtime.history[1]).toEqual({ role: 'assistant', content: 'ok' })
+    await runtime.ingest(createUserTextStimulus({ source: 'web', text: 'three' }))
+    expect(runtime.history.length).toBe(6)
+    expect(complete.mock.calls[2]![0].messages.slice(1, 3)).toEqual([
+      { role: 'user', content: 'two' }, { role: 'assistant', content: 'ok' },
+    ])
+    expect(complete.mock.calls[2]![0].messages).not.toContainEqual({ role: 'user', content: 'one' })
   })
 
   it('seeds from restored history', async () => {

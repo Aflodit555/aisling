@@ -45,9 +45,9 @@ function writeDesktopDiagnostic(record) {
       'score', 'reason', 'outcome', 'enabled', 'preference', 'replyTarget', 'replyLength',
       'replyFingerprint', 'delivered', 'replyHistoryWritten']
     let safe = Object.fromEntries(keys.filter(key => record[key] !== undefined).map(key => [key, record[key]]))
-    if (record.type.startsWith('p2-')) {
-      if (!['p2-a-update-start', 'p2-a-update-end', 'p2-a-settled', 'p2-a-http', 'p2-b-context', 'p2-b-request-start', 'p2-b-request-end', 'p2-b-delivery'].includes(record.type)) return
-      // P2 never accepts raw scope strings, errors, prompts or content, even with reply-text opt-in.
+    if (record.type.startsWith('p2-') || record.type === 'context-assembled' || record.type === 'chat-first-text') {
+      if (!['p2-a-update-start', 'p2-a-update-end', 'p2-a-settled', 'p2-a-http', 'p2-b-context', 'p2-b-request-start', 'p2-b-request-end', 'p2-b-delivery', 'context-assembled', 'chat-first-text'].includes(record.type)) return
+      // P2/Context never accept raw scope strings, errors, prompts or content, even with reply-text opt-in.
       safe = { type: record.type }
       for (const key of ['updateId', 'scopeId', 'conversationId', 'turnId', 'activeAUpdateId']) {
         if (typeof record[key] === 'string' && /^[a-f0-9-]{36}$/i.test(record[key])) safe[key] = record[key]
@@ -56,7 +56,8 @@ function writeDesktopDiagnostic(record) {
       for (const key of ['startedAt', 'finishedAt', 'durationMs', 'previousRevision', 'revision', 'availableRevision',
         'batchCount', 'observationCount', 'contextChars', 'round', 'aCalls', 'aCallsAtStart', 'aCallsDuringTurn', 'httpStatus',
         'firstReceivedAt', 'lastReceivedAt', 'scheduledAt', 'queueDelayMs', 'snapshotToCommitMs', 'latestSnapshotToCommitMs',
-        'contentChars', 'reasoningChars', 'contentDeltaCount', 'reasoningDeltaCount', 'streamEventCount']) {
+        'contentChars', 'reasoningChars', 'contentDeltaCount', 'reasoningDeltaCount', 'streamEventCount',
+        'historyTokens', 'requiredTokens', 'selectedMessages', 'omittedMessages', 'basisCount', 'assemblyMs', 'firstTextMs']) {
         if (Number.isFinite(record[key]) && record[key] >= 0) safe[key] = record[key]
       }
       for (const key of ['committed', 'usable', 'executorReturned', 'settled', 'injected', 'delivered', 'statePresent', 'abortRequested',
@@ -75,7 +76,7 @@ function writeDesktopDiagnostic(record) {
       if (['committed', 'deadline', 'invalid-output', 'input-limit', 'executor-error', 'incompatible-result', 'disabled', 'disposed', 'reset',
         'invalid-observation', 'scope-changed', 'stale-observation', 'provider-changed', 'session-invalidated', 'feature-disabled',
         'no-ready-state', 'scope-unknown', 'state-expired', 'evidence-pending', 'target-mismatch',
-        'context-limit', 'context-error', 'context-unavailable', 'unsupported-source', 'injected'].includes(record.reason)) safe.reason = record.reason
+        'context-limit', 'context-error', 'context-unavailable', 'unsupported-source', 'injected', 'session-window', 'candidate-only'].includes(record.reason)) safe.reason = record.reason
     }
     if (desktopDiagnosticReplyText && record.type === 'delivery' && record.delivered === true && typeof record.replyText === 'string') {
       safe.replyText = record.replyText.slice(0, 2000)

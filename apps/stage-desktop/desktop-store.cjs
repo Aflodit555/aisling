@@ -23,13 +23,16 @@ function storeFilePath() {
 }
 
 /** @returns {Record<string, unknown>} */
-function readStore() {
+function readStore(strict = false) {
   try {
     const raw = fs.readFileSync(storeFilePath(), 'utf8')
     const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+    if (strict) throw new Error('Invalid desktop storage')
+    return {}
   }
-  catch {
+  catch (error) {
+    if (strict && error.code !== 'ENOENT') throw error
     return {}
   }
 }
@@ -37,7 +40,15 @@ function readStore() {
 function writeStore(data) {
   const file = storeFilePath()
   fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(data))
+  const temporary = `${file}.tmp`
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(data))
+    fs.renameSync(temporary, file)
+  }
+  finally {
+    try { fs.unlinkSync(temporary) }
+    catch { /* A failed cleanup must not replace the original write result. */ }
+  }
 }
 
 /** @param {unknown} key */
@@ -89,10 +100,15 @@ function registerStorageIpc() {
       event.returnValue = false
       return
     }
-    const data = readStore()
-    data[key] = value
-    writeStore(data)
-    event.returnValue = true
+    try {
+      const data = readStore(true)
+      data[key] = value
+      writeStore(data)
+      event.returnValue = true
+    }
+    catch {
+      event.returnValue = false
+    }
   })
 }
 

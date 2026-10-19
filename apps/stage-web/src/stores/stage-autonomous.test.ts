@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { createAutonomousStimulus, type ChatCompletionRequest, type ChatCompletionResult, type DesktopActivitySnapshot } from '@aisling/core'
+import { createAutonomousContext, createAutonomousStimulus, type ChatCompletionRequest, type ChatCompletionResult, type ConversationMessage, type DesktopActivitySnapshot } from '@aisling/core'
 import { createPinia, setActivePinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createLocalStorageConversationStore } from '../conversation/conversation-store'
@@ -63,6 +63,119 @@ describe('Stage desktop awareness integration', () => {
     vi.mocked(window.aislingDesktop!.readDesktopContext).mockResolvedValue({ enabled: true, available: true, context: snapshot })
     vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context: snapshot, scores: { shouldInterrupt: 0.9 } })
   }
+
+  it('commits speech and compact basis only after delivery, then supplies both to a user follow-up', async () => {
+    const records: DesktopDiagnosticRecord[] = []
+    window.aislingDesktop!.desktopDiagnostics = { enabled: true, replyText: false }
+    window.aislingDesktop!.recordDesktopDiagnostic = record => records.push(record)
+    const { stage, complete } = await prepareStage()
+    let finish!: (result: ChatCompletionResult) => void
+    complete.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const candidate = { id: 'c', objectId: 'o', source: 'foreground' as const, change: 'appeared' as const,
+      snapshot: { capturedAt: 1000, targetHwnd: '123', sequence: 1 },
+      target: { app: 'Browser', title: 'Research paper', text: 'A public research observation. '.repeat(300) + 'foo@example.com' } }
+    stage.sendStimulus(createAutonomousStimulus({ candidate }))
+    expect(stage.runtime.history).toEqual([])
+    expect(createLocalStorageConversationStore().get(stage.activeSessionId)!.messages).toEqual([])
+    time = 2500; finish({ text: '这个结论还挺大胆。' })
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    const saved = createLocalStorageConversationStore().get(stage.activeSessionId)!.messages
+    expect(saved).toHaveLength(1)
+    expect(saved[0]!.autonomousContext).toMatchObject({ deliveredAt: 2500, observedAt: 1000, source: 'foreground',
+      candidateId: 'c', objectId: 'o', title: 'Research paper' })
+    expect(saved[0]!.autonomousContext!.excerpt!.length).toBeLessThanOrEqual(240)
+    expect(JSON.stringify(saved)).not.toMatch(/targetHwnd|sequence|foo@example.com/)
+    expect(stage.runtime.history).toEqual(saved)
+    stage.send('你刚才为什么说这个结论大胆？')
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    const messages = complete.mock.calls[1]![0].messages
+    expect(messages[1]!.content).toContain('[Past autonomous utterance basis]')
+    expect(messages[1]!.content).toContain('1970-01-01T00:00:01.000Z')
+    expect(messages[1]!.content).toContain('1970-01-01T00:00:02.500Z')
+    expect(messages[2]).toEqual({ role: 'assistant', content: '这个结论还挺大胆。' })
+    expect(messages.every(message => !('autonomousContext' in message))).toBe(true)
+    expect(records.filter(record => record.type === 'context-assembled').at(-1))
+      .toMatchObject({ reason: 'session-window', basisCount: 1, selectedMessages: 1 })
+    expect(complete).toHaveBeenCalledTimes(2)
+  })
+
+  it('restores over 200 small messages and basis across sessions/restart and removes deleted context', async () => {
+    const { stage, complete } = await prepareStage()
+    const store = createLocalStorageConversationStore()
+    const session = store.get(stage.activeSessionId)!
+    const candidate = { id: 'a', objectId: 'song-a', source: 'media' as const, change: 'appeared' as const,
+      snapshot: { capturedAt: 100, targetHwnd: '123', sequence: 1 }, target: { app: 'Player', title: 'Song A', artist: 'B' } }
+    const history: ConversationMessage[] = Array.from({ length: 105 }, (_, i) => [
+      { role: 'user' as const, content: i === 0 ? 'oldest detail' : `${i}` }, { role: 'assistant' as const, content: 'ok' },
+    ]).flat()
+    session.messages = [...history, { role: 'assistant', content: 'Song A comment', autonomousContext: createAutonomousContext(candidate, 200) }]
+    store.save(session); stage.switchSession(session.id)
+    expect(stage.runtime.history).toHaveLength(211)
+    stage.send('再说一下之前的约定和歌曲')
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    expect(JSON.stringify(complete.mock.calls.at(-1)![0].messages)).toContain('oldest detail')
+    expect(store.get(session.id)!.messages).toHaveLength(213)
+    stage.newConversation()
+    const newId = stage.activeSessionId
+    stage.send('new session')
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    expect(JSON.stringify(complete.mock.calls.at(-1)![0].messages)).not.toMatch(/oldest detail|Song A/)
+    stage.switchSession(session.id)
+    expect(stage.runtime.history[210]!.autonomousContext?.objectId).toBe('song-a')
+    setActivePinia(createPinia())
+    const restartedSettings = useSettingsStore(); await restartedSettings.load()
+    restartedSettings.activeChatProvider = { id: 'test', complete }
+    const restarted = useStageStore()
+    expect(restarted.activeSessionId).toBe(session.id)
+    expect(restarted.runtime.history[210]!.autonomousContext?.observedAt).toBe(100)
+    restarted.send('刚才说的歌呢？')
+    await vi.waitFor(() => expect(restarted.sending).toBe(false))
+    expect(JSON.stringify(complete.mock.calls.at(-1)![0].messages)).toContain('Song A')
+    restarted.deleteSession(session.id)
+    expect(store.get(session.id)).toBeUndefined(); expect(restarted.activeSessionId).toBe(newId)
+    restarted.send('现在呢？')
+    await vi.waitFor(() => expect(restarted.sending).toBe(false))
+    expect(JSON.stringify(complete.mock.calls.at(-1)![0].messages)).not.toMatch(/oldest detail|Song A|Past autonomous/)
+  })
+
+  it.each(['failed', 'empty', 'expired'] as const)('does not commit %s autonomous output or basis', async (outcome) => {
+    const { stage, complete, speak } = await prepareStage()
+    if (outcome === 'failed') complete.mockRejectedValueOnce(new Error('offline'))
+    if (outcome === 'empty') complete.mockResolvedValueOnce({ text: ' ' })
+    if (outcome === 'expired') {
+      complete.mockImplementationOnce(async () => {
+        time = 40000
+        mockDesktop({ ...playingContext, capturedAt: 1 })
+        return { text: 'expired media reply' }
+      })
+    }
+    stage.sendStimulus(createAutonomousStimulus({ candidate: { id: 'c', objectId: 'o', source: 'media', change: 'appeared',
+      snapshot: { capturedAt: 1, targetHwnd: '123', sequence: 1 }, target: playingContext.media[0]! } }))
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    expect(stage.runtime.history).toEqual([])
+    expect(createLocalStorageConversationStore().get(stage.activeSessionId)!.messages).toEqual([])
+    expect(speak).not.toHaveBeenCalled()
+    if (outcome === 'expired') expect(stage.autonomous.decisions.some(decision => decision.reason === 'media-stale')).toBe(true)
+  })
+
+  it('keeps delivered A and its basis for user chat while B generation sees only B', async () => {
+    const { stage, complete } = await prepareStage()
+    const a = { id: 'a', objectId: 'song-a', source: 'media' as const, change: 'appeared' as const,
+      snapshot: { capturedAt: 1000, targetHwnd: '123', sequence: 1 }, target: { app: 'player', title: 'Song A', artist: 'Artist A' } }
+    mockDesktop({ ...context, capturedAt: time, media: [a.target] })
+    stage.sendStimulus(createAutonomousStimulus({ candidate: a }))
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    expect(stage.runtime.history[0]!.autonomousContext?.title).toBe('Song A')
+    const b = { ...a, id: 'b', objectId: 'song-b', target: { ...a.target, title: 'Song B', artist: 'Artist B' } }
+    mockDesktop({ ...context, capturedAt: time, media: [b.target] })
+    stage.sendStimulus(createAutonomousStimulus({ candidate: b }))
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    const request = JSON.stringify(complete.mock.calls[1]![0].messages)
+    expect(request).toContain('Song B'); expect(request).not.toMatch(/Song A|Artist A|Past autonomous/)
+    stage.send('你之前评论 A 时指的是什么？')
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    expect(JSON.stringify(complete.mock.calls[2]![0].messages)).toContain('Song A')
+  })
 
   it.each([
     ['https://api.ppio.com/openai', 'qwen/qwen3.8-flash', false],
@@ -603,8 +716,10 @@ describe('Stage desktop awareness integration', () => {
     await settle()
 
     expect(stage.messages).toEqual([{ role: 'assistant', content: 'That answer looks suspiciously tidy.' }])
-    expect(stage.runtime.history).toEqual(stage.messages)
-    expect(createLocalStorageConversationStore().get(stage.activeSessionId)!.messages).toEqual(stage.messages)
+    expect(stage.runtime.history.map(({ role, content }) => ({ role, content }))).toEqual(stage.messages)
+    const saved = createLocalStorageConversationStore().get(stage.activeSessionId)!.messages
+    expect(saved).toEqual(stage.runtime.history)
+    expect(saved[0]?.autonomousContext).toMatchObject({ source: 'foreground', deliveredAt: time, observedAt: context.capturedAt })
     expect(synthesize).toHaveBeenCalledTimes(speechEnabled ? 1 : 0)
     expect(settings.config.desktopAwareness.enabled).toBe(true)
     expect(stage.lastTurn!.stimulus.kind).toBe('autonomous')

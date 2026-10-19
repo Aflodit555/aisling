@@ -135,6 +135,24 @@ test('P2 request phase timing is opt-in metadata with no URL, headers or body', 
   assert.equal(on.lines[4].contentChars, undefined); assert.equal(on.lines[4].reasoningChars, undefined)
 })
 
+test('Context selection and first-text measurements survive the real sink without leaking basis or text', () => {
+  const record = { type: 'context-assembled', turnId: '22222222-2222-4222-8222-222222222222',
+    source: 'user-text', reason: 'session-window', historyTokens: 4090, requiredTokens: 500,
+    selectedMessages: 90, omittedMessages: 200, basisCount: 2, assemblyMs: 0.25,
+    text: 'Private reply', app: 'Private app', autonomousContext: { title: 'Private song' }, prompt: 'Private prompt' }
+  const off = fixture(false); off.api.writeDesktopDiagnostic(record)
+  assert.deepEqual(off.lines, [])
+  const on = fixture(true, true); on.api.writeDesktopDiagnostic(record)
+  assert.equal(on.lines[1].historyTokens, 4090); assert.equal(on.lines[1].requiredTokens, 500)
+  assert.equal(on.lines[1].selectedMessages, 90); assert.equal(on.lines[1].omittedMessages, 200)
+  assert.equal(on.lines[1].basisCount, 2); assert.equal(on.lines[1].assemblyMs, 0.25)
+  assert.equal(on.lines[1].reason, 'session-window')
+  on.api.writeDesktopDiagnostic({ ...record, type: 'chat-first-text', firstTextMs: 123, assemblyMs: Infinity, basisCount: -1 })
+  assert.equal(on.lines[2].firstTextMs, 123)
+  assert.equal(on.lines[2].assemblyMs, undefined); assert.equal(on.lines[2].basisCount, undefined)
+  assert.equal(JSON.stringify(on.lines).includes('Private'), false)
+})
+
 test('main distinguishes an actual Jev call, validates snapshot first, and keeps model input unchanged', async () => {
   const f = fixture(true)
   await assert.rejects(f.api.startDesktop({ stageUrl: 'http://localhost:5174' }), /fixture stops/)

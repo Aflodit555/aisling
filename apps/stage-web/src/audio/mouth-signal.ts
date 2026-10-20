@@ -80,7 +80,7 @@ export function createMouthSignal(config: Partial<MouthSignalConfig> = {}): Mout
     if (rawLevel === undefined || !Number.isFinite(rawLevel)) {
       // No usable sample: hold the current openness. A suspended context or a
       // missing element must not produce a spurious 0 spike that reads as silence.
-      return clamp01(level)
+      return level
     }
 
     const envelope = clamp01(rawLevel / referenceSafe)

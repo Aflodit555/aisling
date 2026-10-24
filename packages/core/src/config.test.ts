@@ -17,6 +17,7 @@ describe('config store', () => {
       speech: { enabled: true, providerType: 'alibaba', apiKey: 'sk', model: 'qwen-audio-3.0-tts-flash', voice: 'longanhuan_v3.6', transport: 'websocket', endpoint: 'wss://x.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference' },
       vision: { enabled: true, providerType: 'openai-compatible', baseUrl: 'https://x/v1', apiKey: 'vk', model: 'gpt-4o-mini' },
       webSearch: { enabled: true, providerType: 'duckduckgo' },
+      memory: { enabled: true },
     } as const
 
     await store.set(next)

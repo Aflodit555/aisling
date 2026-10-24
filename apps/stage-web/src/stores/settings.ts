@@ -118,6 +118,11 @@ export const useSettingsStore = defineStore('settings', () => {
     applyConfig(config.value)
   }
 
+  async function setMemoryEnabled(enabled: boolean): Promise<void> {
+    config.value = { ...config.value, memory: { enabled: enabled === true } }
+    await persist()
+  }
+
   return {
     activeChatProvider,
     activeSpeechProvider,
@@ -133,6 +138,7 @@ export const useSettingsStore = defineStore('settings', () => {
     saveVision,
     saveWebSearch,
     setModuleEnabled,
+    setMemoryEnabled,
     speechReady,
     visionReady,
     webSearchReady,

@@ -50,6 +50,7 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             speech: { ...defaults.speech, ...parsed.speech, enabled: storedSpeech?.enabled ?? (storedSpeech?.providerType !== undefined && storedSpeech.providerType !== 'none'), transport: migratedTransport },
             vision: { ...defaults.vision, ...parsed.vision, enabled: parsed.vision?.enabled ?? (parsed.vision?.providerType !== undefined && parsed.vision.providerType !== 'none') },
             webSearch,
+            memory: { enabled: parsed.memory?.enabled === true },
           }
           if (Object.hasOwn(parsed, 'hearing')
             || parsed.speech?.enabled === undefined || parsed.vision?.enabled === undefined || parsed.webSearch?.enabled === undefined

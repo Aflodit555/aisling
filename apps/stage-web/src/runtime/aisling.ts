@@ -38,6 +38,7 @@ export function createAislingRuntime(deps: {
   /** Seed conversation context (restored history). */
   history?: ConversationMessage[]
   getSituationContext?: (stimulus: Stimulus, turnId?: string) => string | undefined
+  getRecallEvidence?: import('@aisling/core').CharacterRuntimeOptions['getRecallEvidence']
   diagnostic?: (record: ChatRuntimeDiagnostic) => void
 }): CharacterRuntime {
   return createCharacterRuntime({
@@ -46,6 +47,7 @@ export function createAislingRuntime(deps: {
     getTools: deps.getTools,
     history: deps.history,
     getSituationContext: deps.getSituationContext,
+    getRecallEvidence: deps.getRecallEvidence,
     diagnostic: deps.diagnostic,
   })
 }

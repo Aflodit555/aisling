@@ -35,3 +35,24 @@ it('persists module switches and removes disabled providers from new calls', asy
   expect(settings.activeSpeechProvider).toBeUndefined()
   expect(JSON.parse(data.get('aisling.config.v1')!).speech.enabled).toBe(false)
 })
+
+it('persists Memory consent across restarts without replacing the chat provider', async () => {
+  const data = new Map<string, string>()
+  vi.stubGlobal('window', { localStorage: { getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => { data.set(key, value) } } })
+  setActivePinia(createPinia())
+  const settings = useSettingsStore(); await settings.load()
+  expect(settings.config.memory.enabled).toBe(false)
+  const provider = { id: 'unchanged', complete: vi.fn(async () => ({ text: '' })) }
+  settings.activeChatProvider = provider
+  await settings.setMemoryEnabled(true)
+  expect(settings.activeChatProvider).toBe(provider)
+  setActivePinia(createPinia())
+  const restarted = useSettingsStore(); await restarted.load()
+  expect(restarted.config.memory.enabled).toBe(true)
+  await restarted.setMemoryEnabled(false)
+  setActivePinia(createPinia())
+  const disabled = useSettingsStore(); await disabled.load()
+  expect(disabled.config.memory.enabled).toBe(false)
+  expect(provider.complete).not.toHaveBeenCalled()
+})

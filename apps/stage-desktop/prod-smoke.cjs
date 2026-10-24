@@ -140,6 +140,129 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     return
   }
 
+  if (process.env.AISLING_MEMORY_SMOKE === '1') {
+    contents.setBackgroundThrottling(false)
+    const report = await contents.executeJavaScript(String.raw`(async () => {
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
+      const stage = pinia._s.get('stage'), settings = pinia._s.get('settings'), requests = []
+      let reply = '', pending, reject = false
+      settings.activeChatProvider = { id: 'memory-smoke', complete: async request => {
+        requests.push(request)
+        if (pending) return new Promise(resolve => { pending.resolve = resolve })
+        if (reject) throw new Error('Synthetic generation failure')
+        return { text: reply }
+      } }
+      async function settled() {
+        for (let n = 0; n < 200 && stage.sending; n++) await new Promise(resolve => setTimeout(resolve, 10))
+        if (stage.sending) throw new Error('Memory smoke did not settle')
+      }
+      const saved = () => JSON.parse(window.aislingDesktop.storage.getItem('aisling.conversations.v1')).sessions
+      const marker = '[Cross-session recall evidence]'
+      const evidence = request => request.messages.find(message => message.content?.startsWith(marker))?.content
+      await document.querySelector('#app').__vue_app__.config.globalProperties.$router.push('/settings/memory')
+      for (let n = 0; n < 100 && !document.querySelector('.settings-module input[role="switch"]'); n++)
+        await new Promise(resolve => setTimeout(resolve, 10))
+      const toggle = document.querySelector('.settings-module input[role="switch"]')
+      if (!toggle) throw new Error('Memory settings switch did not mount: ' + document.body.innerText.slice(0, 500))
+      const consentCopy = document.querySelector('.settings-module').textContent.includes('selected LLM Provider')
+      async function setMemory(enabled) {
+        toggle.checked = enabled
+        toggle.dispatchEvent(new Event('change', { bubbles: true }))
+        for (let n = 0; n < 100; n++) {
+          const config = JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1') || '{}')
+          if (config.memory?.enabled === enabled && stage.memoryRecallEnabled === enabled) return
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        throw new Error('Memory consent did not persist')
+      }
+      const oldId = stage.activeSessionId, defaultOff = stage.memoryRecallEnabled === false
+      reply = '萤桥发布：我猜它稳定了。'
+      stage.send('萤桥发布：2026-03-01 是实验版。'); await settled()
+      reply = '萤桥发布：我之前的判断错了。'
+      stage.send('萤桥发布：纠正，2026-04-02 才发布稳定版，2026-04-05 又发现崩溃。'); await settled()
+      const autonomous = () => ({ id: 'smoke-turn', kind: 'autonomous', source: 'desktop', at: Date.now(), candidate: {
+        id: 'private-candidate', objectId: 'private-object', source: 'foreground', change: 'appeared',
+        snapshot: { capturedAt: 1000, targetHwnd: '1', sequence: 1 },
+        target: { app: 'Synthetic browser', title: '萤桥发布', text: 'An old photograph.' }
+      } })
+      await setMemory(true)
+      reply = '萤桥发布：窗口旧照片不能证明你刚刚发布。'
+      stage.sendStimulus(autonomous()); await settled()
+      const autonomousIsolated = !evidence(requests.at(-1))
+      pending = {}
+      stage.sendStimulus(autonomous()); stage.send('/quiet')
+      pending.resolve({ text: '萤桥发布：取消草稿，不是已交付经历。' }); pending = undefined
+      await settled()
+      reject = true; stage.send('萤桥发布：这条请求会生成失败。'); await settled(); reject = false
+      const stored = saved().find(session => session.id === oldId).messages
+      stage.newConversation(); await setMemory(false); reply = ''
+      const question = '萤桥发布：你以前说过哪些话，当前状态能否确定？'
+      stage.send(question); await settled()
+      const offIsolated = !JSON.stringify(requests.at(-1)).includes('2026-04-05') && !evidence(requests.at(-1))
+      await setMemory(true); stage.send(question); await settled()
+      const packed = evidence(requests.at(-1)), records = JSON.parse(packed.split('\n').at(-1))
+      const scopes = new Set(records.map(record => record.sourceScope))
+      const positions = records.map(record => record.position)
+      const report = { defaultOff, consentCopy, autonomousIsolated, offIsolated, injected: !!packed,
+        rolesSeparated: ['stored-user-report', 'stored-assistant-utterance', 'stored-autonomous-utterance'].every(scope => scopes.has(scope)),
+        quotesIntact: stored.every(message => records.some(record => record.content === message.content)),
+        positionOrder: positions.every((position, i) => i === 0 || position > positions[i - 1]),
+        timeScope: records.some(record => record.autonomousBasis?.observedAt === '1970-01-01T00:00:01.000Z')
+          && records.filter(record => !record.autonomousBasis).every(record => !('deliveredAt' in record)),
+        discarded: !packed.includes('取消草稿') && !stored.some(message => message.content.includes('取消草稿')),
+        idsIsolated: !packed.includes(oldId) && !packed.includes('private-candidate') && !packed.includes('private-object'),
+        bounded: new TextEncoder().encode(JSON.stringify(records)).length <= 6000,
+        noPersistedEvidence: !JSON.stringify(saved()).includes(marker) }
+      stage.send('还记得有什么吗'); await settled()
+      const followupAnchored = stage.memoryRecallDiagnostic?.sessionIds[0] === oldId
+        && !!evidence(requests.at(-1))
+      stage.deleteSession(oldId); stage.send(question); await settled()
+      const size = text => new TextEncoder().encode(text).length
+      const contextBounded = requests.every(request => request.messages.reduce((n, message) => n + 8 + size(message.content || ''),
+        request.tools?.length ? size(JSON.stringify(request.tools)) : 0) <= 14336)
+      return { ...report, followupAnchored, contextBounded, deletionEffective: !evidence(requests.at(-1)), calls: requests.length }
+    })()`)
+    for (const [key, value] of Object.entries(report)) if (key !== 'calls') assert.equal(value, true, key)
+    assert.equal(report.calls, 9)
+    async function reloadMemorySettings() {
+      await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
+      return contents.executeJavaScript(`(async () => {
+        for (let n = 0; n < 200; n++) {
+          const globals = document.querySelector('#app')?.__vue_app__?.config.globalProperties
+          const settings = globals?.$pinia?._s.get('settings'), stage = globals?.$pinia?._s.get('stage')
+          if (settings?.loaded && stage) {
+            await globals.$router.push('/settings/memory')
+            await new Promise(resolve => setTimeout(resolve, 20))
+            const toggle = document.querySelector('.settings-module input[role="switch"]')
+            const restored = settings.config.memory.enabled && stage.memoryRecallEnabled && toggle?.checked === true
+            if (toggle?.checked) {
+              toggle.checked = false
+              toggle.dispatchEvent(new Event('change', { bubbles: true }))
+            }
+            return { restored, disabled: settings.config.memory.enabled === false && stage.memoryRecallEnabled === false
+              && JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).memory.enabled === false,
+              checked: toggle?.checked }
+          }
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        throw new Error('Memory settings did not recover after reload')
+      })()`)
+    }
+    const enabledReload = await reloadMemorySettings()
+    assert.equal(enabledReload.restored, true, 'Memory opt-in must survive renderer restart')
+    assert.equal(enabledReload.disabled, true, 'Memory UI must persist opt-out after restart')
+    const disabledReload = await reloadMemorySettings()
+    assert.equal(disabledReload.restored, false)
+    assert.equal(disabledReload.disabled, true)
+    assert.equal(disabledReload.checked, false)
+    report.restartConsent = true
+    console.log(JSON.stringify({ memorySmoke: 'passed', modelResponses: 'mocked', ...report }))
+    clearTimeout(timeout)
+    win.destroy()
+    app.exit(0)
+    return
+  }
+
   if (process.env.AISLING_CONTEXT_SMOKE === '1') {
     const report = await contents.executeJavaScript(`(async () => {
       const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia

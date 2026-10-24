@@ -7,6 +7,7 @@ const pages = [
   { kind: 'speech', name: 'Speech' },
   { kind: 'vision', name: 'Vision' },
   { kind: 'web-search', name: 'Web Search' },
+  { kind: 'memory', name: 'Memory' },
   { kind: 'desktop-awareness', name: 'Desktop Awareness' },
 ]
 </script>

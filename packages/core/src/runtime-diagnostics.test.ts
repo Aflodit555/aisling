@@ -14,7 +14,9 @@ describe('opt-in chat request diagnostics', () => {
       diagnostic: r => records.push(r), getSituationContext: () => 'Private understanding',
       getTools: () => [{ name: 'local', description: 'Mock', parameters: {}, run: async () => 'Private tool result' }],
       getChatProvider: () => ({ id: 'mock', complete: async request => {
-        requests.push(structuredClone(request)); time += 25
+        // Timing callbacks are local instrumentation, not part of the model payload.
+        const { onTiming: _onTiming, ...modelRequest } = request
+        requests.push(structuredClone(modelRequest)); time += 25
         return requests.length === 1 ? { text: '', toolCalls: [{ id: 'call', name: 'local', arguments: '{}' }] } : { text: 'Private reply' }
       } }) })
     const turn = await runtime.ingest(createUserTextStimulus({ source: 'test', text: 'Private user message' }))

@@ -2,6 +2,17 @@ import { expect, it } from 'vitest'
 import { createDefaultPlatformConfig } from '@aisling/core'
 import { createLocalStorageConfigStore } from './local-storage-config-store'
 
+it('defaults legacy Memory settings to off and only restores explicit boolean consent', async () => {
+  for (const memory of [undefined, {}, { enabled: 'true' }, { enabled: false }, { enabled: true }]) {
+    let raw = JSON.stringify({ ...createDefaultPlatformConfig(), memory })
+    const store = createLocalStorageConfigStore({ getItem: () => raw, setItem: (_key, text) => { raw = text } })
+    const loaded = await store.get()
+    expect(loaded.memory.enabled).toBe(memory?.enabled === true)
+    await store.set(loaded)
+    expect((await store.get()).memory.enabled).toBe(memory?.enabled === true)
+  }
+})
+
 it('requires explicit P2 opt-in, retains it in the existing config and defaults old configs to off', async () => {
   for (const value of [undefined, false, 'true', true]) {
     let raw = JSON.stringify({ ...createDefaultPlatformConfig(), desktopAwareness: {

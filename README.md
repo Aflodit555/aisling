@@ -8,20 +8,23 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 [AIRI](https://github.com/moeru-ai/airi) as an engineering reference. Aisling is
 **not** an AIRI fork and has no official relationship with either project.
 
-> **Current version:** v0.3.5 · **Status:** early development. The architecture
+> **Current version:** v0.3.6 · **Status:** early development. The architecture
 > and public APIs may still change.
 
 ## What exists today
 
 - Runtime foundation (Stimulus → Runtime → Character → Provider → Output)
 - Character / Stimulus domain model
-- Settings pages: General, Consciousness, Speech, Vision, Web Search, Desktop Awareness
+- Settings pages: General, Consciousness, Speech, Vision, Web Search, Memory, Desktop Awareness
 - Provider Settings UI for model configuration
 - Unified interaction history within each conversation session, with switching
   and restart recovery (localStorage in the browser; file-backed on Desktop)
 - Context Phase One: a bounded, estimated-token history window; user replies can
   follow up on delivered autonomous speech and its compact, redacted trigger
   evidence, without extra Context LLM calls
+- Memory Phase One: optional cross-session recall from local conversation history,
+  with bounded evidence, user-topic anchors for short follow-ups, and distinct
+  sources for user reports, stored replies and delivered autonomous speech
 - Persistence hardening: unsaved history stays in memory with a visible warning;
   Desktop writes replace the stored file only after a temporary write succeeds
 - Desktop Situation Understanding P1/P1.1: explicit foreground/media candidates,
@@ -38,20 +41,31 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 **Verified end-to-end:** Consciousness, Vision, Browser Speech, Alibaba TTS,
 conversation persistence.
 
-**v0.3.5:** brings Context Phase One and conversation/autonomous-speech continuity,
-token-budgeted history selection, persistence hardening, and the existing P2
-preview into one version. Users have reported successful manual checks of
-conversation continuity, speech follow-ups, event attribution, session isolation,
-and cooperation with P2 enabled; these are not comprehensive performance or
-long-running desktop validation. P2 remains a preview and can make separately
-bounded background model calls when enabled.
+**v0.3.6:** ships the Memory Phase One recall foundation. Open **Settings → Memory**
+and enable **cross-session recall** to use it. It is off by default, and the choice
+is saved locally across restarts. Enabling it allows relevant excerpts from older
+local sessions to be sent to your selected LLM Provider with user text turns.
+Turning it off stops cross-session retrieval for new turns; it does not erase
+existing conversations or retract requests already sent.
 
-Context is not long-term Memory: history outside the selected token window is
-not semantically recalled, and there is no cross-session memory or three-tier
-compression. Token counts are estimates; full persisted history can still reach
-storage limits. The optional native Candidate smoke remains inconclusive.
+Memory uses local lexical retrieval, up to five sessions and a bounded evidence
+block, without an extra LLM call. It can supply related experiences, corrections
+and state changes for the model to interpret. It can also miss relevant sessions,
+include unrelated excerpts or produce an incorrect recollection. Ordinary stored
+messages have no individual timestamps: session update times are not event dates,
+and missing dates must remain unknown. Stored assistant statements prove what was
+said, not that an external action or fictional story really happened.
 
-Design, verification and limits:
+Context selects recent history within the active session. Memory retrieves from
+other saved sessions. P2 maintains optional, bounded short-term desktop
+understanding and may make separate background model calls. Memory does not add
+automatic memory formation, a knowledge database or a complete long-term memory
+system. Token counts are estimates; full persisted history can still reach
+storage limits. P2 remains a preview, and the optional native Candidate smoke
+remains inconclusive.
+
+Design and limits:
+[Memory Phase One](docs/memory.md),
 [Context Phase One](docs/context-phase-one.md),
 [Context Hardening](docs/context-hardening.md), and
 [P2 preview](docs/p2-minimal-loop.md).

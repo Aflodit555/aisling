@@ -60,6 +60,21 @@ test('diagnostics default off: no ID arguments, directory, stream or file output
   assert.deepEqual(f.lines, [])
 })
 
+test('tool-loop diagnostics retain only bounded metadata, never arguments, responses or recall quotations', () => {
+  const f = fixture(true, true)
+  f.api.writeDesktopDiagnostic({ type: 'chat-tool-round', round: 4, reason: 'round-limit', source: 'user-text',
+    toolCallCount: 1, repeatedToolCalls: 1, toolFailures: 0, toolResultChars: 14, recallIncluded: false,
+    toolArguments: 'private query', toolResult: 'private result', prompt: 'private quotation', replyText: 'private reply' })
+  f.api.writeDesktopDiagnostic({ type: 'chat-provider-result', round: 4, finishReason: 'tool_calls', httpStatus: 200,
+    outcome: 'returned', body: 'private provider body' })
+  assert.equal(f.lines[1].reason, 'round-limit')
+  assert.equal(f.lines[1].repeatedToolCalls, 1)
+  assert.equal(f.lines[1].recallIncluded, false)
+  assert.equal(f.lines[2].finishReason, 'tool_calls')
+  assert.equal(f.lines[2].httpStatus, 200)
+  assert.doesNotMatch(JSON.stringify(f.lines), /private/)
+})
+
 test('local JSONL strips unapproved fields and reply text unless separately opted in', () => {
   const f = fixture(true)
   f.api.writeDesktopDiagnostic({ type: 'delivery', delivered: true, replyLength: 13, replyText: 'Private reply', prompt: 'Secret prompt', apiKey: 'Secret key' })

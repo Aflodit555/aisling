@@ -18,6 +18,7 @@ import { PREFERENCE_ACKNOWLEDGEMENTS, recognizeInteractionPreference } from '../
 import { resolvePersistentStorage } from '../storage/desktop-storage'
 import { createSituationWorkingState, isSituationCorrection, providerSituationExecutor } from '../runtime/situation-working-state'
 import { situationEnableThinking } from '../runtime/provider-factory'
+import { recallForModel, retrieveRecall, type RecallSource } from '../runtime/memory-recall'
 import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
@@ -91,6 +92,10 @@ export const useStageStore = defineStore('stage', () => {
   const activeSessionId = ref<string>(activeSession.id)
   const sessionMessages = ref<ConversationMessage[]>([...activeSession.messages])
   const sessionsList = ref<ConversationSession[]>(conversationStore.list())
+  const memoryRecallEnabled = computed(() => settings.config.memory.enabled)
+  const memoryRecallDiagnostic = shallowRef<{ sessionIds: string[]; rankedSessionIds: string[]; packingOmittedSessionIds: string[];
+    records: number; durationMs: number; sources: RecallSource[] }>()
+  watch(memoryRecallEnabled, () => { memoryRecallDiagnostic.value = undefined }, { flush: 'sync' })
 
   const diagnostic = window.aislingDesktop?.desktopDiagnostics?.enabled
     ? (record: import('../runtime/autonomous').DesktopDiagnosticRecord) => {
@@ -107,6 +112,17 @@ export const useStageStore = defineStore('stage', () => {
     getChatProvider: () => settings.activeChatProvider,
     getTools: () => settings.activeTools,
     history: activeSession.messages,
+    getRecallEvidence: stimulus => {
+      if (!memoryRecallEnabled.value) return
+      memoryRecallDiagnostic.value = undefined
+      const startedAt = performance.now()
+      const sessions = conversationStore.list()
+      if (conversationStore.getPersistenceError()) return
+      const { evidence, ...summary } = retrieveRecall(sessions, activeSessionId.value, stimulus.text)
+      const projected = evidence ? recallForModel(evidence) : undefined
+      memoryRecallDiagnostic.value = { ...summary, sources: projected?.sources ?? [], durationMs: performance.now() - startedAt }
+      return projected?.evidence
+    },
     getSituationContext: (stimulus, turnId) => situation.contextFor(stimulus, diagnostic && turnId
       ? selection => { turnDiagnostics.set(turnId, { ...selection }) } : undefined),
     diagnostic: diagnostic ? record => {
@@ -118,7 +134,7 @@ export const useStageStore = defineStore('stage', () => {
           conversationId: activeSessionId.value, aCallsAtStart: situation.status.calls })
       }
       const trace = turnDiagnostics.get(record.turnId)
-      diagnostic({ ...trace, ...record, reason: record.type === 'context-assembled' ? record.reason : trace?.reason ?? record.reason,
+      diagnostic({ ...trace, ...record, reason: ['context-assembled', 'chat-tool-round', 'chat-provider-result'].includes(record.type) ? record.reason : trace?.reason ?? record.reason,
         aCalls: situation.status.calls, activeAUpdateId: situation.activeUpdateId() })
     } : undefined,
   })
@@ -484,6 +500,8 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   return {
+    memoryRecallEnabled,
+    memoryRecallDiagnostic,
     autonomous,
     situationStatus,
     desktopBridgeState,

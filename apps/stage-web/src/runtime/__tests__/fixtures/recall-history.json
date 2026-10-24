@@ -1,0 +1,469 @@
+{
+  "synthetic": true,
+  "sessions": [
+    {
+      "session_id": "H01",
+      "messages": [
+        {
+          "message_id": "H01-M01",
+          "role": "user",
+          "content": "我把旅行票根整理的小工具叫「纸舟」。现在还是本地网页，主要按出行日期把票根排成时间线；它不是记账软件。"
+        },
+        {
+          "message_id": "H01-M02",
+          "role": "assistant",
+          "content": "纸舟，按日期整理旅行票根的本地网页。我会把它和记账工具区分开。"
+        },
+        {
+          "message_id": "H01-M03",
+          "role": "user",
+          "content": "先保留最简单的列表视图，漂亮的地图以后再说。"
+        }
+      ]
+    },
+    {
+      "session_id": "H02",
+      "messages": [
+        {
+          "message_id": "H02-M01",
+          "role": "user",
+          "content": "最近坐晚班车我经常循环「北窗」的《潮汐回廊》，尤其下雨的时候。"
+        },
+        {
+          "message_id": "H02-M02",
+          "role": "assistant",
+          "content": "那首歌像是你给雨天留的背景音乐。"
+        },
+        {
+          "message_id": "H02-M03",
+          "role": "user",
+          "content": "只是这个月听得多，别推断我只喜欢这一首。"
+        }
+      ]
+    },
+    {
+      "session_id": "H03",
+      "messages": [
+        {
+          "message_id": "H03-M01",
+          "role": "user",
+          "content": "我目前一共有三件乐器：小合成器 Kumo-37、木吉他 松林-6、卡林巴 Luma-17。"
+        },
+        {
+          "message_id": "H03-M02",
+          "role": "assistant",
+          "content": "三种不同音色，都记下来了。不过将来是否还在，要看有没有新的变化。"
+        }
+      ]
+    },
+    {
+      "session_id": "H04",
+      "messages": [
+        {
+          "message_id": "H04-M01",
+          "role": "user",
+          "content": "纸舟的设置页面终于出现「导出 PDF」按钮了，我还没接导出逻辑。"
+        },
+        {
+          "message_id": "H04-M02",
+          "role": "assistant",
+          "content": "那看来 PDF 导出功能已经完成了。"
+        },
+        {
+          "message_id": "H04-M03",
+          "role": "user",
+          "content": "不对，只有按钮外观。点它还不会导出任何文件。"
+        },
+        {
+          "message_id": "H04-M04",
+          "role": "assistant",
+          "content": "我误把界面元素存在当成功能完成了。现在只能确认有按钮，不能说 PDF 导出可用。"
+        }
+      ]
+    },
+    {
+      "session_id": "H05",
+      "messages": [
+        {
+          "message_id": "H05-M01",
+          "role": "user",
+          "content": "这个周末做了个陶杯，杯身是米白色，只有杯沿是一圈蓝色。"
+        },
+        {
+          "message_id": "H05-M02",
+          "role": "assistant",
+          "content": "米白色杯身、蓝色杯沿，我差点把重点全放在蓝色上。"
+        },
+        {
+          "message_id": "H05-M03",
+          "role": "user",
+          "content": "它还没烧制好，我暂时不能拿来喝水。"
+        }
+      ]
+    },
+    {
+      "session_id": "H23",
+      "messages": [
+        {
+          "message_id": "H23-M01",
+          "role": "user",
+          "content": "今天试了灰白色的编辑器主题；它和我那只陶杯是两回事。"
+        },
+        {
+          "message_id": "H23-M02",
+          "role": "assistant",
+          "content": "一个是屏幕配色，一个是你手工做的东西，不混在一起。"
+        }
+      ]
+    },
+    {
+      "session_id": "H06",
+      "messages": [
+        {
+          "message_id": "H06-M01",
+          "role": "user",
+          "content": "上周三，也就是 3 月 18 日，我去了岚湾灯塔。印象最深的是石阶下面的海浪声。"
+        },
+        {
+          "message_id": "H06-M02",
+          "role": "assistant",
+          "content": "你记住的是石阶下的海浪声，而不只是灯塔的样子。"
+        }
+      ]
+    },
+    {
+      "session_id": "H07",
+      "messages": [
+        {
+          "message_id": "H07-M01",
+          "role": "user",
+          "content": "纸舟的 PDF 导出今天真的接通了！我已经导出第一份 2025 秋季的票根合集。"
+        },
+        {
+          "message_id": "H07-M02",
+          "role": "assistant",
+          "content": "上次只是按钮，这次有真正生成的文件，可以说导出功能实现了。"
+        },
+        {
+          "message_id": "H07-M03",
+          "role": "user",
+          "content": "对，4 月 7 日算是它正式能用的日期。"
+        }
+      ]
+    },
+    {
+      "session_id": "H08",
+      "messages": [
+        {
+          "message_id": "H08-M01",
+          "role": "user",
+          "content": "纸舟先坚持本地存储，不准备加入云同步。云同步只是朋友随口提过的想法，不在当前计划里。"
+        },
+        {
+          "message_id": "H08-M02",
+          "role": "assistant",
+          "content": "明白，当前选择是本地存储，不把别人提过的点子当成已上线的功能。"
+        }
+      ]
+    },
+    {
+      "session_id": "H09",
+      "messages": [
+        {
+          "message_id": "H09-M01",
+          "role": "user",
+          "content": "我周末经常去「栖角」，一般都点热燕麦拿铁；它家冰的我还没试过。"
+        },
+        {
+          "message_id": "H09-M02",
+          "role": "assistant",
+          "content": "那你在栖角的已知习惯是热燕麦拿铁，不能推断冰饮也适合。"
+        }
+      ]
+    },
+    {
+      "session_id": "H10",
+      "messages": [
+        {
+          "message_id": "H10-M01",
+          "role": "assistant",
+          "content": "《潮汐回廊》又出现了。你上回说雨天很适合听它。"
+        },
+        {
+          "message_id": "H10-M02",
+          "role": "user",
+          "content": "今天其实是晴天，我放它只是为了查歌词。不要因为歌一样就认定今天又下雨。"
+        },
+        {
+          "message_id": "H10-M03",
+          "role": "assistant",
+          "content": "你说得对。我把以前的情境套用到现在了；这首歌出现，不代表天气或目的也一样。"
+        }
+      ]
+    },
+    {
+      "session_id": "H11",
+      "messages": [
+        {
+          "message_id": "H11-M01",
+          "role": "user",
+          "content": "我考虑把 Kumo-37 卖掉，不过现在还没有挂售，也没有成交。"
+        },
+        {
+          "message_id": "H11-M02",
+          "role": "assistant",
+          "content": "这是计划，不是卖出。我不会把它从现有乐器里提前扣掉。"
+        }
+      ]
+    },
+    {
+      "session_id": "H12",
+      "messages": [
+        {
+          "message_id": "H12-M01",
+          "role": "user",
+          "content": "这阵子我更常听「纸月」的《游云慢》。之前的《潮汐回廊》我仍喜欢，只是最近听得少了。"
+        },
+        {
+          "message_id": "H12-M02",
+          "role": "assistant",
+          "content": "常听程度变了，不等于旧歌被你讨厌或完全遗忘。"
+        }
+      ]
+    },
+    {
+      "session_id": "H13",
+      "messages": [
+        {
+          "message_id": "H13-M01",
+          "role": "user",
+          "content": "今天 Kumo-37 已经卖出去了。现在还留着松林-6 木吉他和 Luma-17 卡林巴。"
+        },
+        {
+          "message_id": "H13-M02",
+          "role": "assistant",
+          "content": "从六月的考虑出售，变成了七月十二日实际出售。现在两件乐器仍在。"
+        }
+      ]
+    },
+    {
+      "session_id": "H14",
+      "messages": [
+        {
+          "message_id": "H14-M01",
+          "role": "user",
+          "content": "我在草稿里试写过「纸航」，听起来好像也不错。"
+        },
+        {
+          "message_id": "H14-M02",
+          "role": "assistant",
+          "content": "原来纸舟已经改名成纸航了。"
+        },
+        {
+          "message_id": "H14-M03",
+          "role": "user",
+          "content": "没有正式改！目前项目仍叫纸舟。只是尝试过另一个名字。"
+        },
+        {
+          "message_id": "H14-M04",
+          "role": "assistant",
+          "content": "我又把一种设想说成既成事实了；截至今天正式名字还是纸舟。"
+        }
+      ]
+    },
+    {
+      "session_id": "H15",
+      "messages": [
+        {
+          "message_id": "H15-M01",
+          "role": "user",
+          "content": "纸舟的票根文字识别 OCR 我做出了试验版，但错误率还高，不能说稳定可用。"
+        },
+        {
+          "message_id": "H15-M02",
+          "role": "assistant",
+          "content": "目前只能说 OCR 有试验能力，不能把实验通过当正式完成。"
+        }
+      ]
+    },
+    {
+      "session_id": "H16",
+      "messages": [
+        {
+          "message_id": "H16-M01",
+          "role": "user",
+          "content": "今天决定正式把「纸舟」改名为「纸航」。它还是同一个票根工具，旧数据也保留。"
+        },
+        {
+          "message_id": "H16-M02",
+          "role": "assistant",
+          "content": "这是正式改名，不是新建第二个项目；纸舟是旧名，纸航是现名。"
+        }
+      ]
+    },
+    {
+      "session_id": "H24",
+      "messages": [
+        {
+          "message_id": "H24-M01",
+          "role": "user",
+          "content": "我今天复制了一段《游云慢》的歌词到编辑器，这是普通粘贴，不是票根 OCR 识别结果。"
+        },
+        {
+          "message_id": "H24-M02",
+          "role": "assistant",
+          "content": "收到，不把歌词粘贴当成 OCR 已经稳定的证据。"
+        }
+      ]
+    },
+    {
+      "session_id": "H17",
+      "messages": [
+        {
+          "message_id": "H17-M01",
+          "role": "user",
+          "content": "这个月可能去石栈镇拍照，但目前只是计划，还没出发。"
+        },
+        {
+          "message_id": "H17-M02",
+          "role": "assistant",
+          "content": "我会把石栈镇标作计划，而不是一次已经发生的旅行。"
+        }
+      ]
+    },
+    {
+      "session_id": "H18",
+      "messages": [
+        {
+          "message_id": "H18-M01",
+          "role": "user",
+          "content": "昨天和朋友一起看了旧港摄影展，就在市内，没出远门。"
+        },
+        {
+          "message_id": "H18-M02",
+          "role": "assistant",
+          "content": "这是一次市内看展，不应当误记成外地旅行。"
+        }
+      ]
+    },
+    {
+      "session_id": "H19",
+      "messages": [
+        {
+          "message_id": "H19-M01",
+          "role": "user",
+          "content": "石栈镇这趟真的去了：9 月 18 日出发，9 月 19 日返回。之前的岚湾灯塔是 3 月 18 日去的。"
+        },
+        {
+          "message_id": "H19-M02",
+          "role": "assistant",
+          "content": "石栈镇现在是已发生的出行，不再只是计划，而且晚于岚湾灯塔。"
+        }
+      ]
+    },
+    {
+      "session_id": "H20",
+      "messages": [
+        {
+          "message_id": "H20-M01",
+          "role": "assistant",
+          "content": "你那只蓝色陶杯后来烧好了吗？"
+        },
+        {
+          "message_id": "H20-M02",
+          "role": "user",
+          "content": "再纠正一次：杯身不是蓝色，是米白色，只有杯沿是蓝色。现在已经烧好了。"
+        },
+        {
+          "message_id": "H20-M03",
+          "role": "assistant",
+          "content": "我把蓝色杯沿误概括为蓝色杯身了。颜色应该以你原先和这次的描述为准。"
+        }
+      ]
+    },
+    {
+      "session_id": "H21",
+      "messages": [
+        {
+          "message_id": "H21-M01",
+          "role": "user",
+          "content": "纸航的 OCR 现在已经稳定可用了；不过云同步始终没做，数据仍只放本地。"
+        },
+        {
+          "message_id": "H21-M02",
+          "role": "assistant",
+          "content": "我会把 OCR 现已稳定与云同步从未上线分开记录。"
+        }
+      ]
+    },
+    {
+      "session_id": "H22",
+      "messages": [
+        {
+          "message_id": "H22-M01",
+          "role": "assistant",
+          "content": "窗口里又看到岚湾灯塔，难道你今天又去那里了？"
+        },
+        {
+          "message_id": "H22-M02",
+          "role": "user",
+          "content": "那只是我的旧照片壁纸，不能说明我今天重游了灯塔。"
+        },
+        {
+          "message_id": "H22-M03",
+          "role": "assistant",
+          "content": "是我把照片出现在桌面和实际去过那里混在一起了；我不知道你今天是否去过。"
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "AM0-09",
+      "question": "纸航的 PDF 导出与 OCR 各自经历了什么状态变化？",
+      "evidenceMessageIds": [
+        "H04-M01",
+        "H07-M01",
+        "H15-M01",
+        "H21-M01"
+      ],
+      "expectedMissingMessageIds": []
+    },
+    {
+      "id": "AM0-10",
+      "question": "你有过哪两次把纸舟项目的“设想或外观”当成既成事实的误判？",
+      "evidenceMessageIds": [
+        "H04-M02",
+        "H04-M03",
+        "H14-M02",
+        "H14-M03"
+      ],
+      "expectedMissingMessageIds": []
+    },
+    {
+      "id": "AM0-12",
+      "question": "到这次提问为止，我最近一次明确完成的外地出游是哪里，什么时候去的？",
+      "evidenceMessageIds": [
+        "H06-M01",
+        "H17-M01",
+        "H18-M01",
+        "H19-M01"
+      ],
+      "expectedMissingMessageIds": [
+        "H06-M01",
+        "H17-M01",
+        "H19-M01"
+      ]
+    },
+    {
+      "id": "AM0-22_abs",
+      "question": "十月十八日我再次去了岚湾灯塔，对吧？当天几点到的？",
+      "evidenceMessageIds": [
+        "H22-M01",
+        "H22-M02",
+        "H22-M03"
+      ],
+      "expectedMissingMessageIds": []
+    }
+  ]
+}

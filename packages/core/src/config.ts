@@ -64,6 +64,8 @@ export interface PlatformConfig {
   speech: SpeechConfig
   vision: VisionConfig
   webSearch: WebSearchConfig
+  /** Explicit opt-in to sending bounded local history excerpts with user text turns. */
+  memory: { enabled: boolean }
 }
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
@@ -101,6 +103,7 @@ export function createDefaultPlatformConfig(): PlatformConfig {
       enabled: true,
       providerType: 'duckduckgo',
     },
+    memory: { enabled: false },
   }
 }
 

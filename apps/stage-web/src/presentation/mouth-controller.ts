@@ -23,7 +23,7 @@ export interface MouthControllerInput {
   level: number | undefined
   /** Frame delta in milliseconds. */
   dtMs: number
-  /** Native ParamMouthOpenY left by model.update() this frame (cross-fade target). */
+  /** Mouth value after native motion and lower-priority parameter layers (cross-fade target). */
   baseMouth: number
 }
 

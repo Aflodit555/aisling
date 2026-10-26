@@ -23,7 +23,7 @@ export interface Live2DRig {
   expressions: ReadonlyMap<string, readonly ExpressionParameter[]>
   /** Plays once; emotion can interrupt a click, while clicks never interrupt a gesture. */
   playMotion(name: string, reason?: 'interaction' | 'emotion'): Promise<boolean>
-  /** Visits every available gesture before refilling, without consecutive repeats. */
+  /** Visits every available gesture before refilling; avoids consecutive repeats when possible. */
   playRandomMotion(): Promise<boolean>
   /** Includes a gesture being started, so parameter layers yield before its first frame. */
   isGesture(): boolean

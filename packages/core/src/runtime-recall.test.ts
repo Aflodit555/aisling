@@ -55,3 +55,20 @@ it('uses spare budget without replacing current history or retaining evidence, i
   expect((await failed.runtime.ingest(failed.user)).status).toBe('failed')
   expect(failed.runtime.history).toEqual(history)
 })
+
+it('repacks by relevance priority and preserves chronological presentation when spare context is limited', async () => {
+  const evidence = JSON.stringify([2, 1, 3].map(i => ({ conversation: `C${i}`, content: `quote-${i} ${'x'.repeat(1700)}` })))
+  const complete = vi.fn(async (_request: ChatCompletionRequest) => ({ text: '' }))
+  const runtime = createCharacterRuntime({
+    character: createCharacter({ id: 'a', name: 'A', persona: '', capabilities: [] }),
+    history: [{ role: 'user', content: 'h'.repeat(3500) }],
+    getChatProvider: () => ({ id: 'offline', complete }), getRecallEvidence: () => evidence,
+    getReflectionContext: () => ({ candidates: [JSON.stringify({ content: 'old understanding' })], durationMs: 0, reason: 'selected' }),
+  })
+  await runtime.ingest(createUserTextStimulus({ source: 'test', text: 'u'.repeat(4000) }))
+  const request = complete.mock.calls[0]![0]
+  const block = request.messages.find(m => m.content?.startsWith('[Cross-session recall evidence]'))!.content!
+  const records = JSON.parse(block.slice(block.lastIndexOf('\n') + 1))
+  expect(records.map((r: { conversation: string }) => r.conversation)).toEqual(['C1'])
+  expect(request.messages.reduce((n, m) => n + estimateMessageTokens(m), 0)).toBeLessThanOrEqual(INPUT_TOKEN_LIMIT)
+})

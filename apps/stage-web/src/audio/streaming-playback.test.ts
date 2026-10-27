@@ -177,15 +177,31 @@ describe('streaming playback queue', () => {
     expect(h.ended).toEqual([])
 
     await sleep()
-    // Queue drained → endOfStream → draining.
+    // Queue drained, but no audible playback event yet.
     expect(h.mediaSource().readyState).toBe('ended')
+    expect(h.playback.phase).toBe('buffering')
     expect(h.ended).toEqual([]) // still not terminal: playback has not drained
 
     h.audio().emit('playing')
+    expect(h.playback.phase).toBe('draining')
     h.audio().emit('ended')
     expect(h.ended).toEqual(['completed'])
-    expect(h.phases).toContain('playing')
     expect(h.phases).toContain('draining')
+  })
+
+  it('reports starvation and resumes the same audio element without restarting its queue', async () => {
+    const h = setup()
+    h.playback.start(); h.mediaSource().emit('sourceopen')
+    h.playback.enqueue(u8(1)); await sleep()
+    h.audio().emit('playing'); expect(h.playback.phase).toBe('playing')
+    h.audio().emit('waiting'); expect(h.playback.phase).toBe('buffering')
+    h.playback.enqueue(u8(2)); await sleep()
+    h.audio().emit('playing'); expect(h.playback.phase).toBe('playing')
+    h.playback.complete(); expect(h.playback.phase).toBe('draining')
+    h.audio().emit('waiting'); h.audio().emit('playing')
+    expect(h.playback.phase).toBe('draining')
+    expect(h.mediaSource().sourceBuffer!.appended.map(buffer => Array.from(buffer))).toEqual([[1], [2]])
+    h.audio().emit('ended'); expect(h.ended).toEqual(['completed'])
   })
 
   it('cleans up idempotently and suppresses terminal events after dispose', async () => {

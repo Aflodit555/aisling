@@ -28,7 +28,14 @@ function fixture() {
   })
   module.exports.registerStorageIpc()
   return { files, file, setFailWrite: value => { failWrite = value }, setFailRead: value => { failRead = value },
-    invoke(channel, ...args) { const event = {}; handlers.get(channel)(event, ...args); return event.returnValue } }
+    invoke(channel, ...args) {
+      let response, answered = false
+      const event = {}
+      // Electron sendSync observes the first reply, not the handler's last assignment.
+      Object.defineProperty(event, 'returnValue', { set(value) { if (!answered) { response = value; answered = true } } })
+      handlers.get(channel)(event, ...args)
+      return response
+    } }
 }
 
 test('failed desktop write returns a result and preserves all previously durable keys', () => {
@@ -62,4 +69,31 @@ test('preload preserves the desktop write result without paths or content', () =
   response = true; assert.doesNotThrow(() => bridge.storage.setItem('key', 'value'))
   response = null; assert.equal(bridge.storage.getItem('key'), null)
   response = 'stored'; assert.equal(bridge.storage.getItem('key'), 'stored')
+})
+
+test('reflection JSON is independent and shares atomic write failure protection', () => {
+  const f = fixture(), file = path.join('user-data', 'aisling-reflections.v1.json')
+  f.files.set(f.file, 'original conversation storage')
+  assert.equal(f.invoke('aisling:reflections:read').value, null)
+  const state = { version: 1, reflections: [], progress: [], batches: [] }
+  assert.equal(f.invoke('aisling:reflections:write', JSON.stringify(state)), true)
+  assert.deepEqual(JSON.parse(f.invoke('aisling:reflections:read').value), state)
+  const old = f.files.get(file)
+  f.setFailWrite(true)
+  assert.equal(f.invoke('aisling:reflections:write', JSON.stringify({ ...state, progress: [{ sessionId: 's', nextIndex: 2 }] })), false)
+  assert.equal(f.files.get(file), old)
+  assert.equal(f.files.get(f.file), 'original conversation storage')
+})
+
+test('corrupt, unreadable or future reflection stores are never silently overwritten', () => {
+  const f = fixture(), file = path.join('user-data', 'aisling-reflections.v1.json')
+  const next = JSON.stringify({ version: 1, reflections: [], progress: [], batches: [] })
+  for (const old of ['{broken', JSON.stringify({ version: 2 })]) {
+    f.files.set(file, old)
+    assert.equal(f.invoke('aisling:reflections:write', next), false)
+    assert.equal(f.files.get(file), old)
+  }
+  f.setFailRead(true)
+  assert.equal(f.invoke('aisling:reflections:read').ok, false)
+  assert.equal(f.invoke('aisling:reflections:write', next), false)
 })

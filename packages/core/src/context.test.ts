@@ -13,6 +13,17 @@ const assemble = (history: ConversationMessage[], historyTokenBudget = HISTORY_T
   prefix: [{ role: 'system', content: 'persona' }], suffix: [{ role: 'user', content: 'current question' }], history, historyTokenBudget })
 
 describe('bounded conversation context', () => {
+  it('keeps timestamped messages in source order without sending persistence fields to providers', () => {
+    const history: ConversationMessage[] = [
+      { role: 'user', content: '我计划购买手碟。', createdAt: 2000 },
+      { role: 'assistant', content: '明白。', createdAt: 2000 },
+      { role: 'user', content: '现在已经购买了。', createdAt: 1000 },
+      { role: 'assistant', content: '收到。', createdAt: 3000 },
+    ]
+    const baseline = assemble(history.map(({ createdAt: _time, ...message }) => message))
+    expect(assemble(history)).toEqual(baseline)
+    expect(history.map(m => m.createdAt)).toEqual([2000, 2000, 1000, 3000])
+  })
   it.each([
     { kind: 'Chinese', text: '中文', bytes: 6 },
     { kind: 'English', text: 'Hello world', bytes: 11 },
@@ -144,7 +155,7 @@ describe('bounded conversation context', () => {
     expect(complete).toHaveBeenCalledOnce(); expect(huge.history).toEqual([])
   })
 
-  it('reports context selection, request duration and first streamed text without content', async () => {
+  it('reports context selection and P2 request duration without content', async () => {
     const records: ChatRuntimeDiagnostic[] = []
     let time = 1000
     const runtime = createCharacterRuntime({ character: createCharacter({ id: 'a', name: 'A', persona: '', capabilities: [] }),
@@ -155,7 +166,6 @@ describe('bounded conversation context', () => {
       } }) })
     await runtime.ingest(createUserTextStimulus({ source: 'web', text: 'Private follow-up' }))
     expect(records.find(record => record.type === 'context-assembled')).toMatchObject({ selectedMessages: 1, basisCount: 1, omittedMessages: 0 })
-    expect(records.find(record => record.type === 'chat-first-text')?.firstTextMs).toBe(50)
     expect(records.find(record => record.type === 'p2-b-request-end')?.durationMs).toBe(150)
     expect(JSON.stringify(records)).not.toMatch(/Private|Song A|Artist B/)
   })

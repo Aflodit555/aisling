@@ -165,4 +165,26 @@ describe('alibaba (DashScope) speech provider', () => {
     })
     expect(error.message).toContain('authentication failed')
   })
+
+  it('forwards cancellation to the streaming fetch and releases the response reader', async () => {
+    const abort = new AbortController()
+    let receivedSignal: AbortSignal | null | undefined
+    let responseBody!: ReadableStream<Uint8Array>
+    const provider = createAlibabaSpeechProvider({ apiKey: 'test', model: 'm', voice: 'v',
+      endpoint: 'wss://workspace.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference',
+      fetchImpl: async (_url, init) => {
+        receivedSignal = init?.signal
+        responseBody = new ReadableStream({ start(controller) {
+          receivedSignal!.addEventListener('abort', () => controller.error(new DOMException('Cancelled', 'AbortError')), { once: true })
+        } })
+        return new Response(responseBody)
+      } })
+    const errors: Error[] = []
+    const running = provider.stream!.stream({ text: '中英 mixed。', signal: abort.signal }, { onError: e => errors.push(e) })
+    await Promise.resolve()
+    abort.abort(); await running
+    expect(receivedSignal).toBe(abort.signal)
+    expect(errors[0]?.name).toBe('AbortError')
+    expect(responseBody.locked).toBe(false)
+  })
 })

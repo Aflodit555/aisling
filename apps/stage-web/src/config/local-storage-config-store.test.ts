@@ -2,14 +2,25 @@ import { expect, it } from 'vitest'
 import { createDefaultPlatformConfig } from '@aisling/core'
 import { createLocalStorageConfigStore } from './local-storage-config-store'
 
-it('defaults legacy Memory settings to off and only restores explicit boolean consent', async () => {
+it('defaults missing Memory settings to on and preserves explicit opt-out', async () => {
   for (const memory of [undefined, {}, { enabled: 'true' }, { enabled: false }, { enabled: true }]) {
     let raw = JSON.stringify({ ...createDefaultPlatformConfig(), memory })
     const store = createLocalStorageConfigStore({ getItem: () => raw, setItem: (_key, text) => { raw = text } })
     const loaded = await store.get()
-    expect(loaded.memory.enabled).toBe(memory?.enabled === true)
+    expect(loaded.memory.enabled).toBe(memory?.enabled === undefined || memory.enabled === true)
+    expect(loaded.memory.formationEnabled).toBe(false)
     await store.set(loaded)
-    expect((await store.get()).memory.enabled).toBe(memory?.enabled === true)
+    expect((await store.get()).memory.enabled).toBe(memory?.enabled === undefined || memory.enabled === true)
+  }
+})
+
+it('restores Formation only with Memory on and persists cleanup of legacy independent opt-in', async () => {
+  for (const enabled of [false, true]) for (const value of [undefined, false, 'true', true]) {
+    let raw = JSON.stringify({ ...createDefaultPlatformConfig(), memory: { enabled, formationEnabled: value } })
+    const loaded = await createLocalStorageConfigStore({ getItem: () => raw, setItem: (_key, text) => { raw = text } }).get()
+    expect(loaded.memory.formationEnabled).toBe(enabled && value === true)
+    expect(loaded.memory.enabled).toBe(enabled)
+    if (!enabled && value === true) expect(JSON.parse(raw).memory.formationEnabled).toBe(false)
   }
 })
 

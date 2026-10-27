@@ -52,6 +52,7 @@ export interface ChatRequestTiming {
   streamEventCount?: number
   doneReceived?: boolean
   unsupportedContent?: boolean
+  responseShape?: 'missing-message' | 'missing-content' | 'null-content' | 'string-content' | 'unsupported-content'
   finishReason?: 'stop' | 'length' | 'tool_calls' | 'function_call' | 'content_filter' | 'other' | 'unknown'
   jsonParseFailure?: 'empty-content' | 'whitespace-only' | 'markdown-fence' | 'non-json-prefix' | 'json-syntax' | 'non-syntax-error'
 }

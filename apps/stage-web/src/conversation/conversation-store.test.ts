@@ -7,6 +7,33 @@ function storage() {
 }
 
 describe('conversation context persistence compatibility', () => {
+  it('round-trips append timestamps for every stored role and drops invalid times without backfilling', () => {
+    const backend = storage(), store = createLocalStorageConversationStore(backend), session = store.create()
+    session.messages = (['user', 'assistant', 'system', 'tool'] as const).map((role, i) => ({ role, content: role, createdAt: 1000 + i }))
+    session.messages.push(...[undefined, -1, Infinity, NaN, 9e15, '1000'].map(createdAt =>
+      ({ role: 'user', content: 'legacy or malformed', createdAt }) as never))
+    store.save(session)
+    const restored = createLocalStorageConversationStore(backend).get(session.id)!
+    expect(restored.messages.slice(0, 4).map(m => m.createdAt)).toEqual([1000, 1001, 1002, 1003])
+    expect(restored.messages.slice(4).every(m => !('createdAt' in m))).toBe(true)
+    store.save(restored)
+    expect(createLocalStorageConversationStore(backend).get(session.id)!.messages).toEqual(restored.messages)
+  })
+
+  it('does not replace missing or invalid legacy session dates with read/migration time', () => {
+    const backend = storage(), messages = [{ role: 'user', content: '手碟还没购买。' }]
+    backend.setItem('aisling.conversations.v1', JSON.stringify({ sessions: [
+      { id: 'missing', messages }, { id: 'invalid', createdAt: -10, updatedAt: 9e15, messages },
+    ] }))
+    const write = vi.spyOn(backend, 'setItem'), store = createLocalStorageConversationStore(backend)
+    expect(store.list().map(s => [s.createdAt, s.updatedAt, s.messages])).toEqual([[0, 0, messages], [0, 0, messages]])
+    expect(write).not.toHaveBeenCalled()
+    const legacy = storage()
+    legacy.setItem('aisling.conversation.v1', JSON.stringify(messages))
+    const migrated = createLocalStorageConversationStore(legacy).list()[0]!
+    expect(migrated).toMatchObject({ createdAt: 0, updatedAt: 0, messages })
+  })
+
   it('handles the desktop bridge false write result as an unsaved state', () => {
     const backend = storage(), store = createLocalStorageConversationStore(backend), session = store.create()
     vi.spyOn(backend, 'setItem').mockImplementation(() => false)

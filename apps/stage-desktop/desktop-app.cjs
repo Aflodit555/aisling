@@ -36,6 +36,7 @@ function desktopDiagnosticArguments() {
 /** Local JSONL only. A broken diagnostic sink must not affect capture or models. */
 function writeDesktopDiagnostic(record) {
   if (!desktopDiagnosticsEnabled || desktopDiagnosticFailed || !record || typeof record.type !== 'string') return
+  if (['chat-first-text', 'chat-tool-round', 'chat-provider-result'].includes(record.type)) return
   try {
     // Whitelist excludes prompts, desktop bodies, conversation and credentials.
     const keys = ['at', 'type', 'sampleId', 'judgmentId', 'judgmentSampleId', 'candidateId', 'objectId', 'candidateSource', 'targetFingerprint', 'change', 'intendedTarget', 'stimulusId', 'turnId',
@@ -45,8 +46,8 @@ function writeDesktopDiagnostic(record) {
       'score', 'reason', 'outcome', 'enabled', 'preference', 'replyTarget', 'replyLength',
       'replyFingerprint', 'delivered', 'replyHistoryWritten']
     let safe = Object.fromEntries(keys.filter(key => record[key] !== undefined).map(key => [key, record[key]]))
-    if (record.type.startsWith('p2-') || record.type === 'context-assembled' || record.type === 'chat-first-text' || record.type === 'chat-tool-round' || record.type === 'chat-provider-result') {
-      if (!['p2-a-update-start', 'p2-a-update-end', 'p2-a-settled', 'p2-a-http', 'p2-b-context', 'p2-b-request-start', 'p2-b-request-end', 'p2-b-delivery', 'context-assembled', 'chat-first-text', 'chat-tool-round', 'chat-provider-result'].includes(record.type)) return
+    if (record.type.startsWith('p2-') || record.type === 'context-assembled') {
+      if (!['p2-a-update-start', 'p2-a-update-end', 'p2-a-settled', 'p2-a-http', 'p2-b-context', 'p2-b-request-start', 'p2-b-request-end', 'p2-b-delivery', 'context-assembled'].includes(record.type)) return
       // P2/Context never accept raw scope strings, errors, prompts or content, even with reply-text opt-in.
       safe = { type: record.type }
       for (const key of ['updateId', 'scopeId', 'conversationId', 'turnId', 'activeAUpdateId']) {
@@ -57,8 +58,8 @@ function writeDesktopDiagnostic(record) {
         'batchCount', 'observationCount', 'contextChars', 'round', 'aCalls', 'aCallsAtStart', 'aCallsDuringTurn', 'httpStatus',
         'firstReceivedAt', 'lastReceivedAt', 'scheduledAt', 'queueDelayMs', 'snapshotToCommitMs', 'latestSnapshotToCommitMs',
         'contentChars', 'reasoningChars', 'contentDeltaCount', 'reasoningDeltaCount', 'streamEventCount',
-        'historyTokens', 'requiredTokens', 'selectedMessages', 'omittedMessages', 'basisCount', 'assemblyMs', 'firstTextMs',
-        'toolCallCount', 'repeatedToolCalls', 'toolFailures', 'toolResultChars']) {
+        'historyTokens', 'requiredTokens', 'selectedMessages', 'omittedMessages', 'basisCount',
+        'reflectionCount', 'reflectionChars', 'reflectionTokens', 'reflectionRetrievalMs']) {
         if (Number.isFinite(record[key]) && record[key] >= 0) safe[key] = record[key]
       }
       for (const key of ['committed', 'usable', 'executorReturned', 'settled', 'injected', 'delivered', 'statePresent', 'abortRequested',
@@ -66,6 +67,8 @@ function writeDesktopDiagnostic(record) {
         if (typeof record[key] === 'boolean') safe[key] = record[key]
       }
       if (typeof record.scopeMatched === 'boolean' || record.scopeMatched === 'unknown') safe.scopeMatched = record.scopeMatched
+      if (['injected', 'context-budget', 'disabled', 'conversation-error', 'unsafe-query', 'storage-error', 'empty',
+        'no-match', 'invalid-source', 'candidate-budget', 'context-error', 'unavailable'].includes(record.reflectionReason)) safe.reflectionReason = record.reflectionReason
       if (['stop', 'length', 'tool_calls', 'function_call', 'content_filter', 'other', 'unknown'].includes(record.finishReason)) safe.finishReason = record.finishReason
       if (['empty-content', 'whitespace-only', 'markdown-fence', 'non-json-prefix', 'json-syntax', 'non-syntax-error'].includes(record.jsonParseFailure)) safe.jsonParseFailure = record.jsonParseFailure
       if (['provider-enter', 'fetch-start', 'headers-received', 'response-json-start', 'response-json-end', 'response-json-failed',
@@ -77,8 +80,7 @@ function writeDesktopDiagnostic(record) {
       if (['committed', 'deadline', 'invalid-output', 'input-limit', 'executor-error', 'incompatible-result', 'disabled', 'disposed', 'reset',
         'invalid-observation', 'scope-changed', 'stale-observation', 'provider-changed', 'session-invalidated', 'feature-disabled',
         'no-ready-state', 'scope-unknown', 'state-expired', 'evidence-pending', 'target-mismatch',
-        'context-limit', 'context-error', 'context-unavailable', 'unsupported-source', 'injected', 'session-window', 'candidate-only',
-        'final-answer', 'tool-calls', 'round-limit'].includes(record.reason)) safe.reason = record.reason
+        'context-limit', 'context-error', 'context-unavailable', 'unsupported-source', 'injected', 'session-window', 'candidate-only'].includes(record.reason)) safe.reason = record.reason
     }
     if (desktopDiagnosticReplyText && record.type === 'delivery' && record.delivered === true && typeof record.replyText === 'string') {
       safe.replyText = record.replyText.slice(0, 2000)

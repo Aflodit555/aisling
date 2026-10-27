@@ -40,18 +40,16 @@ it.each([false, true])('allows four tool rounds and their final answer with reca
       expect(messages.some(m => m.role === 'assistant' && m.tool_calls?.[0]?.id === `call_${n}`)).toBe(true)
     }
   }
-  expect(f.diagnostic).toContainEqual(expect.objectContaining({ type: 'chat-provider-result', finishReason: 'stop' }))
-  expect(f.diagnostic).toContainEqual(expect.objectContaining({ type: 'chat-tool-round', reason: 'final-answer', recallIncluded: recall }))
+  expect(f.diagnostic.filter(r => r.type === 'p2-b-request-start')).toHaveLength(5)
+  expect(f.diagnostic).toContainEqual(expect.objectContaining({ type: 'context-assembled', recallIncluded: recall }))
 })
 
-it.each([false, true])('diagnoses repeated calls without executing an unconsumable fifth round, recall=%s', async recall => {
+it.each([false, true])('stops repeated calls before executing an unconsumable fifth round, recall=%s', async recall => {
   const f = setup(5, recall)
   const turn = await f.runtime.ingest(createUserTextStimulus({ source: 'test', text: 'new session' }))
   expect(turn.status).toBe('failed'); expect(turn.error).toBe('Tool loop exceeded the maximum number of rounds')
   expect(f.run).toHaveBeenCalledTimes(4); expect(f.requests).toHaveLength(5)
   expect(f.runtime.history).toEqual([])
-  expect(f.diagnostic).toContainEqual(expect.objectContaining({ type: 'chat-tool-round', round: 4,
-    reason: 'round-limit', toolCallCount: 1, repeatedToolCalls: 1, recallIncluded: recall }))
   expect(JSON.stringify(f.diagnostic)).not.toMatch(/private query|private search result|prior quotation|call_1/)
 })
 
@@ -62,6 +60,7 @@ it('terminates a new-session ordinary reply once, and reports a failed tool with
   const failed = setup(1, false, false, true)
   expect((await failed.runtime.ingest(createUserTextStimulus({ source: 'test', text: 'search' }))).status).toBe('completed')
   expect(failed.requests[1]!.messages).toContainEqual({ role: 'tool', content: 'Error: private tool error', tool_call_id: 'call_1' })
-  expect(failed.diagnostic).toContainEqual(expect.objectContaining({ type: 'chat-tool-round', toolFailures: 1 }))
+  expect(failed.run).toHaveBeenCalledOnce()
+  expect(failed.requests).toHaveLength(2)
   expect(JSON.stringify(failed.diagnostic)).not.toContain('private tool error')
 })

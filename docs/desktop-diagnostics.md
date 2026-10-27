@@ -7,7 +7,7 @@
 完全退出原 Electron，再在项目根目录启动。两个开关均默认关闭，只有字符串 `1` 才启用：
 
 ```powershell
-Set-Location 'D:\Project\demo\project_Aisling'
+# First open PowerShell in the repository root.
 $env:AISLING_DESKTOP_DIAGNOSTICS = '1'
 Remove-Item Env:AISLING_DESKTOP_DIAGNOSTICS_REPLY_TEXT -ErrorAction SilentlyContinue
 pnpm dev:desktop
@@ -22,13 +22,13 @@ $env:AISLING_DESKTOP_DIAGNOSTICS_REPLY_TEXT = '1'
 
 默认只记录回复长度与指纹。正文开关只允许记录成功交付的自主回复，最多 2000 字符，超出标明 `replyTextTruncated`；不记录普通对话、桌面正文、标题原文、媒体名称、完整 Prompt、API Key 或音频。
 
-Context 新增 `context-assembled`（每次实际请求前的历史估算 Token、必需输入估算 Token、选择／省略消息数、依据数量、组装毫秒数、`session-window` 或 `candidate-only`）和 `chat-first-text`（当前请求到首个非空文本的毫秒数）。两者经过 main 的严格元数据白名单，不保存历史正文或触发依据。`p2-b-request-start/end` 继续记录各轮实际模型请求耗时；`omittedMessages` 表示此次未选择的历史总数，不表示删除记录。
+`context-assembled` 保留每次请求的历史/必需输入估算 Token、选择/省略消息数、依据数量、召回是否注入，以及 `session-window` 或 `candidate-only`，用于核对 Context 边界。`p2-b-request-start/end` 保留各轮实际模型请求耗时；`omittedMessages` 表示此次未选择的历史总数，不表示删除记录。Memory/Provider/TTS 专项延迟埋点、首 Token 分析和事件循环采样已移除；P2 A 的可选请求阶段诊断继续保留。
 
-日志固定追加至 `D:\Project\demo\project_Aisling\.local\desktop-awareness-diagnostics.jsonl`，已由现有 `.gitignore` 的 `.local/` 忽略。main 首次写入时打印完整位置；默认关闭不创建目录/文件、不发诊断 IPC、不保留诊断采样或关联表。关闭不删除之前的日志。
+日志追加至仓库下的 `.local/desktop-awareness-diagnostics.jsonl`，已由 `.gitignore` 忽略。main 首次写入时打印完整位置；默认关闭不创建目录/文件、不发诊断 IPC、不保留诊断采样或关联表。关闭不删除之前的日志。
 
 ```powershell
-# 在另一个 PowerShell 查看
-Get-Content -LiteralPath 'D:\Project\demo\project_Aisling\.local\desktop-awareness-diagnostics.jsonl' -Encoding UTF8 -Tail 40 -Wait
+# 在另一个位于仓库根目录的 PowerShell 查看
+Get-Content -LiteralPath '.local/desktop-awareness-diagnostics.jsonl' -Encoding UTF8 -Tail 40 -Wait
 
 # 完全退出 Electron；删除当前 shell 的开关，再重新启动
 Remove-Item Env:AISLING_DESKTOP_DIAGNOSTICS -ErrorAction SilentlyContinue
@@ -65,7 +65,7 @@ P1 session 的 diagnostics-started 标明 schema=desktop-candidate-v1。既有�
 可按 ID 快速筛选（必须同时保留其 sample、原缓存判断和相邻采样）：
 
 ```powershell
-$diagPath = 'D:\Project\demo\project_Aisling\.local\desktop-awareness-diagnostics.jsonl'
+$diagPath = Join-Path (Get-Location) '.local/desktop-awareness-diagnostics.jsonl'
 Get-Content -LiteralPath $diagPath -Encoding UTF8 | ForEach-Object { $_ | ConvertFrom-Json } |
   Where-Object { $_.judgmentId -eq '<judgmentId>' } |
   Format-Table at,type,sampleId,candidateId,objectId,stimulusId,score,reason

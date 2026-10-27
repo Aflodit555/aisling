@@ -32,6 +32,7 @@ const activeTitle = computed(() => (
 ))
 
 function formatTime(timestamp: number): string {
+  if (!timestamp) return '—'
   const date = new Date(timestamp)
   const now = new Date()
   const sameDay = date.toDateString() === now.toDateString()

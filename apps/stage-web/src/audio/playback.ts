@@ -1,11 +1,10 @@
 import type { SpeechAudio } from '@aisling/core'
 
-let current: HTMLAudioElement | undefined
+let cancelCurrent: (() => void) | undefined
 
 /** Stops whatever is currently playing. */
 export function stopPlayback(): void {
-  current?.pause()
-  current = undefined
+  cancelCurrent?.()
 }
 
 /**
@@ -15,7 +14,7 @@ export function stopPlayback(): void {
  */
 export function playSpeechResult(
   audio: SpeechAudio,
-  hooks?: { onElement?: (element: HTMLAudioElement) => void },
+  hooks?: { onElement?: (element: HTMLAudioElement) => void; onPlaying?: () => void; onWaiting?: () => void },
 ): Promise<void> {
   stopPlayback()
 
@@ -26,15 +25,26 @@ export function playSpeechResult(
       : audio.url
 
     const element = new Audio(url)
-    current = element
     hooks?.onElement?.(element)
+    let settled = false
 
     const cleanup = () => {
+      if (settled) return
+      settled = true
+      element.onended = element.onerror = element.onplaying = element.onwaiting = null
       if (fromBytes)
         URL.revokeObjectURL(url)
-      if (current === element)
-        current = undefined
+      if (cancelCurrent === cancel)
+        cancelCurrent = undefined
     }
+    const cancel = () => {
+      element.pause()
+      cleanup()
+      resolve()
+    }
+    cancelCurrent = cancel
+    element.onplaying = () => hooks?.onPlaying?.()
+    element.onwaiting = () => hooks?.onWaiting?.()
 
     element.onended = () => {
       cleanup()

@@ -5,7 +5,7 @@ const { app, BaseWindow, Menu, nativeImage, screen } = require('electron')
 const assert = require('node:assert/strict')
 const path = require('node:path')
 const os = require('node:os')
-const { writeFileSync } = require('node:fs')
+const { writeFileSync, mkdtempSync, readFileSync, existsSync } = require('node:fs')
 const candidateJudgeRequests = []
 if (process.env.AISLING_DESKTOP_CANDIDATE_SMOKE === '1') {
   globalThis.fetch = async (_url, options) => {
@@ -26,7 +26,7 @@ app.disableHardwareAcceleration()
 delete process.env.AISLING_STAGE_URL
 // Replies would otherwise send the smoke conversation to the real Jev emotion judge.
 delete process.env.TYPESAFE_API_KEY
-app.setPath('userData', path.join(os.tmpdir(), `aisling-desktop-prod-smoke-${process.pid}`))
+app.setPath('userData', mkdtempSync(path.join(os.tmpdir(), 'aisling-desktop-prod-smoke-')))
 const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out'); app.exit(1) }, 45000)
 
 ;(async () => {
@@ -69,6 +69,29 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
   assert.equal(result.nodeAccess, 'undefined')
   assert.equal(result.origin, 'aisling://stage')
   assert.ok(result.appChildCount > 0)
+
+  const backgroundThrottling = contents.getBackgroundThrottling()
+  contents.setBackgroundThrottling(false)
+  const characterRendered = await contents.executeJavaScript(`(async () => {
+    for (let n = 0; n < 200; n++) {
+      const canvas = document.querySelector('.live2d-canvas')
+      if (canvas && !document.querySelector('.renderer-state')) {
+        await new Promise(requestAnimationFrame)
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl')
+        const pixels = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4)
+        gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels)
+        return pixels.some((value, index) => index % 4 === 3 && value > 0)
+      }
+      if (document.querySelector('.renderer-error')) return false
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    return false
+  })()`)
+  assert.equal(characterRendered, true, 'Live2D must draw visible pixels, not just mount a canvas')
+  const screenshot = path.join(app.getPath('userData'), 'stage-prod-smoke.png')
+  await contents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+  writeFileSync(screenshot, (await contents.capturePage()).toPNG())
+  contents.setBackgroundThrottling(backgroundThrottling)
 
   if (process.env.AISLING_SPEECH_SMOKE === '1') {
     // Local tone only: exercise the production relay, audio decoder and real mouth source without paid calls.
@@ -140,8 +163,88 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     return
   }
 
+  if (process.env.AISLING_FORMATION_SMOKE === '1') {
+    const report = await contents.executeJavaScript(String.raw`(async () => {
+      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
+      const stage = pinia._s.get('stage'), settings = pinia._s.get('settings')
+      async function until(test, phase) {
+        for (let n = 0; n < 300; n++) { if (test()) return; await new Promise(resolve => setTimeout(resolve, 10)) }
+        throw new Error('Formation smoke timed out at ' + phase + ': ' + JSON.stringify(stage.formationStatus))
+      }
+      await until(() => settings.loaded, 'settings')
+      const defaultOff = !stage.formationStatus.enabled && !settings.config.memory.formationEnabled
+        && window.aislingDesktop.reflectionStorage.read().value === null
+      let finish, ordinaryCalls = 0, backgroundCalls = 0, request, ordinaryRequest
+      settings.activeChatProvider = { id: 'formation-smoke', complete: async input => {
+        if (input.messages[0].content.startsWith('You form append-only')) {
+          backgroundCalls++; request = input
+          return new Promise(resolve => { finish = resolve })
+        }
+        ordinaryCalls++; ordinaryRequest = input; return { text: '这是已经交付的回复。' }
+      } }
+      await settings.setMemoryFormationEnabled(true)
+      await until(() => stage.formationStatus.lastEvent === 'ready', 'formation-init')
+      for (const text of ['纸舟实验版已发布。', '纸舟还有识别错误。', '纸舟识别错误已修复。']) {
+        stage.send(text); await until(() => !stage.sending, 'chat')
+      }
+      await until(() => backgroundCalls === 1, 'batch')
+      const chatDidNotWait = stage.sending === false
+      finish({ text: JSON.stringify({ reflections: [{ content: '用户报告纸舟实验版已发布。', kind: 'project-state', basis: 'direct', tags: ['纸舟'], sources: ['E1'], related: [] }] }) })
+      await until(() => stage.formation.inspect().reflections.length === 1, 'commit')
+      const state = stage.formation.inspect(), reflection = state.reflections[0], source = reflection.sourceRefs[0]
+      const stored = JSON.parse(window.aislingDesktop.storage.getItem('aisling.conversations.v1')).sessions
+        .find(session => session.id === source.sessionId).messages[source.messageIndex]
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(stored)))
+      const actual = Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, '0')).join('')
+      await settings.setMemoryFormationEnabled(false)
+      stage.newConversation()
+      stage.send('纸舟实验版目前已经撤回发布。'); await until(() => !stage.sending, 'reflection-recall')
+      const reflectionBlock = ordinaryRequest.messages.find(m => m.content.startsWith('[Historical Aisling reflections]'))
+      const recallBlock = ordinaryRequest.messages.find(m => m.content.startsWith('[Cross-session recall evidence]'))
+      return { defaultOff, chatDidNotWait, ordinaryCalls, backgroundCalls,
+        reflectionRecalled: !!reflectionBlock && reflectionBlock.content.includes(reflection.content),
+        bothMemories: !!reflectionBlock && !!recallBlock,
+        reflectionIdsIsolated: !!reflectionBlock && !reflectionBlock.content.includes(reflection.id) && !reflectionBlock.content.includes(source.sessionId),
+        currentInputPreserved: ordinaryRequest.messages.at(-1).content === '纸舟实验版目前已经撤回发布。',
+        sourceResolves: stored.role === 'user' && stored.content === '纸舟实验版已发布。' && actual === source.digest,
+        memoryEnabled: settings.config.memory.enabled === true,
+        idsIsolated: !JSON.stringify(request).includes(stage.activeSessionId) && !JSON.stringify(request).includes('messageIndex'),
+        batchComplete: state.batches[0].status === 'completed' && state.batches[0].sourceRefs.length === 6 }
+    })()`)
+    for (const key of ['defaultOff', 'chatDidNotWait', 'sourceResolves', 'memoryEnabled', 'idsIsolated', 'batchComplete',
+      'reflectionRecalled', 'bothMemories', 'reflectionIdsIsolated', 'currentInputPreserved']) assert.equal(report[key], true, key)
+    assert.equal(report.ordinaryCalls, 4); assert.equal(report.backgroundCalls, 1)
+    const file = path.join(app.getPath('userData'), 'aisling-reflections.v1.json')
+    assert.equal(existsSync(file), true)
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).reflections.length, 1)
+    assert.equal(JSON.parse(readFileSync(path.join(app.getPath('userData'), 'aisling-store.json'), 'utf8')).reflections, undefined)
+    await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
+    const recovered = await contents.executeJavaScript(`(async () => {
+      for (let n = 0; n < 200; n++) {
+        const pinia = document.querySelector('#app')?.__vue_app__?.config.globalProperties.$pinia
+        const stage = pinia?._s.get('stage'), settings = pinia?._s.get('settings')
+        if (settings?.loaded && stage && !stage.formationStatus.enabled) {
+          const state = stage.formation.inspect()
+          let request
+          settings.activeChatProvider = { id: 'reflection-restart-smoke', complete: async input => { request = input; return { text: 'ok' } } }
+          stage.send('纸舟实验版发布情况？')
+          for (let i = 0; i < 200 && stage.sending; i++) await new Promise(resolve => setTimeout(resolve, 10))
+          return state.reflections.length === 1 && state.batches[0].status === 'completed' && stage.formationStatus.calls === 0
+            && request?.messages.some(m => m.content.startsWith('[Historical Aisling reflections]'))
+        }
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      return false
+    })()`)
+    assert.equal(recovered, true)
+    console.log(JSON.stringify({ formationSmoke: 'passed', modelResponses: 'mocked', separateFile: true, restartDeduplicated: recovered, ...report }))
+    clearTimeout(timeout); win.destroy(); app.exit(0); return
+  }
+
   if (process.env.AISLING_MEMORY_SMOKE === '1') {
     contents.setBackgroundThrottling(false)
+    // Hidden windows can stall route-leave animations; load the settings route directly.
+    await contents.loadURL('aisling://stage/settings/memory')
     const report = await contents.executeJavaScript(String.raw`(async () => {
       const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
       const stage = pinia._s.get('stage'), settings = pinia._s.get('settings'), requests = []
@@ -159,12 +262,14 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       const saved = () => JSON.parse(window.aislingDesktop.storage.getItem('aisling.conversations.v1')).sessions
       const marker = '[Cross-session recall evidence]'
       const evidence = request => request.messages.find(message => message.content?.startsWith(marker))?.content
-      await document.querySelector('#app').__vue_app__.config.globalProperties.$router.push('/settings/memory')
       for (let n = 0; n < 100 && !document.querySelector('.settings-module input[role="switch"]'); n++)
         await new Promise(resolve => setTimeout(resolve, 10))
       const toggle = document.querySelector('.settings-module input[role="switch"]')
       if (!toggle) throw new Error('Memory settings switch did not mount: ' + document.body.innerText.slice(0, 500))
-      const consentCopy = document.querySelector('.settings-module').textContent.includes('selected LLM Provider')
+      const defaultOn = toggle.checked && stage.memoryRecallEnabled === true
+      const formationDefaultOff = document.querySelectorAll('.settings-module input[role="switch"]').length === 2
+        && document.querySelectorAll('.settings-module input[role="switch"]')[1].checked === false
+      const formationCopy = document.querySelector('.settings-module').textContent.includes('May make additional LLM requests.')
       async function setMemory(enabled) {
         toggle.checked = enabled
         toggle.dispatchEvent(new Event('change', { bubbles: true }))
@@ -175,7 +280,28 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         }
         throw new Error('Memory consent did not persist')
       }
-      const oldId = stage.activeSessionId, defaultOff = stage.memoryRecallEnabled === false
+      async function setFormation(enabled) {
+        for (let n = 0; n < 100 && document.querySelectorAll('.settings-module input[role="switch"]').length !== 2; n++)
+          await new Promise(resolve => setTimeout(resolve, 10))
+        const formation = document.querySelectorAll('.settings-module input[role="switch"]')[1]
+        if (!formation) throw new Error('Formation switch did not expand')
+        formation.checked = enabled
+        formation.dispatchEvent(new Event('change', { bubbles: true }))
+        for (let n = 0; n < 100; n++) {
+          const config = JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1') || '{}')
+          if (config.memory?.formationEnabled === enabled && stage.formationStatus.enabled === enabled) return
+          await new Promise(resolve => setTimeout(resolve, 10))
+        }
+        throw new Error('Formation switch did not persist')
+      }
+      await setFormation(true)
+      await setMemory(false)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const collapsedWhenOff = document.querySelectorAll('.settings-module input[role="switch"]').length === 1
+        && settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
+      await setMemory(true)
+      const formationNotReenabled = settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
+      const oldId = stage.activeSessionId
       reply = '萤桥发布：我猜它稳定了。'
       stage.send('萤桥发布：2026-03-01 是实验版。'); await settled()
       reply = '萤桥发布：我之前的判断错了。'
@@ -203,7 +329,8 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       const packed = evidence(requests.at(-1)), records = JSON.parse(packed.split('\n').at(-1))
       const scopes = new Set(records.map(record => record.sourceScope))
       const positions = records.map(record => record.position)
-      const report = { defaultOff, consentCopy, autonomousIsolated, offIsolated, injected: !!packed,
+      const report = { defaultOn, formationDefaultOff, formationCopy, collapsedWhenOff, formationNotReenabled,
+        autonomousIsolated, offIsolated, injected: !!packed,
         rolesSeparated: ['stored-user-report', 'stored-assistant-utterance', 'stored-autonomous-utterance'].every(scope => scopes.has(scope)),
         quotesIntact: stored.every(message => records.some(record => record.content === message.content)),
         positionOrder: positions.every((position, i) => i === 0 || position > positions[i - 1]),
@@ -220,7 +347,9 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       const size = text => new TextEncoder().encode(text).length
       const contextBounded = requests.every(request => request.messages.reduce((n, message) => n + 8 + size(message.content || ''),
         request.tools?.length ? size(JSON.stringify(request.tools)) : 0) <= 14336)
-      return { ...report, followupAnchored, contextBounded, deletionEffective: !evidence(requests.at(-1)), calls: requests.length }
+      const deletionEffective = !evidence(requests.at(-1))
+      await setFormation(true)
+      return { ...report, followupAnchored, contextBounded, deletionEffective, calls: requests.length }
     })()`)
     for (const [key, value] of Object.entries(report)) if (key !== 'calls') assert.equal(value, true, key)
     assert.equal(report.calls, 9)
@@ -235,12 +364,18 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
             await new Promise(resolve => setTimeout(resolve, 20))
             const toggle = document.querySelector('.settings-module input[role="switch"]')
             const restored = settings.config.memory.enabled && stage.memoryRecallEnabled && toggle?.checked === true
+              && settings.config.memory.formationEnabled && stage.formationStatus.enabled
+              && document.querySelectorAll('.settings-module input[role="switch"]')[1]?.checked === true
             if (toggle?.checked) {
               toggle.checked = false
               toggle.dispatchEvent(new Event('change', { bubbles: true }))
             }
+            await new Promise(resolve => setTimeout(resolve, 0))
             return { restored, disabled: settings.config.memory.enabled === false && stage.memoryRecallEnabled === false
-              && JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).memory.enabled === false,
+              && settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
+              && JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).memory.formationEnabled === false
+              && JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).memory.enabled === false
+              && document.querySelectorAll('.settings-module input[role="switch"]').length === 1,
               checked: toggle?.checked }
           }
           await new Promise(resolve => setTimeout(resolve, 10))
@@ -447,7 +582,6 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     globalThis.fetch = nativeFetch
   }
 
-  const screenshot = path.join(app.getPath('userData'), 'stage-prod-smoke.png')
   const desktopScreenshot = path.join(app.getPath('userData'), 'desktop-prod-smoke.png')
   const entryScreenshot = path.join(app.getPath('userData'), 'desktop-entry-smoke.png')
   if (process.env.AISLING_LAYOUT_SMOKE === '1') {

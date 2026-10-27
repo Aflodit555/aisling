@@ -18,3 +18,10 @@ dsh-task.txt
 codex-task.txt
 .agent-work/
 .local/
+
+# Local runtime data and exported test/release artifacts
+aisling-store.json
+aisling-reflections.v1.json
+*.jsonl
+*.tsbuildinfo
+artifacts/

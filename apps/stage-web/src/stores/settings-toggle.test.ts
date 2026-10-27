@@ -36,13 +36,13 @@ it('persists module switches and removes disabled providers from new calls', asy
   expect(JSON.parse(data.get('aisling.config.v1')!).speech.enabled).toBe(false)
 })
 
-it('persists Memory consent across restarts without replacing the chat provider', async () => {
+it('defaults Memory on and persists opt-out across restarts without replacing the chat provider', async () => {
   const data = new Map<string, string>()
   vi.stubGlobal('window', { localStorage: { getItem: (key: string) => data.get(key) ?? null,
     setItem: (key: string, value: string) => { data.set(key, value) } } })
   setActivePinia(createPinia())
   const settings = useSettingsStore(); await settings.load()
-  expect(settings.config.memory.enabled).toBe(false)
+  expect(settings.config.memory).toEqual({ enabled: true, formationEnabled: false })
   const provider = { id: 'unchanged', complete: vi.fn(async () => ({ text: '' })) }
   settings.activeChatProvider = provider
   await settings.setMemoryEnabled(true)
@@ -54,5 +54,32 @@ it('persists Memory consent across restarts without replacing the chat provider'
   setActivePinia(createPinia())
   const disabled = useSettingsStore(); await disabled.load()
   expect(disabled.config.memory.enabled).toBe(false)
+  expect(provider.complete).not.toHaveBeenCalled()
+})
+
+it('persists both switches and requires a new Formation opt-in after Memory is turned off', async () => {
+  const data = new Map<string, string>()
+  vi.stubGlobal('window', { localStorage: { getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => { data.set(key, value) } } })
+  setActivePinia(createPinia())
+  const settings = useSettingsStore(); await settings.load()
+  expect(settings.config.memory.formationEnabled).not.toBe(true)
+  await settings.setMemoryFormationEnabled(true)
+  setActivePinia(createPinia())
+  const enabled = useSettingsStore(); await enabled.load()
+  expect(enabled.config.memory).toEqual({ enabled: true, formationEnabled: true })
+  const provider = { id: 'unchanged', complete: vi.fn(async () => ({ text: '' })) }
+  enabled.activeChatProvider = provider
+  await enabled.setMemoryEnabled(false)
+  expect(enabled.activeChatProvider).toBe(provider)
+  expect(enabled.config.memory).toEqual({ enabled: false, formationEnabled: false })
+  expect(JSON.parse(data.get('aisling.config.v1')!).memory).toEqual({ enabled: false, formationEnabled: false })
+  await enabled.setMemoryFormationEnabled(true)
+  expect(enabled.config.memory.formationEnabled).toBe(false)
+  setActivePinia(createPinia())
+  const restarted = useSettingsStore(); await restarted.load()
+  expect(restarted.config.memory).toEqual({ enabled: false, formationEnabled: false })
+  await restarted.setMemoryEnabled(true)
+  expect(restarted.config.memory).toEqual({ enabled: true, formationEnabled: false })
   expect(provider.complete).not.toHaveBeenCalled()
 })

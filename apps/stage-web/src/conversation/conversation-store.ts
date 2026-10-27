@@ -1,10 +1,11 @@
-import { normalizeAutonomousContext, type ChatMessage, type ConversationMessage } from '@aisling/core'
+import { isValidTimestamp, normalizeAutonomousContext, type ChatMessage, type ConversationMessage } from '@aisling/core'
 
 import type { PersistentStorage } from '../storage/desktop-storage'
 
 export interface ConversationSession {
   id: string
   title: string
+  /** Zero means unknown for legacy sessions, never their migration/read time. */
   createdAt: number
   updatedAt: number
   /** Full UI/persistence history (longer than the model context window). */
@@ -57,6 +58,7 @@ function normalizeMessages(messages: unknown[]): ConversationMessage[] {
     const context = message.role === 'assistant'
       ? normalizeAutonomousContext((message as ConversationMessage).autonomousContext) : undefined
     return { role: message.role, content: message.content,
+      ...(isValidTimestamp((message as ConversationMessage).createdAt) ? { createdAt: (message as ConversationMessage).createdAt } : {}),
       ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
       ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
       ...(context ? { autonomousContext: context } : {}) }
@@ -73,8 +75,8 @@ function normalizeSession(value: unknown): ConversationSession | undefined {
   return {
     id: record.id,
     title: typeof record.title === 'string' && record.title ? record.title : DEFAULT_SESSION_TITLE,
-    createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now(),
-    updatedAt: typeof record.updatedAt === 'number' ? record.updatedAt : Date.now(),
+    createdAt: isValidTimestamp(record.createdAt) ? record.createdAt : 0,
+    updatedAt: isValidTimestamp(record.updatedAt) ? record.updatedAt : 0,
     messages,
   }
 }
@@ -114,12 +116,11 @@ export function createLocalStorageConversationStore(storage: PersistentStorage =
         const parsed = JSON.parse(legacy) as unknown
         if (Array.isArray(parsed)) {
           const messages = normalizeMessages(parsed)
-          const now = Date.now()
           const session: ConversationSession = {
             id: crypto.randomUUID(),
             title: deriveTitle(messages),
-            createdAt: now,
-            updatedAt: now,
+            createdAt: 0,
+            updatedAt: 0,
             messages,
           }
           // Keep the migrated identity stable until the first successful write.

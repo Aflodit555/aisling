@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('aislingDesktop', {
       ipcRenderer.send('aisling:desktop-awareness:diagnostic', record)
   },
   judgeEmotion: conversation => ipcRenderer.invoke('aisling:emotion:judge', conversation),
+  reflectionStorage: {
+    read: () => ipcRenderer.sendSync('aisling:reflections:read'),
+    write: value => ipcRenderer.sendSync('aisling:reflections:write', value),
+  },
   storage: {
     getItem: key => ipcRenderer.sendSync('aisling:storage:get', key),
     setItem: (key, value) => ipcRenderer.sendSync('aisling:storage:set', key, value),

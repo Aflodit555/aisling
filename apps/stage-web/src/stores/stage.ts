@@ -1,6 +1,6 @@
 import { createAutonomousContext, type CharacterOutput, type ChatMessage, type ConversationMessage, type ImageInput, type Stimulus } from '@aisling/core'
 import { defineStore } from 'pinia'
-import { computed, onScopeDispose, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, onScopeDispose, reactive, ref, shallowRef, toRaw, watch } from 'vue'
 
 import { createWebVisualStimulus } from '../adapter/vision'
 import { createWebTextStimulus } from '../adapter/web'
@@ -17,8 +17,10 @@ import { CAPTURE_MAX_GAP_MS, mediaCandidateMatches, playingMedia } from '../runt
 import { PREFERENCE_ACKNOWLEDGEMENTS, recognizeInteractionPreference } from '../runtime/interaction-preference'
 import { resolvePersistentStorage } from '../storage/desktop-storage'
 import { createSituationWorkingState, isSituationCorrection, providerSituationExecutor } from '../runtime/situation-working-state'
-import { situationEnableThinking } from '../runtime/provider-factory'
+import { userTextEnableThinking, situationEnableThinking } from '../runtime/provider-factory'
 import { recallForModel, retrieveRecall, type RecallSource } from '../runtime/memory-recall'
+import { createReflectionFormation } from '../runtime/reflection-formation'
+import { createReflectionRecall } from '../runtime/reflection-recall'
 import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
@@ -93,9 +95,28 @@ export const useStageStore = defineStore('stage', () => {
   const sessionMessages = ref<ConversationMessage[]>([...activeSession.messages])
   const sessionsList = ref<ConversationSession[]>(conversationStore.list())
   const memoryRecallEnabled = computed(() => settings.config.memory.enabled)
+  // Developer-only comparison; never persist an experiment as the user's Memory preference.
+  const recallMode = ref<'A' | 'B' | 'C'>('C')
+  const memoryRecallMode = computed(() => recallMode.value)
   const memoryRecallDiagnostic = shallowRef<{ sessionIds: string[]; rankedSessionIds: string[]; packingOmittedSessionIds: string[];
-    records: number; durationMs: number; sources: RecallSource[] }>()
+    records: number; sources: RecallSource[] }>()
   watch(memoryRecallEnabled, () => { memoryRecallDiagnostic.value = undefined }, { flush: 'sync' })
+  const formationStatus = shallowRef({ enabled: false, running: false, calls: 0, lastEvent: 'disabled' })
+  const reflectionRecall = createReflectionRecall(() => formation.inspect())
+  const formation = createReflectionFormation({
+    storage: { read: () => window.aislingDesktop?.reflectionStorage?.read() ?? { ok: false },
+      write: value => window.aislingDesktop?.reflectionStorage?.write(value) ?? false },
+    getSessions: () => {
+      const sessions = conversationStore.list()
+      if (conversationStore.getPersistenceError()) throw new Error('conversation-read')
+      return sessions
+    },
+    getProvider: () => settings.activeChatProvider,
+    changed: () => { formationStatus.value = { ...formation.status }; reflectionRecall.invalidate() },
+  })
+  watch(() => settings.loaded && settings.config.memory.enabled && settings.config.memory.formationEnabled === true,
+    enabled => { void formation.setEnabled(enabled) }, { flush: 'sync', immediate: true })
+  onScopeDispose(() => formation.dispose())
 
   const diagnostic = window.aislingDesktop?.desktopDiagnostics?.enabled
     ? (record: import('../runtime/autonomous').DesktopDiagnosticRecord) => {
@@ -110,18 +131,24 @@ export const useStageStore = defineStore('stage', () => {
 
   const runtime = createAislingRuntime({
     getChatProvider: () => settings.activeChatProvider,
+    getUserTextEnableThinking: () => userTextEnableThinking(settings.config.consciousness),
     getTools: () => settings.activeTools,
     history: activeSession.messages,
     getRecallEvidence: stimulus => {
-      if (!memoryRecallEnabled.value) return
       memoryRecallDiagnostic.value = undefined
-      const startedAt = performance.now()
-      const sessions = conversationStore.list()
+      if (!memoryRecallEnabled.value || recallMode.value === 'B') return
+      // Submission already refreshed this snapshot after saving the current input.
+      const sessions = toRaw(sessionsList.value)
       if (conversationStore.getPersistenceError()) return
       const { evidence, ...summary } = retrieveRecall(sessions, activeSessionId.value, stimulus.text)
       const projected = evidence ? recallForModel(evidence) : undefined
-      memoryRecallDiagnostic.value = { ...summary, sources: projected?.sources ?? [], durationMs: performance.now() - startedAt }
+      memoryRecallDiagnostic.value = { ...summary, sources: projected?.sources ?? [] }
       return projected?.evidence
+    },
+    getReflectionContext: stimulus => {
+      if (!memoryRecallEnabled.value || recallMode.value === 'A') return { candidates: [], durationMs: 0, reason: 'disabled' }
+      if (conversationStore.getPersistenceError()) return { candidates: [], durationMs: 0, reason: 'conversation-error' }
+      return reflectionRecall.retrieve(toRaw(sessionsList.value), activeSessionId.value, stimulus.text)
     },
     getSituationContext: (stimulus, turnId) => situation.contextFor(stimulus, diagnostic && turnId
       ? selection => { turnDiagnostics.set(turnId, { ...selection }) } : undefined),
@@ -134,7 +161,7 @@ export const useStageStore = defineStore('stage', () => {
           conversationId: activeSessionId.value, aCallsAtStart: situation.status.calls })
       }
       const trace = turnDiagnostics.get(record.turnId)
-      diagnostic({ ...trace, ...record, reason: ['context-assembled', 'chat-tool-round', 'chat-provider-result'].includes(record.type) ? record.reason : trace?.reason ?? record.reason,
+      diagnostic({ ...trace, ...record, reason: record.type === 'context-assembled' ? record.reason : trace?.reason ?? record.reason,
         aCalls: situation.status.calls, activeAUpdateId: situation.activeUpdateId() })
     } : undefined,
   })
@@ -145,6 +172,12 @@ export const useStageStore = defineStore('stage', () => {
   const sending = ref(false)
   const searching = ref(false)
   const visionProcessing = ref(false)
+  function setMemoryRecallMode(mode: 'A' | 'B' | 'C'): void {
+    if (!['A', 'B', 'C'].includes(mode)) throw new Error('Memory Recall mode must be A, B or C')
+    if (sending.value || visionProcessing.value) throw new Error('Wait for the current turn before changing Memory Recall mode')
+    recallMode.value = mode
+    memoryRecallDiagnostic.value = undefined
+  }
   const lastTurn = shallowRef<{ stimulus: Stimulus; output: CharacterOutput } | undefined>()
   const autonomous = reactive(createAutonomousState())
   const desktopBridgeState = ref<DesktopBridgeState>(hasDesktopBridge() ? 'connected' : 'unavailable')
@@ -271,8 +304,11 @@ export const useStageStore = defineStore('stage', () => {
 
   function persistActiveSession(): void {
     const session = conversationStore.get(activeSessionId.value)
-    if (!session)
+    if (!session) {
+      sessionsList.value = conversationStore.list()
+      syncPersistenceStatus()
       return
+    }
     session.messages = [...sessionMessages.value]
     session.updatedAt = Date.now()
     conversationStore.save(session)
@@ -291,8 +327,8 @@ export const useStageStore = defineStore('stage', () => {
         autonomousController.setPreference(preference, stimulus.id)
         if (preference === 'quiet') cancelAutonomous('quiet-in-flight')
         const acknowledgement = [
-          { role: 'user' as const, content: stimulus.text },
-          { role: 'assistant' as const, content: PREFERENCE_ACKNOWLEDGEMENTS[preference] },
+          { role: 'user' as const, content: stimulus.text, createdAt: Date.now() },
+          { role: 'assistant' as const, content: PREFERENCE_ACKNOWLEDGEMENTS[preference], createdAt: Date.now() },
         ]
         messages.value = [...messages.value, ...acknowledgement]
         sessionMessages.value = [...sessionMessages.value, ...acknowledgement]
@@ -324,10 +360,12 @@ export const useStageStore = defineStore('stage', () => {
       autonomousController.recordDecision(stimulus.source, 'allowed', 'output-started', stimulus.id, activeAutonomous.stimulus.candidate)
     }
     partialIndex = -1
+    const formationSessionId = activeSessionId.value
+    const formationUserIndex = sessionMessages.value.length
     const userMessage = stimulusToUserMessage(stimulus)
     if (userMessage) {
       messages.value = [...messages.value, { role: 'user', content: userMessage.content }]
-      sessionMessages.value = [...sessionMessages.value, userMessage]
+      sessionMessages.value = [...sessionMessages.value, { ...userMessage, createdAt: Date.now() }]
 
       const session = conversationStore.get(activeSessionId.value)
       if (session && session.title === DEFAULT_SESSION_TITLE && userMessage.content.trim()) {
@@ -375,12 +413,19 @@ export const useStageStore = defineStore('stage', () => {
         lastTurn.value = { stimulus: turn.stimulus, output: turn.output }
         if (partialIndex >= 0)
           messages.value[partialIndex] = { role: 'assistant', content: turn.output.text }
-        else
+        else {
           messages.value.push({ role: 'assistant', content: turn.output.text })
-        const delivered: ConversationMessage = { role: 'assistant', content: turn.output.text,
-          ...(autonomousTurn ? { autonomousContext: createAutonomousContext(autonomousTurn.stimulus.candidate, Date.now()) } : {}) }
+        }
+        const createdAt = Date.now()
+        const delivered: ConversationMessage = { role: 'assistant', content: turn.output.text, createdAt,
+          ...(autonomousTurn ? { autonomousContext: createAutonomousContext(autonomousTurn.stimulus.candidate, createdAt) } : {}) }
         sessionMessages.value = [...sessionMessages.value, delivered]
+        void speech.speak(turn.output.text)
         persistActiveSession()
+        if (!conversationStore.getPersistenceError() && (stimulus.kind === 'user-text' || autonomousTurn)) {
+          const indices = autonomousTurn ? [sessionMessages.value.length - 1] : [formationUserIndex, sessionMessages.value.length - 1]
+          void formation.delivered(formationSessionId, indices)
+        }
         diagnosticDelivered = true; diagnosticOutcome = 'delivered'
         if (autonomousTurn) {
           const replyHistoryWritten = autonomousController.completed(autonomousTurn.stimulus, true, turn.output.text)
@@ -390,7 +435,6 @@ export const useStageStore = defineStore('stage', () => {
             turnId: turn.id, text: turn.output.text, delivered: true, replyHistoryWritten,
           })
         }
-        void speech.speak(turn.output.text)
         void emotion.judge(sessionMessages.value)
       }
       else {
@@ -458,6 +502,7 @@ export const useStageStore = defineStore('stage', () => {
     const session = conversationStore.get(id)
     if (!session)
       return
+    void formation.flush(activeSessionId.value)
     activeSessionId.value = id
     situation.reset()
     conversationStore.setActiveId(id)
@@ -472,6 +517,7 @@ export const useStageStore = defineStore('stage', () => {
     autonomousController.noteHumanInteraction()
     if (sending.value || visionProcessing.value)
       return
+    void formation.flush(activeSessionId.value)
     const session = conversationStore.create()
     activeSessionId.value = session.id
     situation.reset()
@@ -500,7 +546,11 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   return {
+    formationStatus,
+    formation,
     memoryRecallEnabled,
+    memoryRecallMode,
+    setMemoryRecallMode,
     memoryRecallDiagnostic,
     autonomous,
     situationStatus,

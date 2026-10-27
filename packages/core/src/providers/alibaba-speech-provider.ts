@@ -116,6 +116,7 @@ export function createAlibabaSpeechProvider(options: AlibabaSpeechProviderOption
     try {
       response = await fetchImpl(relayUrl, {
         method: 'POST',
+        signal: request.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
@@ -175,6 +176,7 @@ export function createAlibabaSpeechProvider(options: AlibabaSpeechProviderOption
         try {
           response = await fetchImpl(relayUrl, {
             method: 'POST',
+            signal: request.signal,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               text,
@@ -233,6 +235,7 @@ export function createAlibabaSpeechProvider(options: AlibabaSpeechProviderOption
         catch (error) {
           sink.onError?.(error instanceof Error ? error : new Error(String(error)))
         }
+        finally { reader.releaseLock() }
       },
     }
   }

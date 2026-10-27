@@ -174,6 +174,10 @@ describe('openai-compatible provider', () => {
     const running = provider.stream!({ messages: [], onTiming: r => records.push(r) }, text => updates.push(text))
     for (let n = 0; n < 6; n++) await Promise.resolve()
     expect(records.at(-1)).toMatchObject({ event: 'headers-received', at: 1000 })
+    vi.setSystemTime(1100)
+    feed.enqueue(encoder.encode('data: {"choices":[{"delta":{"reasoning_content":"Private reasoning"}}]}\n\n'))
+    for (let n = 0; n < 6; n++) await Promise.resolve()
+    expect(updates).toEqual([])
     vi.setSystemTime(1200)
     feed.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"{\\"claims\\":"}}]}\n\n'))
     for (let n = 0; n < 6; n++) await Promise.resolve()
@@ -185,6 +189,7 @@ describe('openai-compatible provider', () => {
     expect(records.find(r => r.event === 'stream-end')).toMatchObject({ at: 1800 })
     expect(records.at(-1)).toMatchObject({ event: 'result-ready', at: 1800 })
     expect(records.filter(r => r.event === 'first-text')).toHaveLength(1)
+    expect(JSON.stringify(records)).not.toContain('Private reasoning')
     expect(JSON.stringify(records)).not.toContain('claims')
   })
 

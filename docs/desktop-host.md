@@ -8,7 +8,7 @@ Windows Electron 是主入口；Browser Stage 保留为开发入口。桌面候�
 
 ```powershell
 git submodule update --init
-pnpm install
+pnpm install --frozen-lockfile
 cmake -S external/kernel_c -B external/kernel_c/build
 cmake --build external/kernel_c/build --config Release
 pnpm dev:desktop
@@ -40,6 +40,8 @@ desktop-app.cjs 优先使用 AISLING_STAGE_URL，否则使用已有的 stage-web
 ## 数据归属
 
 Electron 的 Settings 与 Conversation 由 main 的 desktop-store.cjs 写入 userData 下的 aisling-store.json。renderer 通过 storage.getItem/setItem 使用此后端，dev/built 共用数据。浏览器继续使用 localStorage。
+
+Reflection 独立保存为 `userData/aisling-reflections.v1.json`，不混入设置／会话文件。Formation 默认关闭；产物的读取、来源失效与故障定位见 [Formation](memory-formation-v0.md) 和 [Reflection Recall](reflection-recall.md)。这两个 userData 文件不属于发布包或 Git 仓库。
 
 resolvePersistentStorage() 在 Desktop 桥为空时迁移既有 origin 的配置与会话；配置加载还保留历史用户授权和模块迁移。凭据在 Settings 中配置，不能提交实际配置文件或 userData。
 

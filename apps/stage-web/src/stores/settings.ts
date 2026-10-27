@@ -119,7 +119,14 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function setMemoryEnabled(enabled: boolean): Promise<void> {
-    config.value = { ...config.value, memory: { enabled: enabled === true } }
+    config.value = { ...config.value, memory: { ...config.value.memory, enabled: enabled === true,
+      formationEnabled: enabled === true && config.value.memory.enabled && config.value.memory.formationEnabled === true } }
+    await persist()
+  }
+
+  /** Formation requires Memory and does not replace the provider. */
+  async function setMemoryFormationEnabled(enabled: boolean): Promise<void> {
+    config.value = { ...config.value, memory: { ...config.value.memory, formationEnabled: config.value.memory.enabled && enabled === true } }
     await persist()
   }
 
@@ -139,6 +146,7 @@ export const useSettingsStore = defineStore('settings', () => {
     saveWebSearch,
     setModuleEnabled,
     setMemoryEnabled,
+    setMemoryFormationEnabled,
     speechReady,
     visionReady,
     webSearchReady,

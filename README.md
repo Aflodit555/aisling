@@ -8,7 +8,7 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 [AIRI](https://github.com/moeru-ai/airi) as an engineering reference. Aisling is
 **not** an AIRI fork and has no official relationship with either project.
 
-> **Current version:** v0.3.6 · **Status:** early development. The architecture
+> **Current version:** v0.3.7 · **Status:** early development. The architecture
 > and public APIs may still change.
 
 ## What exists today
@@ -19,12 +19,16 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 - Provider Settings UI for model configuration
 - Unified interaction history within each conversation session, with switching
   and restart recovery (localStorage in the browser; file-backed on Desktop)
-- Context Phase One: a bounded, estimated-token history window; user replies can
+- Context: a bounded, estimated-token history window; user replies can
   follow up on delivered autonomous speech and its compact, redacted trigger
   evidence, without extra Context LLM calls
-- Memory Phase One: optional cross-session recall from local conversation history,
+- Memory: optional cross-session recall from local conversation history,
   with bounded evidence, user-topic anchors for short follow-ups, and distinct
   sources for user reports, stored replies and delivered autonomous speech
+- Reflection Formation: opt-in background batches from delivered interactions,
+  validated sources, independent persistence, cancellation and failure isolation
+- Reflection Recall: local retrieval of completed reflections, checked against
+  their original sources and injected as fallible historical understandings
 - Persistence hardening: unsaved history stays in memory with a visible warning;
   Desktop writes replace the stored file only after a temporary write succeeds
 - Desktop Situation Understanding P1/P1.1: explicit foreground/media candidates,
@@ -35,39 +39,47 @@ long-term experience direction takes Neuro-sama as one reference, and studies
   scoped understanding from foreground evidence via the existing Chat Provider;
   replies only consume ready understanding and never wait for its update
 - Browser / System Speech (`speechSynthesis`)
-- Alibaba Native HTTP TTS
+- Alibaba HTTP and realtime streaming TTS
 - Live2D idle life (blinks, gaze, posture) and Jev-judged emotion with a stabilizing state machine ([docs/emotion.md](docs/emotion.md))
 
-**Verified end-to-end:** Consciousness, Vision, Browser Speech, Alibaba TTS,
-conversation persistence.
+Verification distinguishes automated Mock coverage, Electron smoke tests and
+limited real-provider samples; see [release notes](CHANGELOG.md) and
+[research results](docs/research/memory-validation.md).
 
-**v0.3.6:** ships the Memory Phase One recall foundation. Open **Settings → Memory**
-and enable **cross-session recall** to use it. It is off by default, and the choice
-is saved locally across restarts. Enabling it allows relevant excerpts from older
-local sessions to be sent to your selected LLM Provider with user text turns.
+**Memory:** Open **Settings → Memory** to control cross-session recall and optional
+Reflection Formation. Memory defaults on; an existing saved opt-out is preserved.
+Formation defaults off and appears only while Memory is on. Turning Memory off
+also saves Formation as off and cancels/discards its in-flight results, preserving
+stored reflections and queued work. Both choices survive restarts. Recall allows
+relevant excerpts and completed reflections to be sent to your selected LLM
+Provider with ordinary user text turns. Disabling Formation alone still permits
+reading existing valid reflections.
 Turning it off stops cross-session retrieval for new turns; it does not erase
 existing conversations or retract requests already sent.
 
-Memory uses local lexical retrieval, up to five sessions and a bounded evidence
-block, without an extra LLM call. It can supply related experiences, corrections
+Memory uses local lexical retrieval, up to five sessions and three reflections,
+with separate budgets and no extra Recall LLM call. It can supply related experiences, corrections
 and state changes for the model to interpret. It can also miss relevant sessions,
-include unrelated excerpts or produce an incorrect recollection. Ordinary stored
-messages have no individual timestamps: session update times are not event dates,
-and missing dates must remain unknown. Stored assistant statements prove what was
+include unrelated excerpts or produce an incorrect recollection. Legacy
+messages may have no individual timestamps: session update times are not
+event dates, and missing dates must remain unknown. New messages retain their
+actual append time. Stored assistant statements prove what was
 said, not that an external action or fictional story really happened.
 
 Context selects recent history within the active session. Memory retrieves from
 other saved sessions. P2 maintains optional, bounded short-term desktop
-understanding and may make separate background model calls. Memory does not add
-automatic memory formation, a knowledge database or a complete long-term memory
-system. Token counts are estimates; full persisted history can still reach
+understanding and may make separate background model calls. The optional
+[Reflection Formation](docs/memory-formation-v0.md) makes additional background
+LLM requests; [Reflection Recall](docs/reflection-recall.md) reads only saved,
+valid results and never waits for Formation. Real-model evidence is limited to
+small samples, not long-term quality acceptance. This is not a complete long-term
+memory system. Token counts are estimates; full persisted history can still reach
 storage limits. P2 remains a preview, and the optional native Candidate smoke
 remains inconclusive.
 
 Design and limits:
-[Memory Phase One](docs/memory.md),
-[Context Phase One](docs/context-phase-one.md),
-[Context Hardening](docs/context-hardening.md), and
+[Memory Recall](docs/memory.md),
+[Context and persistence](docs/context-phase-one.md), and
 [P2 preview](docs/p2-minimal-loop.md).
 
 ## Quick start
@@ -75,7 +87,7 @@ Design and limits:
 Prerequisites: Node.js and pnpm (Node.js 22.12+ for the Desktop host).
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm dev:desktop
 ```
 
@@ -147,7 +159,7 @@ external/kernel_c — pinned native Windows collector (UIA, media, mic, idle, au
 ## Commands
 
 ```bash
-pnpm install       # install workspace
+pnpm install --frozen-lockfile # install locked workspace dependencies
 pnpm dev:desktop   # development / current desktop testing, with live UI updates
 pnpm start         # alias for pnpm dev:desktop
 pnpm start:desktop # build first → launch built Desktop; no Vite server or installer

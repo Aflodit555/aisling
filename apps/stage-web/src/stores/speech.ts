@@ -35,6 +35,7 @@ export const useSpeechStore = defineStore('speech', () => {
   let sessionId = ''
   let activePlayback: StreamingPlayback | undefined
   let activeActivity: AudioActivity | undefined
+  let activeAbort: AbortController | undefined
 
   function log(session: string, message: string): void {
     if (import.meta.env.MODE === 'development')
@@ -61,9 +62,11 @@ export const useSpeechStore = defineStore('speech', () => {
     if (sessionId !== session)
       return
     log(session, `speech:end reason=${reason}`)
-    disposeActivePlayback()
     sessionId = ''
-    phase.value = 'idle'
+    activeAbort?.abort()
+    disposeActivePlayback()
+    activeAbort = undefined
+    phase.value = reason === 'error' ? 'error' : 'idle'
   }
 
   async function speak(text: string): Promise<void> {
@@ -73,19 +76,22 @@ export const useSpeechStore = defineStore('speech', () => {
 
     // A new speech replaces any in-flight session. This is not a full
     // interruption system, but a stale session must never leak into the new one.
-    disposeActivePlayback()
+    stop()
     sessionId = crypto.randomUUID()
     const session = sessionId
+    const controller = new AbortController()
+    activeAbort = controller
     phase.value = 'buffering'
     log(session, 'speech:start')
 
     try {
       if (provider.stream) {
-        const streamed = await runStreaming(session, provider.stream, text)
+        const streamed = await runStreaming(session, provider.stream, text, controller.signal)
         if (streamed)
           return
       }
-      await runOneshot(session, provider, text)
+      if (sessionId !== session) return
+      await runOneshot(session, provider, text, controller.signal)
     }
     catch (error) {
       if (sessionId !== session)
@@ -96,10 +102,11 @@ export const useSpeechStore = defineStore('speech', () => {
     }
   }
 
-  function runStreaming(session: string, capability: SpeechStreamCapability, text: string): Promise<boolean> {
+  function runStreaming(session: string, capability: SpeechStreamCapability, text: string, signal: AbortSignal): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      let firstChunkAt = 0
-      let firstPlaybackAt = 0
+      const settle = () => { signal.removeEventListener('abort', cancelled); resolve(true) }
+      const cancelled = () => settle()
+      signal.addEventListener('abort', cancelled, { once: true })
 
       const playback = createStreamingPlayback(capability.descriptor, {
         onPhase(next) {
@@ -109,17 +116,13 @@ export const useSpeechStore = defineStore('speech', () => {
           if (next === 'ended')
             return
           phase.value = next
-          if (next === 'playing' && !firstPlaybackAt) {
-            firstPlaybackAt = Date.now()
-            log(session, `first playback (${firstPlaybackAt})`)
-          }
           log(session, `speech:progress ${next}`)
         },
         onEnded(reason) {
           if (sessionId !== session)
             return
           endSession(session, reason)
-          resolve(true)
+          settle()
         },
         onError(error) {
           if (sessionId !== session)
@@ -130,6 +133,7 @@ export const useSpeechStore = defineStore('speech', () => {
 
       // No playback implementation can consume this descriptor → fall back.
       if (!playback) {
+        signal.removeEventListener('abort', cancelled)
         resolve(false)
         return
       }
@@ -140,7 +144,7 @@ export const useSpeechStore = defineStore('speech', () => {
       if (element)
         attachActivity(element)
 
-      void capability.stream({ text }, {
+      void capability.stream({ text, signal }, {
         onStart() {
           if (sessionId !== session)
             return
@@ -149,16 +153,12 @@ export const useSpeechStore = defineStore('speech', () => {
         onAudio(chunk) {
           if (sessionId !== session)
             return
-          if (!firstChunkAt) {
-            firstChunkAt = Date.now()
-            log(session, `first audio chunk (${firstChunkAt})`)
-          }
           activePlayback?.enqueue(chunk)
         },
         onEnd() {
           if (sessionId !== session)
             return
-          log(session, `provider finished (${Date.now()})`)
+          log(session, 'provider finished')
           activePlayback?.complete()
         },
         onError(error) {
@@ -166,7 +166,7 @@ export const useSpeechStore = defineStore('speech', () => {
             return
           log(session, `provider error: ${error.message}`)
           endSession(session, 'error')
-          resolve(true)
+          settle()
         },
       }).catch((error: unknown) => {
         if (sessionId !== session)
@@ -174,30 +174,39 @@ export const useSpeechStore = defineStore('speech', () => {
         const message = error instanceof Error ? error.message : String(error)
         log(session, `provider error: ${message}`)
         endSession(session, 'error')
-        resolve(true)
+        settle()
       })
     })
   }
 
-  async function runOneshot(session: string, provider: SpeechProvider, text: string): Promise<void> {
+  async function runOneshot(session: string, provider: SpeechProvider, text: string, signal: AbortSignal): Promise<void> {
     if (provider.speaksDirectly) {
       // Native speech (speechSynthesis): the audible period is the synthesize
       // call itself and there is no audio element to analyse.
-      phase.value = 'playing'
-      await provider.synthesize({ text })
+      await provider.synthesize({ text, signal, onStart: () => {
+        if (sessionId !== session) return
+        phase.value = 'playing'
+      } })
       if (sessionId !== session)
         return
       endSession(session, 'completed')
       return
     }
 
-    const result = await provider.synthesize({ text })
+    const result = await provider.synthesize({ text, signal })
     if (sessionId !== session)
       return
 
     if (result.audio) {
-      phase.value = 'playing'
       await playSpeechResult(result.audio, {
+        onPlaying: () => {
+          if (sessionId !== session) return
+          phase.value = 'playing'
+        },
+        onWaiting: () => {
+          if (sessionId !== session) return
+          phase.value = 'buffering'
+        },
         onElement: (element) => {
           if (sessionId === session)
             attachActivity(element)
@@ -221,9 +230,11 @@ export const useSpeechStore = defineStore('speech', () => {
   }
 
   function stop(): void {
+    sessionId = ''
+    activeAbort?.abort()
+    activeAbort = undefined
     disposeActivePlayback()
     stopPlayback()
-    sessionId = ''
     phase.value = 'idle'
   }
 

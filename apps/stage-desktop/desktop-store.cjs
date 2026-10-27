@@ -1,6 +1,7 @@
 const { app, ipcMain } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
+const { Buffer } = require('node:buffer')
 
 /**
  * Thin Desktop persistence bridge. The renderer keeps its existing
@@ -23,9 +24,9 @@ function storeFilePath() {
 }
 
 /** @returns {Record<string, unknown>} */
-function readStore(strict = false) {
+function readStore(strict = false, file = storeFilePath()) {
   try {
-    const raw = fs.readFileSync(storeFilePath(), 'utf8')
+    const raw = fs.readFileSync(file, 'utf8')
     const parsed = JSON.parse(raw)
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
     if (strict) throw new Error('Invalid desktop storage')
@@ -37,8 +38,7 @@ function readStore(strict = false) {
   }
 }
 
-function writeStore(data) {
-  const file = storeFilePath()
+function writeStore(data, file = storeFilePath()) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const temporary = `${file}.tmp`
   try {
@@ -109,6 +109,24 @@ function registerStorageIpc() {
     catch {
       event.returnValue = false
     }
+  })
+
+  const reflectionsFile = () => path.join(app.getPath('userData'), 'aisling-reflections.v1.json')
+  ipcMain.on('aisling:reflections:read', event => {
+    try { event.returnValue = { ok: true, value: fs.readFileSync(reflectionsFile(), 'utf8') } }
+    catch (error) { event.returnValue = error.code === 'ENOENT' ? { ok: true, value: null } : { ok: false } }
+  })
+  ipcMain.on('aisling:reflections:write', (event, value) => {
+    if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 2_000_000) { event.returnValue = false; return }
+    try {
+      const data = JSON.parse(value)
+      if (!data || data.version !== 1 || !Array.isArray(data.reflections) || !Array.isArray(data.batches) || !Array.isArray(data.progress)) { event.returnValue = false; return }
+      const previous = readStore(true, reflectionsFile())
+      if (Object.keys(previous).length && previous.version !== 1) { event.returnValue = false; return }
+      writeStore(data, reflectionsFile())
+      event.returnValue = true
+    }
+    catch { event.returnValue = false }
   })
 }
 

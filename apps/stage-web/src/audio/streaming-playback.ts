@@ -117,7 +117,8 @@ export function createMseStreamingPlayback(
       try {
         streamEnded = true
         mediaSource.endOfStream()
-        setPhase('draining')
+        // Provider completion is not proof audio has started playing.
+        if (phase === 'playing') setPhase('draining')
       }
       catch (error) {
         finish('error', error instanceof Error ? error : new Error(String(error)))
@@ -158,7 +159,12 @@ export function createMseStreamingPlayback(
 
   function onPlaying(): void {
     if (!ended)
-      setPhase('playing')
+      setPhase(streamEnded ? 'draining' : 'playing')
+  }
+
+  function onWaiting(): void {
+    if (disposed || ended) return
+    setPhase('buffering')
   }
 
   function onAudioEnded(): void {
@@ -179,6 +185,7 @@ export function createMseStreamingPlayback(
     objectUrl = deps.createObjectURL(mediaSource)
     audio.src = objectUrl
     audio.addEventListener('playing', onPlaying)
+    audio.addEventListener('waiting', onWaiting)
     audio.addEventListener('ended', onAudioEnded)
     audio.addEventListener('error', onAudioError)
     // Chunks arriving before sourceopen simply wait in the queue.
@@ -220,6 +227,7 @@ export function createMseStreamingPlayback(
     }
     if (audio) {
       audio.removeEventListener('playing', onPlaying)
+      audio.removeEventListener('waiting', onWaiting)
       audio.removeEventListener('ended', onAudioEnded)
       audio.removeEventListener('error', onAudioError)
       try {

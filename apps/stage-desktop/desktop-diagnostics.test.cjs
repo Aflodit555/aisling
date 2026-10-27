@@ -60,18 +60,17 @@ test('diagnostics default off: no ID arguments, directory, stream or file output
   assert.deepEqual(f.lines, [])
 })
 
-test('tool-loop diagnostics retain only bounded metadata, never arguments, responses or recall quotations', () => {
+test('retired latency events are ignored while formal diagnostics reject experiment fields', () => {
   const f = fixture(true, true)
-  f.api.writeDesktopDiagnostic({ type: 'chat-tool-round', round: 4, reason: 'round-limit', source: 'user-text',
-    toolCallCount: 1, repeatedToolCalls: 1, toolFailures: 0, toolResultChars: 14, recallIncluded: false,
-    toolArguments: 'private query', toolResult: 'private result', prompt: 'private quotation', replyText: 'private reply' })
-  f.api.writeDesktopDiagnostic({ type: 'chat-provider-result', round: 4, finishReason: 'tool_calls', httpStatus: 200,
-    outcome: 'returned', body: 'private provider body' })
-  assert.equal(f.lines[1].reason, 'round-limit')
-  assert.equal(f.lines[1].repeatedToolCalls, 1)
-  assert.equal(f.lines[1].recallIncluded, false)
-  assert.equal(f.lines[2].finishReason, 'tool_calls')
-  assert.equal(f.lines[2].httpStatus, 200)
+  for (const type of ['p2-latency', 'p2-b-http', 'chat-first-text', 'chat-tool-round', 'chat-provider-result'])
+    f.api.writeDesktopDiagnostic({ type, at: 100, text: 'private text' })
+  assert.deepEqual(f.counters(), { directories: 0, streams: 0 })
+  f.api.writeDesktopDiagnostic({ type: 'context-assembled', selectedMessages: 2, recallIncluded: true,
+    traceId: '22222222-2222-4222-8222-222222222222', requestBytes: 100, elapsedMs: 20, assemblyMs: 1,
+    maxLoopLagMs: 5, firstAfterMemorySwitch: true, thinkingMode: 'disabled', prompt: 'private quotation' })
+  assert.equal(f.lines[1].selectedMessages, 2); assert.equal(f.lines[1].recallIncluded, true)
+  for (const key of ['traceId', 'requestBytes', 'elapsedMs', 'assemblyMs', 'maxLoopLagMs', 'firstAfterMemorySwitch', 'thinkingMode'])
+    assert.equal(f.lines[1][key], undefined)
   assert.doesNotMatch(JSON.stringify(f.lines), /private/)
 })
 
@@ -150,21 +149,26 @@ test('P2 request phase timing is opt-in metadata with no URL, headers or body', 
   assert.equal(on.lines[4].contentChars, undefined); assert.equal(on.lines[4].reasoningChars, undefined)
 })
 
-test('Context selection and first-text measurements survive the real sink without leaking basis or text', () => {
+test('Context selection survives the real sink without leaking basis or text', () => {
   const record = { type: 'context-assembled', turnId: '22222222-2222-4222-8222-222222222222',
     source: 'user-text', reason: 'session-window', historyTokens: 4090, requiredTokens: 500,
-    selectedMessages: 90, omittedMessages: 200, basisCount: 2, assemblyMs: 0.25,
+    selectedMessages: 90, omittedMessages: 200, basisCount: 2,
+    reflectionCount: 2, reflectionChars: 1000, reflectionTokens: 2000, reflectionRetrievalMs: 1.5, reflectionReason: 'injected',
     text: 'Private reply', app: 'Private app', autonomousContext: { title: 'Private song' }, prompt: 'Private prompt' }
   const off = fixture(false); off.api.writeDesktopDiagnostic(record)
   assert.deepEqual(off.lines, [])
   const on = fixture(true, true); on.api.writeDesktopDiagnostic(record)
   assert.equal(on.lines[1].historyTokens, 4090); assert.equal(on.lines[1].requiredTokens, 500)
   assert.equal(on.lines[1].selectedMessages, 90); assert.equal(on.lines[1].omittedMessages, 200)
-  assert.equal(on.lines[1].basisCount, 2); assert.equal(on.lines[1].assemblyMs, 0.25)
+  assert.equal(on.lines[1].basisCount, 2)
   assert.equal(on.lines[1].reason, 'session-window')
-  on.api.writeDesktopDiagnostic({ ...record, type: 'chat-first-text', firstTextMs: 123, assemblyMs: Infinity, basisCount: -1 })
-  assert.equal(on.lines[2].firstTextMs, 123)
-  assert.equal(on.lines[2].assemblyMs, undefined); assert.equal(on.lines[2].basisCount, undefined)
+  assert.equal(on.lines[1].reflectionCount, 2); assert.equal(on.lines[1].reflectionChars, 1000)
+  assert.equal(on.lines[1].reflectionTokens, 2000); assert.equal(on.lines[1].reflectionRetrievalMs, 1.5)
+  assert.equal(on.lines[1].reflectionReason, 'injected')
+  on.api.writeDesktopDiagnostic({ ...record, basisCount: -1, reflectionCount: -1, reflectionRetrievalMs: Infinity, reflectionReason: 'Private error' })
+  assert.equal(on.lines[2].basisCount, undefined)
+  assert.equal(on.lines[2].reflectionCount, undefined); assert.equal(on.lines[2].reflectionRetrievalMs, undefined)
+  assert.equal(on.lines[2].reflectionReason, undefined)
   assert.equal(JSON.stringify(on.lines).includes('Private'), false)
 })
 

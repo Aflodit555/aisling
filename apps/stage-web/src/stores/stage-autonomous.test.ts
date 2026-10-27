@@ -81,6 +81,7 @@ describe('Stage desktop awareness integration', () => {
     await vi.waitFor(() => expect(stage.sending).toBe(false))
     const saved = createLocalStorageConversationStore().get(stage.activeSessionId)!.messages
     expect(saved).toHaveLength(1)
+    expect(saved[0]!.createdAt).toBe(2500)
     expect(saved[0]!.autonomousContext).toMatchObject({ deliveredAt: 2500, observedAt: 1000, source: 'foreground',
       candidateId: 'c', objectId: 'o', title: 'Research paper' })
     expect(saved[0]!.autonomousContext!.excerpt!.length).toBeLessThanOrEqual(240)

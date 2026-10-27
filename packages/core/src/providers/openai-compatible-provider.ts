@@ -68,7 +68,7 @@ interface OpenAIStreamChunk {
 }
 
 type ResponseMetadata = Pick<ChatRequestTiming, 'contentChars' | 'reasoningChars' | 'contentDeltaCount' |
-  'reasoningDeltaCount' | 'streamEventCount' | 'doneReceived' | 'unsupportedContent' | 'finishReason'>
+  'reasoningDeltaCount' | 'streamEventCount' | 'doneReceived' | 'unsupportedContent' | 'finishReason' | 'responseShape'>
 function finishReason(value: unknown): ChatRequestTiming['finishReason'] {
   if (value === null || value === undefined) return 'unknown'
   return ['stop', 'length', 'tool_calls', 'function_call', 'content_filter'].includes(value as string)
@@ -188,6 +188,8 @@ export async function openAIChatCompletion(
     const message = data.choices?.[0]?.message
     const text = typeof message?.content === 'string' ? message.content : ''
     if (metadata) Object.assign(metadata, { contentChars: text.length,
+      responseShape: !message ? 'missing-message' : message.content === undefined ? 'missing-content' : message.content === null ? 'null-content'
+        : typeof message.content === 'string' ? 'string-content' : 'unsupported-content',
       reasoningChars: typeof message?.reasoning_content === 'string' ? message.reasoning_content.length : 0,
       unsupportedContent: message?.content != null && typeof message.content !== 'string',
       finishReason: finishReason(data.choices?.[0]?.finish_reason) })

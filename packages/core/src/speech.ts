@@ -8,6 +8,9 @@
 export interface SpeechRequest {
   readonly text: string
   readonly voice?: string
+  readonly signal?: AbortSignal
+  /** Direct speech providers report actual audible start, not synthesis submission. */
+  readonly onStart?: () => void
 }
 
 /** Audio produced by a speech provider: either a URL or raw bytes. */

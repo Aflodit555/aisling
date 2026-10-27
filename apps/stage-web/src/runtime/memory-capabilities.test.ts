@@ -8,7 +8,7 @@ const session = (id: string, contents: string[], updatedAt = 999): ConversationS
 const project = (sessions: ConversationSession[], query: string) => {
   const result = retrieveRecall(sessions, 'new', query)
   return { result, records: JSON.parse(recallForModel(result.evidence!).evidence) as Array<{
-    conversation: string; content: string; position: number; sourceScope: string; autonomousBasis?: unknown
+    conversation: string; content: string; position: number; sourceScope: string; autonomousBasis?: unknown; time: string
   }> }
 }
 
@@ -27,8 +27,10 @@ it('keeps dated updates, later problems and corrections without treating ranking
     expect(visible.map(r => r.content)).toEqual(s.messages.map(m => m.content))
     expect(visible.map(r => r.position)).toEqual(s.messages.map((_, i) => i + 1))
   }
-  expect(JSON.stringify(records)).not.toMatch(/updatedAt|createdAt|9999999|messageTime|eventTime/)
-  expect(project(sessions.map(s => ({ ...s, updatedAt: 0 })), query).records).toEqual(records)
+  expect(records.every(r => r.time === 'session-only')).toBe(true)
+  expect(JSON.stringify(records)).not.toMatch(/messageTime|eventTime/)
+  const quotes = (items: typeof records) => items.map(({ content, conversation, position, sourceScope }) => ({ content, conversation, position, sourceScope }))
+  expect(quotes(project(sessions.map(s => ({ ...s, updatedAt: 0 })), query).records)).toEqual(quotes(records))
 })
 
 it('retains contradictory and undated reports verbatim, without manufacturing a resolution or time', () => {

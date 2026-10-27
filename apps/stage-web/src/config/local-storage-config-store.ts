@@ -35,6 +35,7 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             providerType: parsed.webSearch?.providerType === 'none' ? 'none' : 'duckduckgo',
             enabled: parsed.webSearch?.enabled ?? parsed.webSearch?.providerType !== 'none',
           }
+          const memoryEnabled = parsed.memory?.enabled === undefined ? defaults.memory.enabled : parsed.memory.enabled === true
           const config = {
             consciousness: { ...defaults.consciousness, ...parsed.consciousness, providerType: 'openai-compatible' as const },
             desktopAwareness: {
@@ -50,9 +51,10 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             speech: { ...defaults.speech, ...parsed.speech, enabled: storedSpeech?.enabled ?? (storedSpeech?.providerType !== undefined && storedSpeech.providerType !== 'none'), transport: migratedTransport },
             vision: { ...defaults.vision, ...parsed.vision, enabled: parsed.vision?.enabled ?? (parsed.vision?.providerType !== undefined && parsed.vision.providerType !== 'none') },
             webSearch,
-            memory: { enabled: parsed.memory?.enabled === true },
+            memory: { enabled: memoryEnabled, formationEnabled: memoryEnabled && parsed.memory?.formationEnabled === true },
           }
           if (Object.hasOwn(parsed, 'hearing')
+            || (parsed.memory?.formationEnabled === true && !memoryEnabled)
             || parsed.speech?.enabled === undefined || parsed.vision?.enabled === undefined || parsed.webSearch?.enabled === undefined
             || parsed.consciousness?.providerType !== 'openai-compatible'
             || Object.keys(parsed.desktopAwareness ?? {}).some(key => !['enabled', 'cooldownSeconds', 'jevApiKey', 'replyHistoryEnabled', 'situationEnabled'].includes(key))

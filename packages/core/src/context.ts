@@ -23,10 +23,12 @@ export interface AutonomousReplyContext {
 }
 
 export interface ConversationMessage extends ChatMessage {
+  /** Actual append time in epoch milliseconds; absent on legacy messages. */
+  readonly createdAt?: number
   readonly autonomousContext?: AutonomousReplyContext
 }
 
-function timestamp(value: unknown): value is number {
+export function isValidTimestamp(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 8.64e15
 }
 
@@ -42,12 +44,12 @@ function observationText(value: unknown, limit: number): string {
 export function normalizeAutonomousContext(value: unknown): AutonomousReplyContext | undefined {
   if (!value || typeof value !== 'object') return undefined
   const record = value as Record<string, unknown>
-  if (!timestamp(record.deliveredAt) || (record.source !== 'media' && record.source !== 'foreground')
+  if (!isValidTimestamp(record.deliveredAt) || (record.source !== 'media' && record.source !== 'foreground')
     || !['appeared', 'content-changed', 'track-changed', 'idle'].includes(record.change as string)) return undefined
   const id = (value: unknown) => typeof value === 'string' && /^[\w-]{1,128}$/.test(value) ? value : undefined
   return {
     deliveredAt: record.deliveredAt,
-    ...(timestamp(record.observedAt) ? { observedAt: record.observedAt } : {}),
+    ...(isValidTimestamp(record.observedAt) ? { observedAt: record.observedAt } : {}),
     source: record.source, change: record.change as DesktopCandidate['change'],
     candidateId: id(record.candidateId), objectId: id(record.objectId),
     app: observationText(record.app, 80), title: observationText(record.title, 160),
@@ -127,7 +129,6 @@ export function assembleContext(input: {
   toolTokens?: number
   historyTokenBudget?: number
 }) {
-  const startedAt = performance.now()
   if (input.historyTokenBudget !== undefined && (!Number.isSafeInteger(input.historyTokenBudget) || input.historyTokenBudget < 0))
     throw new Error('Invalid history token budget')
   const requiredTokens = [...input.prefix, ...input.suffix].reduce((sum, message) => sum + estimateMessageTokens(message), 0)
@@ -150,6 +151,5 @@ export function assembleContext(input: {
     end = start - 1
   }
   return { messages: [...input.prefix.map(toChatMessage), ...groups.reverse().flat(), ...input.suffix.map(toChatMessage)],
-    historyTokens, requiredTokens, selectedMessages, omittedMessages: input.history.length - selectedMessages, basisCount,
-    assemblyMs: performance.now() - startedAt }
+    historyTokens, requiredTokens, selectedMessages, omittedMessages: input.history.length - selectedMessages, basisCount }
 }

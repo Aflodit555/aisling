@@ -67,12 +67,13 @@ export type {
   CharacterRuntime,
   CharacterRuntimeOptions,
   ChatRuntimeDiagnostic,
+  ReflectionRecallContext,
   RuntimeEvent,
   TurnRecord,
 } from './runtime'
 export { createCharacterRuntime } from './runtime'
 export type { AutonomousReplyContext, ConversationMessage } from './context'
-export { createAutonomousContext, normalizeAutonomousContext } from './context'
+export { createAutonomousContext, isValidTimestamp, normalizeAutonomousContext } from './context'
 export type {
   AutonomousStimulus,
   DesktopActivitySnapshot,

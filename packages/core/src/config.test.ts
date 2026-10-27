@@ -6,6 +6,7 @@ describe('config store', () => {
   it('starts with the default platform config', async () => {
     const store = createMemoryConfigStore()
     expect(await store.get()).toEqual(createDefaultPlatformConfig())
+    expect((await store.get()).memory).toEqual({ enabled: true, formationEnabled: false })
     expect((await store.get()).desktopAwareness).toEqual({ enabled: false, cooldownSeconds: 30, jevApiKey: '', replyHistoryEnabled: false })
   })
 

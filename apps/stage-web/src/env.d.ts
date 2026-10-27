@@ -20,6 +20,8 @@ interface Window {
     judgeEmotion?(conversation: import('./stores/emotion').EmotionTurn[]): Promise<{ emotion: string; confidence: number; intensity: number } | null>
     /** Minimal `localStorage`-shaped bridge backed by Electron userData. */
     storage?: Pick<Storage, 'getItem' | 'setItem'>
+    /** Dedicated Reflection and processing state, separate from conversations. */
+    reflectionStorage?: import('./runtime/reflection-store').ReflectionStorage
   }
 }
 

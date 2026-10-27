@@ -36,6 +36,19 @@ export function buildChatProvider(config: ConsciousnessConfig): ChatProvider | u
   return undefined
 }
 
+/** Current ordinary-chat route only; background models retain their own request policy. */
+export function userTextEnableThinking(config: Pick<ConsciousnessConfig, 'providerType' | 'baseUrl' | 'model'>): false | undefined {
+  try {
+    const url = new URL(config.baseUrl)
+    if (config.providerType === 'openai-compatible' && config.model === 'qwen3.7-flash' && url.protocol === 'https:'
+      && /^[\w-]+\.cn-beijing\.maas\.aliyuncs\.com$/.test(url.hostname)
+      && url.pathname.replace(/\/+$/, '') === '/compatible-mode/v1' && !url.username && !url.password && !url.search && !url.hash)
+      return false
+  }
+  catch { /* An unrecognized endpoint keeps its own defaults. */ }
+  return undefined
+}
+
 /** P2-only route policy; no change to the shared Provider or ordinary chat defaults. */
 export function situationEnableThinking(config: Pick<ConsciousnessConfig, 'providerType' | 'baseUrl' | 'model'>): false | undefined {
   try {

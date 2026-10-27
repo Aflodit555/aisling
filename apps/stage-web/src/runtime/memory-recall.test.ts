@@ -16,7 +16,9 @@ it('excludes active session, duplicates, unsafe text, placeholders and unsupport
   expect(result.records).toBe(1)
   const record = JSON.parse(result.evidence!)[0]
   expect(record).toMatchObject({ sessionId: 'old', messageIndex: 0, messageId: null, content: '旅行票根纸舟导出' })
-  expect(result.evidence).not.toMatch(/999|createdAt|updatedAt|startedAt|密码|system|tool|repeated/)
+  expect(record.createdAt).toBeUndefined()
+  expect(record.sessionTime).toEqual({ createdAt: 999, updatedAt: 999 })
+  expect(result.evidence).not.toMatch(/startedAt|密码|system|tool|repeated/)
   expect(retrieveRecall([old], 'active', 'zzzz unrelated query').evidence).toBeUndefined()
   expect(retrieveRecall([], 'active', '旅行票根纸舟').evidence).toBeUndefined()
 })

@@ -52,6 +52,7 @@ export function createBrowserSpeechProvider(options: BrowserSpeechOptions = {}):
       const text = request.text.trim()
       if (!text)
         return { spoken: true }
+      request.signal?.throwIfAborted()
 
       const utterance = new SpeechSynthesisUtterance(text)
       if (options.voice) {
@@ -64,10 +65,24 @@ export function createBrowserSpeechProvider(options: BrowserSpeechOptions = {}):
       if (options.rate)
         utterance.rate = options.rate
 
-      await new Promise<void>((resolve) => {
-        utterance.onend = () => resolve()
-        utterance.onerror = () => resolve()
-        synth.speak(utterance)
+      await new Promise<void>((resolve, reject) => {
+        const finish = (error?: Error) => {
+          request.signal?.removeEventListener('abort', cancel)
+          utterance.onstart = utterance.onend = utterance.onerror = null
+          if (error) reject(error)
+          else resolve()
+        }
+        const cancel = () => {
+          // Some engines omit onend/onerror after cancel; settle explicitly.
+          finish(new DOMException('Speech cancelled', 'AbortError'))
+          synth.cancel()
+        }
+        utterance.onstart = () => request.onStart?.()
+        utterance.onend = () => finish()
+        utterance.onerror = event => finish(new Error(`Speech synthesis failed (${event.error})`))
+        request.signal?.addEventListener('abort', cancel, { once: true })
+        try { synth.speak(utterance) }
+        catch (error) { finish(error instanceof Error ? error : new Error('Speech synthesis failed')) }
       })
 
       return { spoken: true }

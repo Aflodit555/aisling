@@ -17,7 +17,7 @@ export interface MouthSignalConfig {
   reference: number
   /** Normalized envelope below which a sample counts as silence (noise floor). */
   silenceFloor: number
-  /** Minimum mouth openness while speech is active; never applied when idle. */
+  /** Minimum target openness during active speech before the silence hold expires. */
   outputFloor: number
   /** Silence must persist this long (ms) before the mouth starts to close. */
   holdMs: number

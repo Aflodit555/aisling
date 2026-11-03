@@ -42,7 +42,7 @@ export interface CoreModelLike {
 
 export interface ParameterController {
   setSources(sources: readonly ParameterSource[]): void
-  /** Applies sources and returns the final written claims (parameter id → value). */
+  /** Applies sources and returns merged claims, including those that failed to write. */
   apply(core: CoreModelLike, dtMs: number): ReadonlyMap<string, number>
   /** Puts back the native values the last `apply` overwrote. */
   restore(core: CoreModelLike): void

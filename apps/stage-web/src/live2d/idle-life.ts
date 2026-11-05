@@ -168,7 +168,7 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
     const gaze = pointer
       ? { x: Math.max(-0.8, Math.min(0.8, pointer.x)), y: Math.max(-0.8, Math.min(1.0, pointer.y)) }
       : gazeTarget
-    moveEyes(gaze, dtMs, !!pointer)
+    moveEyes(gaze, dtMs, hadPointer)
     if (pointer) {
       const blend = Math.min(1, (pointerEntryMs += dtMs) / POINTER_ENTRY_MS)
       head.x = headAtPointerEntry.x + (eye.x - headAtPointerEntry.x) * blend

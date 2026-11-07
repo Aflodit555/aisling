@@ -49,6 +49,19 @@ export function userTextEnableThinking(config: Pick<ConsciousnessConfig, 'provid
   return undefined
 }
 
+/** Formation's bounded JSON output uses the verified route's non-thinking mode. */
+export function formationEnableThinking(config: Pick<ConsciousnessConfig, 'providerType' | 'baseUrl' | 'model'>): false | undefined {
+  try {
+    const url = new URL(config.baseUrl)
+    if (config.providerType === 'openai-compatible' && config.model === 'qwen3.8-flash' && url.protocol === 'https:'
+      && /^[\w-]+\.cn-beijing\.maas\.aliyuncs\.com$/.test(url.hostname) && !url.port
+      && url.pathname.replace(/\/+$/, '') === '/compatible-mode/v1' && !url.username && !url.password && !url.search && !url.hash)
+      return false
+  }
+  catch { /* Unverified routes retain their own defaults. */ }
+  return undefined
+}
+
 /** P2-only route policy; no change to the shared Provider or ordinary chat defaults. */
 export function situationEnableThinking(config: Pick<ConsciousnessConfig, 'providerType' | 'baseUrl' | 'model'>): false | undefined {
   try {

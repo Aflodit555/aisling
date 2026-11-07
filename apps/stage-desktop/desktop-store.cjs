@@ -79,6 +79,20 @@ function readStoredLanguage() {
   return readStore()['aisling.language.v1'] === 'zh-CN' ? 'zh-CN' : 'en'
 }
 
+function readDesktopData() { return readStore(true) }
+const reflectionsFile = () => path.join(app.getPath('userData'), 'aisling-reflections.v1.json')
+let memoryLifecycle
+function configureMemoryLifecycle(value){memoryLifecycle=value}
+function readRawReflections() {
+  const state = /** @type {any} */ (readStore(true, reflectionsFile()))
+  if(!Object.keys(state).length)return {version:1,reflections:[],batches:[],progress:[]}
+  if(state.version!==1||!Array.isArray(state.batches)||!Array.isArray(state.reflections))throw new Error('Invalid reflection storage')
+  return state
+}
+function writeRawReflections(state){writeStore(state,reflectionsFile())}
+function writeDesktopData(data){writeStore(data)}
+function readReflections(){return memoryLifecycle?memoryLifecycle.guardedReflections():readRawReflections()}
+
 let registered = false
 
 function registerStorageIpc() {
@@ -91,8 +105,11 @@ function registerStorageIpc() {
       event.returnValue = null
       return
     }
-    const value = readStore()[key]
-    event.returnValue = typeof value === 'string' ? value : null
+    try {
+      const raw=readStore()
+      const value = key==='aisling.conversations.v1'&&memoryLifecycle?memoryLifecycle.sanitizedData(raw)[key]:raw[key]
+      event.returnValue = typeof value === 'string' ? value : null
+    }catch{event.returnValue={storageError:true}}
   })
 
   ipcMain.on(CHANNELS.set, (event, key, value) => {
@@ -102,7 +119,9 @@ function registerStorageIpc() {
     }
     try {
       const data = readStore(true)
+      if(key==='aisling.conversations.v1'&&memoryLifecycle)memoryLifecycle.beforeConversationChange(data,{...data,[key]:value})
       data[key] = value
+      if(key==='aisling.conversations.v1'&&memoryLifecycle)Object.assign(data,memoryLifecycle.sanitizedData(data))
       writeStore(data)
       event.returnValue = true
     }
@@ -111,9 +130,8 @@ function registerStorageIpc() {
     }
   })
 
-  const reflectionsFile = () => path.join(app.getPath('userData'), 'aisling-reflections.v1.json')
   ipcMain.on('aisling:reflections:read', event => {
-    try { event.returnValue = { ok: true, value: fs.readFileSync(reflectionsFile(), 'utf8') } }
+    try { fs.readFileSync(reflectionsFile(),'utf8'); event.returnValue = { ok: true, value: JSON.stringify(readReflections()) } }
     catch (error) { event.returnValue = error.code === 'ENOENT' ? { ok: true, value: null } : { ok: false } }
   })
   ipcMain.on('aisling:reflections:write', (event, value) => {
@@ -123,6 +141,8 @@ function registerStorageIpc() {
       if (!data || data.version !== 1 || !Array.isArray(data.reflections) || !Array.isArray(data.batches) || !Array.isArray(data.progress)) { event.returnValue = false; return }
       const previous = readStore(true, reflectionsFile())
       if (Object.keys(previous).length && previous.version !== 1) { event.returnValue = false; return }
+      memoryLifecycle?.validateWrite(data)
+      memoryLifecycle?.beforeReflectionsChange(previous.version===1?previous:{reflections:[],batches:[]},data)
       writeStore(data, reflectionsFile())
       event.returnValue = true
     }
@@ -130,4 +150,5 @@ function registerStorageIpc() {
   })
 }
 
-module.exports = { CHANNELS, registerStorageIpc, readStoredConfig, readStoredLanguage }
+module.exports = { CHANNELS, registerStorageIpc, readStoredConfig, readStoredLanguage, readDesktopData, readReflections,
+  readRawReflections,writeRawReflections,writeDesktopData,configureMemoryLifecycle }

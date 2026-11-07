@@ -59,6 +59,8 @@ export interface ChatRequestTiming {
 
 export interface ChatCompletionResult {
   readonly text: string
+  /** Actual non-streaming provider usage when returned; never estimated. */
+  readonly usage?: { inputTokens: number; outputTokens: number }
   /** Present when the model requested tool calls instead of a final answer. */
   readonly toolCalls?: readonly ToolCall[]
 }

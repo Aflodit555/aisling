@@ -4,6 +4,21 @@ import { useSettingsStore } from './settings'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('requires Desktop and a provider for Organization, preserves the old opt-in and clears consent with Memory',async()=>{
+  const data=new Map<string,string>()
+  vi.stubGlobal('window',{localStorage:{getItem:(k:string)=>data.get(k)??null,setItem:(k:string,v:string)=>{data.set(k,v)}}})
+  setActivePinia(createPinia());const settings=useSettingsStore();await settings.load()
+  await settings.setMemoryOrganizationEnabled(true);expect(settings.config.memory.organizationEnabled).toBe(false)
+  vi.stubGlobal('window',{...window,aislingDesktop:{memoryOrganization:{}}})
+  await settings.setMemoryOrganizationEnabled(true);expect(settings.config.memory.organizationEnabled).toBe(false)
+  settings.activeChatProvider={id:'test',complete:async()=>({text:''})}
+  await settings.setMemoryFormationEnabled(true);await settings.setMemoryOrganizationEnabled(true)
+  expect(settings.config.memory).toEqual({enabled:true,formationEnabled:true,organizationEnabled:true})
+  expect(JSON.parse(data.get('aisling.config.v1')!).memory.organizationEnabled).toBe(true)
+  await settings.setMemoryEnabled(false);await settings.setMemoryEnabled(true)
+  expect(settings.config.memory).toEqual({enabled:true,formationEnabled:false,organizationEnabled:false})
+})
+
 it('persists module switches and removes disabled providers from new calls', async () => {
   const data = new Map<string, string>()
   vi.stubGlobal('window', { speechSynthesis: {}, localStorage: {
@@ -42,7 +57,7 @@ it('defaults Memory on and persists opt-out across restarts without replacing th
     setItem: (key: string, value: string) => { data.set(key, value) } } })
   setActivePinia(createPinia())
   const settings = useSettingsStore(); await settings.load()
-  expect(settings.config.memory).toEqual({ enabled: true, formationEnabled: false })
+  expect(settings.config.memory).toEqual({ enabled: true, formationEnabled: false, organizationEnabled: false })
   const provider = { id: 'unchanged', complete: vi.fn(async () => ({ text: '' })) }
   settings.activeChatProvider = provider
   await settings.setMemoryEnabled(true)
@@ -67,19 +82,19 @@ it('persists both switches and requires a new Formation opt-in after Memory is t
   await settings.setMemoryFormationEnabled(true)
   setActivePinia(createPinia())
   const enabled = useSettingsStore(); await enabled.load()
-  expect(enabled.config.memory).toEqual({ enabled: true, formationEnabled: true })
+  expect(enabled.config.memory).toEqual({ enabled: true, formationEnabled: true, organizationEnabled: false })
   const provider = { id: 'unchanged', complete: vi.fn(async () => ({ text: '' })) }
   enabled.activeChatProvider = provider
   await enabled.setMemoryEnabled(false)
   expect(enabled.activeChatProvider).toBe(provider)
-  expect(enabled.config.memory).toEqual({ enabled: false, formationEnabled: false })
-  expect(JSON.parse(data.get('aisling.config.v1')!).memory).toEqual({ enabled: false, formationEnabled: false })
+  expect(enabled.config.memory).toEqual({ enabled: false, formationEnabled: false, organizationEnabled: false })
+  expect(JSON.parse(data.get('aisling.config.v1')!).memory).toEqual({ enabled: false, formationEnabled: false, organizationEnabled: false })
   await enabled.setMemoryFormationEnabled(true)
   expect(enabled.config.memory.formationEnabled).toBe(false)
   setActivePinia(createPinia())
   const restarted = useSettingsStore(); await restarted.load()
-  expect(restarted.config.memory).toEqual({ enabled: false, formationEnabled: false })
+  expect(restarted.config.memory).toEqual({ enabled: false, formationEnabled: false, organizationEnabled: false })
   await restarted.setMemoryEnabled(true)
-  expect(restarted.config.memory).toEqual({ enabled: true, formationEnabled: false })
+  expect(restarted.config.memory).toEqual({ enabled: true, formationEnabled: false, organizationEnabled: false })
   expect(provider.complete).not.toHaveBeenCalled()
 })

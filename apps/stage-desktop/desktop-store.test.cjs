@@ -27,7 +27,7 @@ function fixture() {
       } : require(name),
   })
   module.exports.registerStorageIpc()
-  return { files, file, setFailWrite: value => { failWrite = value }, setFailRead: value => { failRead = value },
+  return { files, file, api:module.exports,setFailWrite: value => { failWrite = value }, setFailRead: value => { failRead = value },
     invoke(channel, ...args) {
       let response, answered = false
       const event = {}
@@ -37,6 +37,26 @@ function fixture() {
       return response
     } }
 }
+
+test('source deletion removes C candidates and their generated text while retaining unrelated origins',()=>{
+  const f=fixture(), file=path.join('user-data','aisling-reflections.v1.json')
+  const message={role:'user',content:'synthetic private report'}
+  const digest=require('node:crypto').createHash('sha256').update(JSON.stringify(message)).digest('hex')
+  const ref=id=>({sessionId:id,messageIndex:0,digest})
+  const state={version:1,progress:[],reflections:['a','b'].map(id=>({id,content:id+' private',sourceRefs:[ref(id==='a'?'a':'common')],relatedReflectionIds:[]})),
+    batches:['a','b'].map(id=>({id,sourceRefs:id==='a'?[ref('a'),ref('common')]:[ref('common')],reflectionIds:[id],organization:{version:1,items:[],settled:true}}))}
+  f.files.set(file,JSON.stringify(state))
+  f.api.configureMemoryLifecycle({
+    beforeConversationChange:(old,next)=>{assert(JSON.parse(old['aisling.conversations.v1']).sessions.some(s=>s.id==='a'));f.files.set(file,JSON.stringify(require('./memory-lifecycle.cjs').pruneReflections(state,next).state))},
+    guardedReflections:()=>JSON.parse(f.files.get(file)),sanitizedData:v=>v,
+  })
+  f.files.set(f.file,JSON.stringify({'aisling.conversations.v1':JSON.stringify({sessions:[{id:'a',messages:[message]},{id:'common',messages:[message]}]})}))
+  assert.equal(f.invoke('aisling:storage:set','aisling.conversations.v1',JSON.stringify({sessions:[{id:'common',messages:[message]}]})),true)
+  const remaining=JSON.parse(f.invoke('aisling:reflections:read').value)
+  assert.deepEqual(remaining.reflections.map(r=>r.id),['b'])
+  assert.deepEqual(remaining.batches.map(b=>b.id),['b'])
+  assert(!f.files.get(file).includes('a private'))
+})
 
 test('failed desktop write returns a result and preserves all previously durable keys', () => {
   const f = fixture(), old = JSON.stringify({ 'aisling.conversations.v1': 'old history', 'aisling.config.v1': 'old config' })

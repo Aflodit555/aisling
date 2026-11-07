@@ -120,13 +120,19 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function setMemoryEnabled(enabled: boolean): Promise<void> {
     config.value = { ...config.value, memory: { ...config.value.memory, enabled: enabled === true,
-      formationEnabled: enabled === true && config.value.memory.enabled && config.value.memory.formationEnabled === true } }
+      formationEnabled: enabled === true && config.value.memory.enabled && config.value.memory.formationEnabled === true,
+      organizationEnabled: enabled === true && config.value.memory.enabled && config.value.memory.organizationEnabled === true } }
     await persist()
   }
 
   /** Formation requires Memory and does not replace the provider. */
   async function setMemoryFormationEnabled(enabled: boolean): Promise<void> {
     config.value = { ...config.value, memory: { ...config.value.memory, formationEnabled: config.value.memory.enabled && enabled === true } }
+    await persist()
+  }
+  async function setMemoryOrganizationEnabled(enabled: boolean): Promise<void> {
+    if(enabled && (!window.aislingDesktop?.memoryOrganization || !activeChatProvider.value))return
+    config.value = { ...config.value, memory: { ...config.value.memory, organizationEnabled:config.value.memory.enabled && enabled===true } }
     await persist()
   }
 
@@ -147,6 +153,7 @@ export const useSettingsStore = defineStore('settings', () => {
     setModuleEnabled,
     setMemoryEnabled,
     setMemoryFormationEnabled,
+    setMemoryOrganizationEnabled,
     speechReady,
     visionReady,
     webSearchReady,

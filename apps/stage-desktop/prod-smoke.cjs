@@ -31,7 +31,16 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
 
 ;(async () => {
   const visible = process.env.AISLING_FOCUS_SMOKE === '1'
-  const win = await startDesktop({ show: visible, diagnostics: false })
+  let memoryDatabaseFailure
+  const win = await startDesktop({ show: visible, diagnostics: false, onMemoryDatabase(store, ready) {
+    if (process.env.AISLING_MEMORY_DB_P0_EXPECT_FAILURE === '1') memoryDatabaseFailure = { store, ready }
+  } })
+  if (process.env.AISLING_MEMORY_DB_P0_EXPECT_FAILURE === '1') {
+    assert.ok(memoryDatabaseFailure?.ready)
+    await assert.rejects(memoryDatabaseFailure.ready, { code: 'ENOENT' })
+    assert.equal(memoryDatabaseFailure.store.status(), 'failed')
+    console.log(JSON.stringify({ memoryDatabaseStartupFailure: 'passed' }))
+  }
   const contents = win.contentView.children[0].webContents
   const desktopMenus = []
   Menu.prototype.popup = function (options) { desktopMenus.push({ menu: this, options }) }
@@ -238,7 +247,10 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     })()`)
     assert.equal(recovered, true)
     console.log(JSON.stringify({ formationSmoke: 'passed', modelResponses: 'mocked', separateFile: true, restartDeduplicated: recovered, ...report }))
-    clearTimeout(timeout); win.destroy(); app.exit(0); return
+    clearTimeout(timeout)
+    if (memoryDatabaseFailure) app.quit()
+    else { win.destroy(); app.exit(0) }
+    return
   }
 
   if (process.env.AISLING_MEMORY_SMOKE === '1') {
@@ -267,8 +279,9 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       const toggle = document.querySelector('.settings-module input[role="switch"]')
       if (!toggle) throw new Error('Memory settings switch did not mount: ' + document.body.innerText.slice(0, 500))
       const defaultOn = toggle.checked && stage.memoryRecallEnabled === true
-      const formationDefaultOff = document.querySelectorAll('.settings-module input[role="switch"]').length === 2
+      const formationDefaultOff = document.querySelectorAll('.settings-module input[role="switch"]').length === 3
         && document.querySelectorAll('.settings-module input[role="switch"]')[1].checked === false
+        && document.querySelectorAll('.settings-module input[role="switch"]')[2].checked === false
       const formationCopy = document.querySelector('.settings-module').textContent.includes('May make additional LLM requests.')
       async function setMemory(enabled) {
         toggle.checked = enabled
@@ -281,7 +294,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         throw new Error('Memory consent did not persist')
       }
       async function setFormation(enabled) {
-        for (let n = 0; n < 100 && document.querySelectorAll('.settings-module input[role="switch"]').length !== 2; n++)
+        for (let n = 0; n < 100 && document.querySelectorAll('.settings-module input[role="switch"]').length !== 3; n++)
           await new Promise(resolve => setTimeout(resolve, 10))
         const formation = document.querySelectorAll('.settings-module input[role="switch"]')[1]
         if (!formation) throw new Error('Formation switch did not expand')
@@ -393,8 +406,8 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     report.restartConsent = true
     console.log(JSON.stringify({ memorySmoke: 'passed', modelResponses: 'mocked', ...report }))
     clearTimeout(timeout)
-    win.destroy()
-    app.exit(0)
+    if (memoryDatabaseFailure) app.quit()
+    else { win.destroy(); app.exit(0) }
     return
   }
 
@@ -664,6 +677,9 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         const settings = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('settings')
         settings.activeChatProvider = { id: 'smoke', complete: async request => ({ text: 'Echo: ' + request.messages.at(-1).content }) }
         const root = document.querySelector('.desktop-surface')
+        // The 300 ms hover timer and Vue render may finish after the host's fixed delay.
+        for (let n = 0; n < 100 && !root.querySelector('.desktop-composer'); n++)
+          await new Promise(resolve => setTimeout(resolve, 50))
         const composer = root.querySelector('.desktop-composer')
         const composerWidth = composer?.getBoundingClientRect().width
         if (composer) {

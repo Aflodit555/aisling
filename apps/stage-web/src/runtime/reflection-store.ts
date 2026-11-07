@@ -2,6 +2,8 @@ export const REFLECTION_KINDS = ['event', 'fact', 'pattern', 'preference', 'proj
 export type ReflectionKind = typeof REFLECTION_KINDS[number]
 export interface SourceRef { sessionId: string; messageIndex: number; digest: string }
 export interface Reflection {
+  /** Main-owned eligibility for C products; absent on compatible legacy records. */
+  recallEligible?: boolean
   version: 1
   id: string
   content: string
@@ -14,6 +16,9 @@ export interface Reflection {
   uncertainty?: string
 }
 export interface FormationBatch {
+  contextSources?: SourceRef[]
+  contextReflectionIds?: string[]
+  organization?: OrganizationRecord
   id: string
   sessionId: string
   sourceRefs: SourceRef[]
@@ -22,6 +27,17 @@ export interface FormationBatch {
   attempts: number
   error?: string
   reflectionIds: string[]
+}
+export interface OrganizationRecord {
+  /** Privacy lineage only, never promoted to Evidence supporting a new claim. */
+  contextSources?: SourceRef[]
+  contextNoteIds?: string[]
+  metrics?: { elapsedMs: number; preparationMs?: number; settleMs?: number; inputTokens?: number; outputTokens?: number }
+  version: 1
+  items: Array<{ action: string; reflectionId?: string; operation?: import('../../../stage-desktop/memory-database/store').NoteOperation;
+    draft?: import('../../../stage-desktop/memory-database/store').NoteMeaning; subjectDescription?: string; related?: string[]; proposalReason?: string;
+    status: 'proposed-not-applied' | 'applied' | 'rejected' | 'undecided' | 'outcome-unknown'; reason: string }>
+  settled: boolean
 }
 export interface ReflectionState {
   version: 1
@@ -61,6 +77,12 @@ function validate(state: ReflectionState): void {
       || !b.sourceRefs.every(validSourceRef) || !integer(b.units) || b.units < 1 || !integer(b.attempts)
       || !['collecting', 'pending', 'completed', 'failed'].includes(b.status) || !Array.isArray(b.reflectionIds)
       || b.reflectionIds.some(ref => !state.reflections.some(r => r.id === ref))
+      || (b.organization !== undefined && (b.organization.version !== 1 || typeof b.organization.settled !== 'boolean'
+        || !Array.isArray(b.organization.items) || b.organization.items.length > 3 || b.organization.items.some(i =>
+          !i || !['ADD','UPDATE','NOOP','SUPERSEDE','RETRACT','UNDECIDED'].includes(i.action)
+          || !['proposed-not-applied','applied','rejected','undecided','outcome-unknown'].includes(i.status)
+          || typeof i.reason !== 'string' || i.reason.length > 300
+          || i.reflectionId !== undefined && !state.reflections.some(r => r.id === i.reflectionId))))
       || (b.error !== undefined && !['provider-error', 'invalid-output', 'source-changed', 'input-limit', 'storage-error'].includes(b.error))))
     throw new Error('reflection-store-invalid')
 }

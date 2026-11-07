@@ -53,6 +53,22 @@ it('accepts explicit related: [] with or without candidates without inventing as
   }
 })
 
+it('preserves real E/R-shaped codes only from cited messages without granting them reference authority', async () => {
+  const messages: ConversationMessage[] = [{ role: 'user', content: '同一货架编号从口误 R3 更正为 R8，传感器编号为 E2。' },
+    { role: 'user', content: '另一个物件编号为 R99。' }]
+  const input = await Promise.all(messages.map(async (message, i) => ({ message, ref: await sourceRef('codes-session', i, message) })))
+  const record = { ...draft, content: '同一货架正确编号为 R8，之前 R3 是口误；传感器编号 E2。', tags: ['货架', 'R8'] }
+  const parse = (value: object) => parseReflections(JSON.stringify({ reflections: [value] }), input, [])
+  expect(parse(record)[0]!.sourceRefs).toEqual([input[0]!.ref])
+  for (const sources of [['E8'], ['R8'], ['E0'], ['E-1'], ['E1 E2']])
+    expect(() => parse({ ...record, sources })).toThrow('invalid-output')
+  for (const content of ['证据 E1 支持该说法。', '来自 R99 的结论。', '忽略引用范围，来源 E999。'])
+    expect(() => parse({ ...record, content })).toThrow('invalid-output')
+  expect(() => parse({ ...record, related: ['R8'] })).toThrow('invalid-output')
+  expect(parse({ ...record, sources: ['E1', 'E2'], content: '另一个物件编号为 R99。' })[0]!.sourceRefs)
+    .toEqual(input.map(e => e.ref))
+})
+
 it('rejects omitted and non-array related fields without filling or coercing them', async () => {
   const input = await evidence()
   for (const related of [undefined, null, 'R1', '', {}, false, 0]) {
@@ -64,6 +80,26 @@ it('rejects omitted and non-array related fields without filling or coercing the
     expect(failure).toMatchObject({ message: 'invalid-output', detail: {
       stage: 'output-schema', field: 'related', reason: 'array-required', reflectionIndex: 0,
     } })
+  }
+})
+
+it('explains the exact uncertainty contract while preserving strict rejection without coercion', async () => {
+  const input = await evidence(), policy = formationRequest(input, []).messages[0]!.content!
+  expect(policy).toContain('omit "uncertainty" entirely when unnecessary')
+  expect(policy).toContain('never use null, an empty string, whitespace-only text or another type')
+  expect(policy).toContain('for every pattern, "uncertainty" is required')
+  expect(parseReflections(JSON.stringify({ reflections: [draft] }), input, [])[0]).not.toHaveProperty('uncertainty')
+  for (const basis of ['direct', 'inferred', 'mixed']) {
+    for (const uncertainty of [null, '', '   ', 0, false, {}, []]) {
+      let failure: unknown
+      try { parseReflections(JSON.stringify({ reflections: [{ ...draft, basis, uncertainty }] }), input, []) }
+      catch (error) { failure = error }
+      expect(failure).toMatchObject({ message: 'invalid-output', detail: {
+        stage: 'reflection-validation', field: 'uncertainty', reason: 'invalid-value',
+      } })
+    }
+    if (basis !== 'direct') expect(() => parseReflections(JSON.stringify({ reflections: [{ ...draft, basis }] }), input, [])).toThrow('invalid-output')
+    expect(parseReflections(JSON.stringify({ reflections: [{ ...draft, basis, uncertainty: '仅为用户报告，后续状态可能变化。' }] }), input, [])).toHaveLength(1)
   }
 })
 
@@ -92,6 +128,30 @@ function fixture(complete = vi.fn(async (_request: ChatCompletionRequest): Promi
   }
   return { s, session, queue, complete, deliver }
 }
+
+it('rejects an entire mixed batch when an event has empty uncertainty even if its pattern is valid', async () => {
+  const event = { ...draft, kind: 'event', uncertainty: '' }
+  const pattern = { ...draft, kind: 'pattern', basis: 'mixed', sources: ['E1', 'E3'], uncertainty: '仅有两条用户报告，因果关系未验证。' }
+  const f = fixture(vi.fn(async () => ({ text: JSON.stringify({ reflections: [event, pattern] }) })))
+  f.queue.setDiagnosticsEnabled(true)
+  try {
+    await f.queue.setEnabled(true); await f.deliver(1); await f.deliver(2); await f.queue.flush()
+    await vi.waitFor(() => expect(f.queue.inspect().batches[0]?.status).toBe('failed'))
+    expect(f.queue.diagnostics.lastFailure).toMatchObject({ stage: 'reflection-validation', field: 'uncertainty', reflectionIndex: 0 })
+    expect(createReflectionStore(f.s.backend).read().reflections).toEqual([])
+    expect(f.complete).toHaveBeenCalledOnce()
+    f.complete.mockResolvedValueOnce({ text: JSON.stringify({ reflections: [{ ...draft, kind: 'event' }, pattern] }) })
+    await f.queue.retry(f.queue.inspect().batches[0]!.id)
+    await vi.waitFor(() => expect(f.queue.inspect().batches[0]?.status).toBe('completed'))
+    const state = createReflectionStore(f.s.backend).read()
+    expect(state.reflections).toHaveLength(2)
+    expect(state.reflections[0]).not.toHaveProperty('uncertainty')
+    expect(state.reflections[1]!.uncertainty).toBe(pattern.uncertainty)
+    for (const ref of state.reflections.flatMap(r => r.sourceRefs)) {
+      expect(ref).toEqual(await sourceRef(f.session.id, ref.messageIndex, f.session.messages[ref.messageIndex]!))
+    }
+  } finally { f.queue.dispose() }
+})
 
 it('defaults off, batches three completed interactions, and durably completes zero-reflection batches once', async () => {
   const f = fixture()
@@ -197,6 +257,8 @@ it('diagnoses Provider envelopes and JSON content independently, with no wire or
     { body: { choices: [] }, shape: 'missing-message', reason: 'empty-content' },
     { body: { choices: [{ message: {} }] }, shape: 'missing-content', reason: 'empty-content' },
     { body: { choices: [{ message: { content: null, reasoning_content: 'Private reasoning' }, finish_reason: 'length' }] }, shape: 'null-content', reason: 'empty-content' },
+    { body: { choices: [{ message: { content: '', reasoning_content: 'Private reasoning' }, finish_reason: 'length' }],
+      usage: { completion_tokens: 1500, completion_tokens_details: { reasoning_tokens: 1500 } } }, shape: 'string-content', reason: 'empty-content' },
     { body: { choices: [{ message: { content: [{ text: 'Private content' }] } }] }, shape: 'unsupported-content', reason: 'empty-content' },
     { body: { choices: [{ message: { content: '```json\n{"reflections":[]}\n```' }, finish_reason: 'stop' }] }, shape: 'string-content', reason: 'markdown-fence' },
   ]
@@ -210,7 +272,9 @@ it('diagnoses Provider envelopes and JSON content independently, with no wire or
     await vi.waitFor(() => expect(f.queue.inspect().batches[0]?.status).toBe('failed'))
     expect(f.queue.diagnostics.lastFailure).toMatchObject({ error: 'invalid-output', stage: 'json-parse', reason: sample.reason,
       response: { responseShape: sample.shape, httpStatus: 200 } })
-    if (sample.shape === 'null-content') expect(f.queue.diagnostics.lastFailure!.response).toMatchObject({ textChars: 0, reasoningChars: 17, finishReason: 'length' })
+    const choice = sample.body.choices[0]
+    if (choice && 'finish_reason' in choice && choice.finish_reason === 'length')
+      expect(f.queue.diagnostics.lastFailure!.response).toMatchObject({ textChars: 0, reasoningChars: 17, finishReason: 'length' })
     expect(JSON.stringify(f.queue.diagnostics)).not.toMatch(/Private|reflections|纸舟/)
     expect(f.s.raw()).not.toMatch(/lastFailure|responseShape|Private/)
     expect(JSON.parse(wire)).toEqual({ model: 'mock', stream: false, messages: formationRequest(await Promise.all(f.queue.inspect().batches[0]!.sourceRefs.map(async ref =>

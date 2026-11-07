@@ -1,0 +1,4 @@
+{
+  "user": { "subject": "profile-user", "prefix": "用户陈述：" },
+  "assistant": { "subject": "aisling", "prefix": "Aisling 发言：" }
+}

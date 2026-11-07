@@ -3,6 +3,7 @@
 interface Window {
   Live2DCubismCore?: unknown
   aislingDesktop?: {
+    memoryOrganization?: import('./runtime/note-organization').OrganizationBridge
     getMode(): Promise<'stage' | 'desktop'>
     setLanguage?(language: 'en' | 'zh-CN'): void
     openDesktopMenu(): void

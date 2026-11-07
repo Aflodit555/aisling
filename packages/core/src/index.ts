@@ -68,6 +68,7 @@ export type {
   CharacterRuntimeOptions,
   ChatRuntimeDiagnostic,
   ReflectionRecallContext,
+  ReflectionCandidateDiagnostic,
   RuntimeEvent,
   TurnRecord,
 } from './runtime'

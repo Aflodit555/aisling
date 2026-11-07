@@ -14,10 +14,10 @@ function fixture(enabled = false, replyText = false) {
     focus: { app: 'chrome', title: 'Private article', text: 'Private screen text' },
     media: [], mic: [], idleSeconds: 0 }
   const mainFrame = { url: 'http://localhost:5174' }
-  const contents = { mainFrame }
+  const contents = { mainFrame,isDestroyed:()=>false,send(){} }
   const image = { resize: () => image }
   const electron = {
-    app: { whenReady: async () => {}, on: () => {} },
+    app: { whenReady: async () => {}, on: () => {}, getPath:()=>path.resolve('synthetic-user-data') },
     Tray: class { setToolTip() {} on() {} },
     nativeImage: { createFromPath: () => image }, nativeTheme: { shouldUseDarkColors: false }, screen: { on: () => {} },
     BaseWindow: class {},
@@ -40,7 +40,7 @@ function fixture(enabled = false, replyText = false) {
       }
       if (name === './desktop-activity.cjs') return { createDesktopObserver: () => ({ status: () => ({ enabled: true, context }) }) }
       if (name === './desktop-protocol.cjs') return { registerStageScheme() {}, registerStageProtocol() {} }
-      if (name === './desktop-store.cjs') return { registerStorageIpc() {}, readStoredConfig: () => ({ desktopAwareness: { jevApiKey: 'private-key' } }) }
+      if (name === './desktop-store.cjs') return { registerStorageIpc() {},configureMemoryLifecycle(){},readDesktopData:()=>({}),writeDesktopData(){},writeRawReflections(){},readRawReflections:()=>({version:1,reflections:[],batches:[],progress:[]}),readStoredConfig: () => ({ desktopAwareness: { jevApiKey: 'private-key' } }) }
       if (name === './desktop-judge.cjs') return { ...judgeModule, createTypeSafeJudge: () => judgeModule.createTypeSafeJudge({ fetchImpl: async (_url, options) => {
         requests.push(JSON.parse(options.body))
         return new Response(JSON.stringify({ answers: { should_interrupt: { type: 'noul', noul: 0.9 } } }))
@@ -170,6 +170,24 @@ test('Context selection survives the real sink without leaking basis or text', (
   assert.equal(on.lines[2].reflectionCount, undefined); assert.equal(on.lines[2].reflectionRetrievalMs, undefined)
   assert.equal(on.lines[2].reflectionReason, undefined)
   assert.equal(JSON.stringify(on.lines).includes('Private'), false)
+})
+
+test('Reflection candidate selection is bounded metadata and never logs source IDs or content', () => {
+  const f = fixture(true)
+  f.api.writeDesktopDiagnostic({ type: 'context-assembled', reflectionSelection: [
+    { label: 'R1', kind: 'pattern', score: 1.2, matched: 4, eligible: true, reason: 'selected', order: 1,
+      chars: 1000, bytes: 2000, reflectionId: 'private-id', content: 'private summary', sourceRefs: ['private-session'] },
+    { label: 'R2', kind: 'event', score: 2, matched: 4, eligible: true, reason: 'candidate-budget' },
+    { label: 'R3', kind: 'event', score: 2, matched: 4, eligible: false, reason: 'invalid-source' },
+    { label: 'private-label', kind: 'event', score: 2, matched: 4, eligible: false, reason: 'relevance' },
+    { label: 'R4', kind: 'pattern', score: Infinity, matched: 4, eligible: true, reason: 'selected' },
+  ] })
+  assert.equal(f.lines[1].reflectionSelection.length, 3)
+  assert.equal(f.lines[1].reflectionSelection[0].order, 1)
+  assert.doesNotMatch(JSON.stringify(f.lines), /private|sourceRefs|content|reflectionId/)
+  const off = fixture(false)
+  off.api.writeDesktopDiagnostic({ type: 'context-assembled', reflectionSelection: f.lines[1].reflectionSelection })
+  assert.deepEqual(off.lines, [])
 })
 
 test('main distinguishes an actual Jev call, validates snapshot first, and keeps model input unchanged', async () => {

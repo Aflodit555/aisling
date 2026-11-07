@@ -5,6 +5,12 @@ const { contextBridge, ipcRenderer } = require('electron')
 // bridge (get/set only) so the renderer can keep its existing persistence while
 // Electron owns a single stable data file in userData.
 contextBridge.exposeInMainWorld('aislingDesktop', {
+  memoryOrganization: {
+    onStatus: callback => {const listener=(_event,state)=>callback(state);ipcRenderer.on('aisling:organization:status',listener);return()=>ipcRenderer.removeListener('aisling:organization:status',listener)},
+    setEnabled: enabled => ipcRenderer.invoke('aisling:organization:enabled',enabled),
+    candidates: () => ipcRenderer.invoke('aisling:organization:candidates'),
+    settle: (batchId,index) => ipcRenderer.invoke('aisling:organization:settle',batchId,index),
+  },
   getMode: () => ipcRenderer.invoke('aisling:mode:get'),
   setLanguage: language => ipcRenderer.send('aisling:language:set', language),
   openDesktopMenu: () => ipcRenderer.send('aisling:desktop-menu'),
@@ -42,7 +48,7 @@ contextBridge.exposeInMainWorld('aislingDesktop', {
     write: value => ipcRenderer.sendSync('aisling:reflections:write', value),
   },
   storage: {
-    getItem: key => ipcRenderer.sendSync('aisling:storage:get', key),
+    getItem: key => {const value=ipcRenderer.sendSync('aisling:storage:get',key);if(value?.storageError)throw new Error('Memory storage unavailable');return value},
     setItem: (key, value) => ipcRenderer.sendSync('aisling:storage:set', key, value),
   },
 })

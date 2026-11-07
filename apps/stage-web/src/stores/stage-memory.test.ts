@@ -309,6 +309,58 @@ it('forms only delivered interactions asynchronously in an independent store wit
   stage.formation.dispose()
 })
 
+it('keeps normal replies working when the independent formation request fails', async () => {
+  const { stage, settings, complete } = await fixture()
+  let raw: string | null = null
+  vi.stubGlobal('window', { ...window, aislingDesktop: { reflectionStorage: {
+    read: () => ({ ok: true, value: raw }), write: (value: string) => { raw = value; return true },
+  } } })
+  complete.mockImplementation(async request => {
+    if (request.messages[0]?.content?.startsWith('You form append-only')) throw new Error('background provider failed')
+    return { text: '这是普通聊天回复。' }
+  })
+  await settings.setMemoryFormationEnabled(true)
+  await vi.waitFor(() => expect(stage.formationStatus.lastEvent).toBe('ready'))
+  for (const question of ['手碟目标太大没开始。', '缩小成两分钟后练完了。', '画画缩小成一个杯子后完成了。']) {
+    stage.send(question); await vi.waitFor(() => expect(stage.sending).toBe(false))
+  }
+  await vi.waitFor(() => expect(stage.formation.inspect().batches[0]?.error).toBe('provider-error'))
+  stage.send('这个新问题仍然需要普通回复。')
+  await vi.waitFor(() => expect(stage.sending).toBe(false))
+  expect(stage.messages.filter(m => m.role === 'assistant')).toHaveLength(4)
+  expect(stage.messages.some(m => m.role === 'error')).toBe(false)
+  expect(stage.formation.inspect().reflections).toEqual([])
+  expect(complete.mock.calls.filter(([request]) => request.messages[0]?.content?.startsWith('You form append-only'))).toHaveLength(1)
+  stage.$dispose()
+})
+
+it('applies the verified Formation thinking policy through Stage without changing ordinary chat or settings', async () => {
+  const { stage, settings, complete, data } = await fixture()
+  let raw: string | null = null
+  vi.stubGlobal('window', { ...window, aislingDesktop: { reflectionStorage: {
+    read: () => ({ ok: true, value: raw }), write: (value: string) => { raw = value; return true },
+  } } })
+  settings.config.consciousness = { ...settings.config.consciousness, model: 'qwen3.8-flash',
+    baseUrl: 'https://test-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' }
+  complete.mockImplementation(async request => ({ text: request.messages[0]?.content?.startsWith('You form append-only')
+    ? '{"reflections":[]}' : '普通回复。' }))
+  try {
+    await settings.setMemoryFormationEnabled(true)
+    await vi.waitFor(() => expect(stage.formationStatus.lastEvent).toBe('ready'))
+    const saved = data.get('aisling.config.v1'), provider = settings.activeChatProvider
+    stage.send('我完成过两分钟手碟节奏练习。')
+    await vi.waitFor(() => expect(stage.sending).toBe(false))
+    await stage.formation.flush()
+    await vi.waitFor(() => expect(stage.formation.inspect().batches[0]?.status).toBe('completed'))
+    const calls = complete.mock.calls.map(([request]) => request)
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.enableThinking).toBeUndefined()
+    expect(calls[1]).toMatchObject({ enableThinking: false, maxOutputTokens: 1500, temperature: 0.2 })
+    expect(settings.activeChatProvider).toBe(provider)
+    expect(data.get('aisling.config.v1')).toBe(saved)
+  } finally { stage.$dispose() }
+})
+
 it('stops both Memory paths and discards in-flight Formation without deleting saved reflections or pending work', async () => {
   const { stage, settings, complete } = await fixture()
   let raw: string | null = null
@@ -346,7 +398,7 @@ it('stops both Memory paths and discards in-flight Formation without deleting sa
   finish(output)
   await vi.waitFor(() => expect(stage.formationStatus.running).toBe(false))
   expect(stage.formation.inspect()).toEqual(saved)
-  expect(settings.config.memory).toEqual({ enabled: false, formationEnabled: false })
+  expect(settings.config.memory).toEqual({ enabled: false, formationEnabled: false, organizationEnabled: false })
   await settings.setMemoryEnabled(true)
   expect(stage.formationStatus.enabled).toBe(false)
   settings.config.memory.formationEnabled = true

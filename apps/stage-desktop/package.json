@@ -8,7 +8,7 @@
     "dev": "electron .",
     "test:smoke": "electron smoke.cjs",
     "test:smoke:prod": "electron prod-smoke.cjs",
-    "typecheck": "tsc --allowJs --checkJs --noEmit --skipLibCheck --target ES2022 --module commonjs main.cjs desktop-app.cjs preload.cjs desktop-activity.cjs desktop-judge.cjs desktop-protocol.cjs desktop-store.cjs"
+    "typecheck": "tsc --allowJs --checkJs --noEmit --skipLibCheck --resolveJsonModule --target ES2022 --module commonjs main.cjs desktop-app.cjs preload.cjs desktop-activity.cjs desktop-judge.cjs desktop-protocol.cjs desktop-store.cjs memory-database/worker.cjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

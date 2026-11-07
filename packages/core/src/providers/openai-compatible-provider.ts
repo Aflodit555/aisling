@@ -41,6 +41,7 @@ interface WireToolCall {
 }
 
 interface OpenAICompletionResponse {
+  usage?: { prompt_tokens?: number; completion_tokens?: number }
   choices?: Array<{
     finish_reason?: string | null
     message?: {
@@ -204,9 +205,11 @@ export async function openAIChatCompletion(
       onText(text)
     }
     timing('result-ready')
-    return toolCalls && toolCalls.length > 0
-      ? { text, toolCalls }
-      : { text }
+    const usage = data.usage
+    const measured = usage && Number.isSafeInteger(usage.prompt_tokens) && usage.prompt_tokens! >= 0
+      && Number.isSafeInteger(usage.completion_tokens) && usage.completion_tokens! >= 0
+      ? { usage: { inputTokens: usage.prompt_tokens!, outputTokens: usage.completion_tokens! } } : {}
+    return toolCalls && toolCalls.length > 0 ? { text, toolCalls, ...measured } : { text, ...measured }
   }
   catch (error) {
     timing('failed', stage === 'stream' ? 'stream-error' : error instanceof ProviderRequestError

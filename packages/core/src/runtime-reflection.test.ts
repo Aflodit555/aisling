@@ -92,6 +92,17 @@ it('does not reread or replace the snapshot during streamed output', async () =>
   expect(getReflectionContext).toHaveBeenCalledOnce(); expect(stream).toHaveBeenCalledOnce()
 })
 
+it('bounds and validates custom selector results and preserves fallback on selector failure', async () => {
+  for (const select of [() => { throw new Error('optional selector failed') }, () => ['not-json'],
+    () => [JSON.stringify({ content: 'x'.repeat(6000) })], () => [candidate, candidate, candidate, candidate]]) {
+    const f = fixture({ getReflectionContext: () => ({ candidates: [candidate], durationMs: 0, reason: 'selected', select }) })
+    expect((await f.runtime.ingest(stimulus())).status).toBe('completed')
+    const request = f.complete.mock.calls[0]![0]
+    expect(request.messages.find(m => m.content?.startsWith('[Historical Aisling reflections]'))!.content).toContain(candidate)
+    expect(request.messages.reduce((n, m) => n + estimateMessageTokens(m), 0)).toBeLessThanOrEqual(INPUT_TOKEN_LIMIT)
+  }
+})
+
 it('shares spare budget by whole conversations without displacing session history, and safely omits when full', async () => {
   const raw = JSON.stringify(Array.from({ length: 3 }, (_, i) => ({ conversation: `C${i}`, content: `quote-${i} ${'x'.repeat(1700)}` })))
   const history = [{ role: 'user' as const, content: 'h'.repeat(3500) }]

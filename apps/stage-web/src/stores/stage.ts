@@ -17,10 +17,11 @@ import { CAPTURE_MAX_GAP_MS, mediaCandidateMatches, playingMedia } from '../runt
 import { PREFERENCE_ACKNOWLEDGEMENTS, recognizeInteractionPreference } from '../runtime/interaction-preference'
 import { resolvePersistentStorage } from '../storage/desktop-storage'
 import { createSituationWorkingState, isSituationCorrection, providerSituationExecutor } from '../runtime/situation-working-state'
-import { userTextEnableThinking, situationEnableThinking } from '../runtime/provider-factory'
+import { userTextEnableThinking, situationEnableThinking, formationEnableThinking } from '../runtime/provider-factory'
 import { recallForModel, retrieveRecall, type RecallSource } from '../runtime/memory-recall'
 import { createReflectionFormation } from '../runtime/reflection-formation'
 import { createReflectionRecall } from '../runtime/reflection-recall'
+import { createOrganizationProcessor } from '../runtime/note-organization'
 import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
@@ -100,8 +101,22 @@ export const useStageStore = defineStore('stage', () => {
   const memoryRecallMode = computed(() => recallMode.value)
   const memoryRecallDiagnostic = shallowRef<{ sessionIds: string[]; rankedSessionIds: string[]; packingOmittedSessionIds: string[];
     records: number; sources: RecallSource[] }>()
-  watch(memoryRecallEnabled, () => { memoryRecallDiagnostic.value = undefined }, { flush: 'sync' })
+  const reflectionRecallDiagnostic = shallowRef<import('@aisling/core').ReflectionRecallContext['selection']>()
+  watch(memoryRecallEnabled, () => { memoryRecallDiagnostic.value = undefined; reflectionRecallDiagnostic.value = undefined }, { flush: 'sync' })
   const formationStatus = shallowRef({ enabled: false, running: false, calls: 0, lastEvent: 'disabled' })
+  const organizationStatus = shallowRef({ ready:false, autoWrite:false, reason:'disabled', pending:0 })
+  const organizationDesired = computed(()=>settings.loaded && settings.config.memory.enabled && settings.config.memory.organizationEnabled===true)
+  const offOrganizationStatus=window.aislingDesktop?.memoryOrganization?.onStatus?.(state=>{organizationStatus.value={...organizationStatus.value,...state}})
+  onScopeDispose(()=>offOrganizationStatus?.())
+  const freshSessions = () => {
+    const sessions=conversationStore.list()
+    if(conversationStore.getPersistenceError())throw new Error('conversation-read')
+    return sessions
+  }
+  const organization = window.aislingDesktop?.memoryOrganization ? createOrganizationProcessor({
+    enabled:()=>organizationDesired.value && organizationStatus.value.ready,
+    bridge:window.aislingDesktop.memoryOrganization, getSessions:freshSessions,
+  }) : undefined
   const reflectionRecall = createReflectionRecall(() => formation.inspect())
   const formation = createReflectionFormation({
     storage: { read: () => window.aislingDesktop?.reflectionStorage?.read() ?? { ok: false },
@@ -112,11 +127,27 @@ export const useStageStore = defineStore('stage', () => {
       return sessions
     },
     getProvider: () => settings.activeChatProvider,
-    changed: () => { formationStatus.value = { ...formation.status }; reflectionRecall.invalidate() },
+    getEnableThinking: () => formationEnableThinking(settings.config.consciousness),
+    organization,
+    changed: () => { formationStatus.value = { ...formation.status }; reflectionRecall.invalidate()
+      try { organizationStatus.value = {...organizationStatus.value,pending:formation.inspect().batches.reduce((n,b)=>n+(b.organization?.items.filter(i=>i.status==='proposed-not-applied').length??0),0)} } catch { /* Storage failure is already reported by Formation. */ }
+    },
   })
-  watch(() => settings.loaded && settings.config.memory.enabled && settings.config.memory.formationEnabled === true,
+  watch(() => settings.loaded && settings.config.memory.enabled && (organizationDesired.value ? organizationStatus.value.ready : settings.config.memory.formationEnabled === true),
     enabled => { void formation.setEnabled(enabled) }, { flush: 'sync', immediate: true })
   onScopeDispose(() => formation.dispose())
+  let organizationEpoch=0
+  watch(()=>[organizationDesired.value, settings.activeChatProvider] as const, async ([desired,provider], previous)=>{
+    const ticket=++organizationEpoch
+    if(formation.status.enabled && (desired || previous?.[0]))formation.interrupt()
+    organizationStatus.value={...organizationStatus.value,ready:false,reason:desired?'starting':'disabled'}
+    try {
+      const state=await window.aislingDesktop?.memoryOrganization?.setEnabled(desired && !!provider)
+      if(ticket!==organizationEpoch)return
+      organizationStatus.value={...organizationStatus.value,...(state??{ready:false,autoWrite:false,reason:'desktop-required'})}
+    }catch{if(ticket===organizationEpoch)organizationStatus.value={...organizationStatus.value,ready:false,reason:'database-unavailable'}}
+  },{flush:'sync',immediate:true})
+  onScopeDispose(()=>{organizationEpoch++;void window.aislingDesktop?.memoryOrganization?.setEnabled(false).catch(()=>{})})
 
   const diagnostic = window.aislingDesktop?.desktopDiagnostics?.enabled
     ? (record: import('../runtime/autonomous').DesktopDiagnosticRecord) => {
@@ -146,9 +177,15 @@ export const useStageStore = defineStore('stage', () => {
       return projected?.evidence
     },
     getReflectionContext: stimulus => {
+      reflectionRecallDiagnostic.value = undefined
       if (!memoryRecallEnabled.value || recallMode.value === 'A') return { candidates: [], durationMs: 0, reason: 'disabled' }
       if (conversationStore.getPersistenceError()) return { candidates: [], durationMs: 0, reason: 'conversation-error' }
-      return reflectionRecall.retrieve(toRaw(sessionsList.value), activeSessionId.value, stimulus.text)
+      const context = reflectionRecall.retrieve(toRaw(sessionsList.value), activeSessionId.value, stimulus.text)
+      const remember = <T extends import('@aisling/core').ReflectionRecallContext>(value: T): T => {
+        reflectionRecallDiagnostic.value = value.selection
+        return value
+      }
+      return 'then' in context ? context.then(remember) : remember(context)
     },
     getSituationContext: (stimulus, turnId) => situation.contextFor(stimulus, diagnostic && turnId
       ? selection => { turnDiagnostics.set(turnId, { ...selection }) } : undefined),
@@ -177,6 +214,7 @@ export const useStageStore = defineStore('stage', () => {
     if (sending.value || visionProcessing.value) throw new Error('Wait for the current turn before changing Memory Recall mode')
     recallMode.value = mode
     memoryRecallDiagnostic.value = undefined
+    reflectionRecallDiagnostic.value = undefined
   }
   const lastTurn = shallowRef<{ stimulus: Stimulus; output: CharacterOutput } | undefined>()
   const autonomous = reactive(createAutonomousState())
@@ -503,6 +541,7 @@ export const useStageStore = defineStore('stage', () => {
     if (!session)
       return
     void formation.flush(activeSessionId.value)
+    if(organizationDesired.value)formation.interrupt()
     activeSessionId.value = id
     situation.reset()
     conversationStore.setActiveId(id)
@@ -518,6 +557,7 @@ export const useStageStore = defineStore('stage', () => {
     if (sending.value || visionProcessing.value)
       return
     void formation.flush(activeSessionId.value)
+    if(organizationDesired.value)formation.interrupt()
     const session = conversationStore.create()
     activeSessionId.value = session.id
     situation.reset()
@@ -534,6 +574,7 @@ export const useStageStore = defineStore('stage', () => {
       return
     const wasActive = id === activeSessionId.value
     conversationStore.delete(id)
+    if(organizationDesired.value)formation.interrupt()
     sessionsList.value = conversationStore.list()
     if (wasActive) {
       const remaining = sessionsList.value
@@ -546,12 +587,14 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   return {
+    organizationStatus,
     formationStatus,
     formation,
     memoryRecallEnabled,
     memoryRecallMode,
     setMemoryRecallMode,
     memoryRecallDiagnostic,
+    reflectionRecallDiagnostic,
     autonomous,
     situationStatus,
     desktopBridgeState,

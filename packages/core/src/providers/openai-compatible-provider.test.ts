@@ -23,6 +23,14 @@ async function captureFetch(reply: () => Response): Promise<{ fetchImpl: typeof 
 }
 
 describe('openai-compatible provider', () => {
+  it('returns actual non-streaming usage without estimating missing counters',async()=>{
+    for(const usage of [{prompt_tokens:12,completion_tokens:7},{prompt_tokens:-1,completion_tokens:7},undefined]){
+      const {fetchImpl}=await captureFetch(()=>jsonResponse({choices:[{message:{content:'ok'}}],usage}))
+      const provider=createOpenAICompatibleProvider({baseUrl:'https://mock.invalid',apiKey:'mock',model:'mock',fetchImpl})
+      const output=await provider.complete({messages:[]})
+      expect(output.usage).toEqual(usage?.prompt_tokens===12?{inputTokens:12,outputTokens:7}:undefined)
+    }
+  })
   afterEach(() => vi.useRealTimers())
 
   it('times headers separately from unchanged response.json processing', async () => {

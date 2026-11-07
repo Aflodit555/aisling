@@ -11,7 +11,8 @@ const {
   registerStageScheme,
   registerStageProtocol,
 } = require('./desktop-protocol.cjs')
-const { registerStorageIpc, readStoredConfig, readStoredLanguage } = require('./desktop-store.cjs')
+const { registerStorageIpc, readStoredConfig, readStoredLanguage, readDesktopData, readReflections,
+  readRawReflections,writeRawReflections,writeDesktopData,configureMemoryLifecycle } = require('./desktop-store.cjs')
 
 // Must run before app.whenReady(): this makes `aisling://` a standard, secure
 // origin so the built renderer keeps working localStorage + history routing.
@@ -69,6 +70,16 @@ function writeDesktopDiagnostic(record) {
       if (typeof record.scopeMatched === 'boolean' || record.scopeMatched === 'unknown') safe.scopeMatched = record.scopeMatched
       if (['injected', 'context-budget', 'disabled', 'conversation-error', 'unsafe-query', 'storage-error', 'empty',
         'no-match', 'invalid-source', 'candidate-budget', 'context-error', 'unavailable'].includes(record.reflectionReason)) safe.reflectionReason = record.reflectionReason
+      if (Array.isArray(record.reflectionSelection)) safe.reflectionSelection = record.reflectionSelection.slice(0, 6).flatMap(item => {
+        if (!item || typeof item.label !== 'string' || !/^R[1-6]$/.test(item.label) || !['event', 'fact', 'pattern', 'preference', 'project-state', 'open-question'].includes(item.kind)
+          || !['relevance', 'invalid-source', 'selected', 'candidate-budget', 'context-budget', 'combination-value'].includes(item.reason)
+          || !Number.isFinite(item.score) || item.score < 0 || !Number.isSafeInteger(item.matched) || item.matched < 0
+          || typeof item.eligible !== 'boolean') return []
+        const row = { label: item.label, kind: item.kind, score: item.score, matched: item.matched, eligible: item.eligible, reason: item.reason }
+        if (typeof item.topical === 'boolean') row.topical = item.topical
+        for (const key of ['chars', 'bytes', 'order']) if (Number.isSafeInteger(item[key]) && item[key] >= 0) row[key] = item[key]
+        return [row]
+      })
       if (['stop', 'length', 'tool_calls', 'function_call', 'content_filter', 'other', 'unknown'].includes(record.finishReason)) safe.finishReason = record.finishReason
       if (['empty-content', 'whitespace-only', 'markdown-fence', 'non-json-prefix', 'json-syntax', 'non-syntax-error'].includes(record.jsonParseFailure)) safe.jsonParseFailure = record.jsonParseFailure
       if (['provider-enter', 'fetch-start', 'headers-received', 'response-json-start', 'response-json-end', 'response-json-failed',
@@ -293,8 +304,8 @@ function describeError(error) {
   return error instanceof Error ? (error.stack || error.message) : String(error)
 }
 
-/** @param {boolean} diagnostics */
-function registerAppDiagnostics(diagnostics) {
+/** @param {boolean} diagnostics @param {(event: Electron.Event) => boolean} [deferQuit] */
+function registerAppDiagnostics(diagnostics, deferQuit) {
   if (appEventsRegistered)
     return
   appEventsRegistered = true
@@ -305,7 +316,8 @@ function registerAppDiagnostics(diagnostics) {
     diagnostic(diagnostics, 'window-all-closed')
     app.quit()
   })
-  app.on('before-quit', () => {
+  app.on('before-quit', event => {
+    if (deferQuit?.(event)) return
     quitting = true
     stopDesktopPointer()
     stopDesktopAwareness()
@@ -553,17 +565,39 @@ async function createWindow(options = {}) {
   return window
 }
 
-/** @param {{ show?: boolean, diagnostics?: boolean, stageUrl?: string }} [options] */
+/** @type {ReturnType<typeof import('./memory-database/host.cjs').attachMemoryDatabase> | undefined} */
+let memoryDatabase
+let organization
+
+/** @param {{ show?: boolean, diagnostics?: boolean, stageUrl?: string,
+ * onMemoryDatabase?: (store: import('./memory-database/store').MemoryDatabaseStore | undefined, ready: Promise<void> | undefined) => void,
+ * memoryDatabaseDiagnostic?: (event: string, detail: any) => void }} [options] */
 async function startDesktop(options = {}) {
   const diagnostics = options.diagnostics ?? true
+  if (process.env.AISLING_MEMORY_DB_P0 === '1' && !memoryDatabase)
+    memoryDatabase = require('./memory-database/host.cjs').attachMemoryDatabase(app, options.memoryDatabaseDiagnostic)
+  options.onMemoryDatabase?.(memoryDatabase?.store, memoryDatabase?.ready)
   await app.whenReady()
+  organization ||= require('./memory-organization.cjs').createMemoryOrganization({
+    profile: app.getPath('userData'), resources: app.isPackaged ? path.join(process.resourcesPath,'memory-database')
+      : process.env.AISLING_MEMORY_DB_P0_RESOURCES || path.resolve(__dirname,'../../.local/memory-database'),
+    readData:readDesktopData, readReflections:readRawReflections,writeData:writeDesktopData,writeReflections:writeRawReflections,
+    report:state=>{if(stageView&&!stageView.webContents.isDestroyed())stageView.webContents.send('aisling:organization:status',state)},
+    consent:()=>{const config=readStoredConfig();const memory=/** @type {any} */(config?.memory);return memory?.enabled===true&&memory?.organizationEnabled===true},
+  })
+  configureMemoryLifecycle(organization.privacy)
+  void organization.recoverSources().catch(()=>{})
   diagnostic(diagnostics, 'app ready')
   if (!tray) {
     tray = new Tray(nativeImage.createFromPath(ICON_PATH).resize({ width: 32, height: 32 }))
     tray.setToolTip('Aisling')
     tray.on('right-click', () => tray.popUpContextMenu(trayMenu()))
   }
-  registerAppDiagnostics(diagnostics)
+  registerAppDiagnostics(diagnostics, event => {
+    if(memoryDatabase?.deferQuit(event))return true
+    if(organization){const service=organization;organization=undefined;event.preventDefault();void service.close().finally(()=>app.quit());return true}
+    return false
+  })
   registerStorageIpc()
   screen.on('display-metrics-changed', () => {
     if (desktopWindow && !desktopWindow.isDestroyed()) desktopWindow.setContentBounds(desktopBounds())
@@ -588,6 +622,18 @@ async function startDesktop(options = {}) {
     const trusted = event => Boolean(stageView && event.sender === stageView.webContents
       && event.senderFrame === stageView.webContents.mainFrame
       && stageOriginOf(event.senderFrame.url) === allowedOrigin)
+    ipcMain.handle('aisling:organization:enabled',(event,enabled)=>{
+      if(!trusted(event)||typeof enabled!=='boolean')throw new Error('Untrusted organization request')
+      return organization?.setEnabled(enabled) ?? {ready:false,autoWrite:false,reason:'disabled'}
+    })
+    ipcMain.handle('aisling:organization:candidates',event=>{
+      if(!trusted(event))throw new Error('Untrusted organization request')
+      return organization.candidates()
+    })
+    ipcMain.handle('aisling:organization:settle',(event,batchId,index)=>{
+      if(!trusted(event)||typeof batchId!=='string'||!/^[\w-]{1,128}$/.test(batchId)||!Number.isInteger(index)||index<0||index>=3)throw new Error('Untrusted organization proposal')
+      return organization.settle(batchId,index)
+    })
     ipcMain.on('aisling:desktop-awareness:diagnostic', (event, record) => {
       if (desktopDiagnosticsEnabled && trusted(event)) writeDesktopDiagnostic(record)
     })

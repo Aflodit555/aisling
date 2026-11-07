@@ -1,8 +1,10 @@
 import { createDefaultPlatformConfig, createOpenAICompatibleProvider, createUserTextStimulus } from '@aisling/core'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createAislingRuntime } from './aisling'
-import { userTextEnableThinking } from './provider-factory'
+import { formationEnableThinking, userTextEnableThinking } from './provider-factory'
 import { recallForModel, retrieveRecall } from './memory-recall'
+import { createReflectionFormation, sourceRef } from './reflection-formation'
+import { createReflectionStore } from './reflection-store'
 
 const config = { ...createDefaultPlatformConfig().consciousness, apiKey: 'MOCK_ONLY', model: 'qwen3.7-flash', temperature: 1.2,
   baseUrl: 'https://test-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' }
@@ -92,4 +94,62 @@ it('does not change direct background calls through the shared Consciousness pro
   await provider.complete({ messages: [{ role: 'user', content: 'background formation' }] })
   expect(bodies[0]!.enable_thinking).toBe(false)
   expect(bodies[1]).not.toHaveProperty('enable_thinking')
+})
+
+it('limits Formation non-thinking to the verified Qwen3.8 Flash workspace route', () => {
+  const formationConfig = { ...config, model: 'qwen3.8-flash' }
+  expect(formationEnableThinking(formationConfig)).toBe(false)
+  expect(formationEnableThinking({ ...formationConfig, baseUrl: `${config.baseUrl}/` })).toBe(false)
+  for (const other of [
+    { ...formationConfig, model: 'other-model' }, { ...config },
+    { ...formationConfig, baseUrl: 'https://api.openai.com/v1' },
+    { ...formationConfig, baseUrl: 'https://api.ppio.com/openai', model: 'qwen/qwen3.8-flash' },
+    { ...formationConfig, baseUrl: 'not a URL' },
+    { ...formationConfig, baseUrl: config.baseUrl.replace('https:', 'http:') },
+    { ...formationConfig, baseUrl: config.baseUrl.replace('.com/', '.com.evil.invalid/') },
+    { ...formationConfig, baseUrl: config.baseUrl.replace('.com/', '.com:8443/') },
+    { ...formationConfig, baseUrl: config.baseUrl.replace('https://', 'https://user:password@') },
+    { ...formationConfig, baseUrl: `${config.baseUrl}?enable_thinking=false` },
+    { ...formationConfig, baseUrl: `${config.baseUrl}#fragment` },
+  ]) expect(formationEnableThinking(other)).toBeUndefined()
+  expect(userTextEnableThinking(formationConfig)).toBeUndefined()
+})
+
+it('sends Formation-only false on the real provider wire and completes validation, persistence and fresh readback', async () => {
+  for (const model of ['qwen3.8-flash', 'other-model']) {
+    const formationConfig = { ...config, model }, bodies: Array<Record<string, unknown>> = []
+    const session = { id: 'controlled', title: '', createdAt: 1, updatedAt: 2,
+      messages: [{ role: 'user' as const, content: '手碟只练两分钟节奏后完成了，并没有练完整首。', createdAt: 1 }] }
+    const provider = createOpenAICompatibleProvider({ ...formationConfig, fetchImpl: async (_url, init) => {
+      const body = JSON.parse(String(init?.body)); bodies.push(body)
+      const formation = body.messages[0].content.startsWith('You form append-only')
+      return Response.json({ choices: [{ message: { content: formation ? JSON.stringify({ reflections: [{
+        content: '用户报告完成了两分钟手碟节奏练习，尚未完成整首。', kind: 'event', basis: 'direct',
+        tags: ['手碟', '节奏练习'], sources: ['E1'], related: [],
+      }] }) : '普通回复。' }, finish_reason: 'stop' }] })
+    } })
+    let raw: string | null = null
+    const sessions: typeof session[] = []
+    const storage = { read: () => ({ ok: true, value: raw }), write: (value: string) => { raw = value; return true } }
+    const queue = createReflectionFormation({ storage, getSessions: () => sessions, getProvider: () => provider,
+      getEnableThinking: () => formationEnableThinking(formationConfig) })
+    try {
+      await queue.setEnabled(true); sessions.push(session); await queue.delivered(session.id, [0]); await queue.flush()
+      await vi.waitFor(() => expect(queue.inspect().batches[0]?.status).toBe('completed'))
+      const state = createReflectionStore(storage).read()
+      expect(state.reflections).toHaveLength(1)
+      expect(state.reflections[0]!.sourceRefs).toEqual([await sourceRef(session.id, 0, session.messages[0]!)])
+      expect(state.reflections[0]).not.toHaveProperty('uncertainty')
+      expect(bodies[0]).toMatchObject({ model, temperature: 0.2, max_completion_tokens: 1500, stream: false })
+      if (model === 'qwen3.8-flash') expect(bodies[0]!.enable_thinking).toBe(false)
+      else expect(bodies[0]).not.toHaveProperty('enable_thinking')
+      const runtime = createAislingRuntime({ getChatProvider: () => provider, getTools: () => [],
+        getUserTextEnableThinking: () => userTextEnableThinking(formationConfig) })
+      expect((await runtime.ingest(createUserTextStimulus({ source: 'test', text: '普通聊天' }))).status).toBe('completed')
+      expect(bodies[1]).toMatchObject({ model, temperature: 1.2, stream: true })
+      expect(bodies[1]).not.toHaveProperty('enable_thinking')
+      expect(bodies[1]).not.toHaveProperty('max_completion_tokens')
+      expect(formationConfig).toEqual({ ...config, model })
+    } finally { queue.dispose() }
+  }
 })

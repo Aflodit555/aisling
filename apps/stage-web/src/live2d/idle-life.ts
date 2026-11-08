@@ -118,8 +118,9 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
     let ay = maxSpeed * dy / distance - eyeVelocity.y
     const acceleration = Math.hypot(ax, ay)
     if (acceleration > maxAcceleration) {
-      ax *= maxAcceleration / acceleration
-      ay *= maxAcceleration / acceleration
+      const scale = maxAcceleration / acceleration
+      ax *= scale
+      ay *= scale
     }
     eyeVelocity.x += ax
     eyeVelocity.y += ay

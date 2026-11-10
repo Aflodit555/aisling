@@ -16,10 +16,12 @@ const LEGACY_CONSCIOUSNESS_KEY = 'aisling.consciousness.config.v1'
  * implementation behind the same `ConfigStore` interface to move to a file or
  * service later.
  */
-export function createLocalStorageConfigStore(storage: PersistentStorage = window.localStorage): ConfigStore {
+export function createLocalStorageConfigStore(storage: PersistentStorage = window.localStorage,
+  noteOnly = false): ConfigStore {
   return {
     async get() {
       const defaults = createDefaultPlatformConfig()
+      if (!noteOnly) defaults.memory.organizationEnabled = false
       try {
         const raw = storage.getItem(KEY)
         if (raw) {
@@ -52,9 +54,11 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             vision: { ...defaults.vision, ...parsed.vision, enabled: parsed.vision?.enabled ?? (parsed.vision?.providerType !== undefined && parsed.vision.providerType !== 'none') },
             webSearch,
             memory: { enabled: memoryEnabled, formationEnabled: memoryEnabled && parsed.memory?.formationEnabled === true,
-              organizationEnabled: memoryEnabled && parsed.memory?.organizationEnabled === true },
+              ...(!noteOnly && { organizationEnabled: memoryEnabled && parsed.memory?.organizationEnabled === true }),
+              ...(memoryEnabled && parsed.memory?.noteRecallEnabled === true ? { noteRecallEnabled: true } : {}) },
           }
           if (Object.hasOwn(parsed, 'hearing')
+            || (noteOnly && Object.hasOwn(parsed.memory ?? {}, 'organizationEnabled'))
             || (parsed.memory?.formationEnabled === true && !memoryEnabled)
             || parsed.speech?.enabled === undefined || parsed.vision?.enabled === undefined || parsed.webSearch?.enabled === undefined
             || parsed.consciousness?.providerType !== 'openai-compatible'

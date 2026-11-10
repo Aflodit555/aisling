@@ -1,15 +1,13 @@
 import { isValidTimestamp, normalizeAutonomousContext, type ChatCompletionRequest, type ChatProvider, type ChatRequestTiming, type ConversationMessage } from '@aisling/core'
 import type { ConversationSession } from '../conversation/conversation-store'
-import { recallForModel, retrieveRecall, safeText, terms } from './memory-recall'
+import { recallForModel, safeText, terms } from './memory-recall'
 import { createReflectionStore, reflectionValidationField, type Reflection, type ReflectionStorage, type SourceRef, type FormationBatch, type OrganizationRecord } from './reflection-store'
 
+import { sourceRef, withRelatedHistory, type FormationEvidence } from './formation-evidence'
+export { sourceRef, type FormationEvidence } from './formation-evidence'
+
 export const FORMATION_LIMITS = { units: 3, sources: 12, evidenceBytes: 6000, inputBytes: 15000, candidates: 3, outputTokens: 1500, timeoutMs: 45000 } as const
-export interface FormationEvidence {
-  ref: SourceRef
-  message: ConversationMessage
-  scope?: 'current-batch' | 'related-history'
-  sessionTime?: { createdAt?: number; updatedAt?: number }
-}
+
 interface EvidenceRecord {
   label: string
   conversation: string
@@ -25,10 +23,7 @@ class FormationFailure extends Error {
   constructor(code: string, readonly detail: FailureDetail) { super(code) }
 }
 const bytes = (text: string) => new TextEncoder().encode(text).length
-export async function sourceRef(sessionId: string, messageIndex: number, message: ConversationMessage): Promise<SourceRef> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(message)))
-  return { sessionId, messageIndex, digest: Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, '0')).join('') }
-}
+
 /** Reuse raw Recall's time/source boundary without changing its retrieval or presentation rules. */
 export function reflectionEvidence(evidence: FormationEvidence[]) {
   const timedSessions = new Set<string>()
@@ -70,7 +65,7 @@ const FORMATION_POLICY = [
 ].join(' ')
 export function formationRequest(evidence: FormationEvidence[], candidates: Reflection[]): ChatCompletionRequest {
   if (!evidence.length || evidence.length > FORMATION_LIMITS.sources || evidence.some(e => !['user', 'assistant'].includes(e.message.role)
-    || typeof e.message.content !== 'string' || !safeText(e.message.content) || e.message.toolCalls?.length || e.message.toolCallId)) throw new Error('input-limit')
+    || typeof e.message.content !== 'string' || e.message.noteDerived || !safeText(e.message.content) || e.message.toolCalls?.length || e.message.toolCallId)) throw new Error('input-limit')
   const records = reflectionEvidence(evidence)
   if (bytes(JSON.stringify(records)) > FORMATION_LIMITS.evidenceBytes) throw new Error('input-limit')
   const content = JSON.stringify({ currentBatchSources: records.filter(r => r.scope === 'current-batch').map(r => r.label),
@@ -165,44 +160,13 @@ export function createReflectionFormation(deps: { storage: ReflectionStorage; ge
     const sessions = deps.getSessions()
     return Promise.all(refs.map(async (ref, sourceIndex) => {
       const session = sessions.find(s => s.id === ref.sessionId), message = session?.messages[ref.messageIndex]
-      const reason = !session ? 'session-missing' : !message ? 'message-missing'
+      const reason = !session ? 'session-missing' : !message ? 'message-missing' : message.noteDerived ? 'note-derived'
         : (await sourceRef(ref.sessionId, ref.messageIndex, message)).digest !== ref.digest ? 'digest-mismatch' : undefined
       if (reason) throw new FormationFailure('source-changed', { stage, reason, sourceIndex })
       return { ref, message: message!, sessionTime: { createdAt: session!.createdAt || undefined, updatedAt: session!.updatedAt || undefined } }
     }))
   }
-  async function withRelatedHistory(sessionId: string, current: FormationEvidence[], candidates: Reflection[]): Promise<FormationEvidence[]> {
-    const selected = [...current]
-    if (selected.length >= FORMATION_LIMITS.sources) return selected
-    try {
-      const sessions = deps.getSessions()
-      const reports = current.filter(e => e.message.role === 'user')
-      // Historical support is for attempts/outcomes, not another pass over unrelated old states.
-      const experience = (text: string | null) => typeof text === 'string' && /本来|原本|尝试|练习|目标|任务|计划|\b(?:tried|practice|goal|task|plan)\b/iu.test(text)
-        && /完成|做完|练完|没开始|未开始|没动笔|没有动笔|拖延|结果|失败|成功|\b(?:finished|completed|failed|stalled|outcome)\b/iu.test(text)
-      if (!reports.some(e => experience(e.message.content))) return selected
-      const query = (reports.length ? reports : current).map(e => e.message.content).join('\n').slice(0, 3000)
-      const recalled = retrieveRecall(sessions, sessionId, query)
-      if (!recalled.evidence) return selected
-      const records = JSON.parse(recalled.evidence) as Array<{ sessionId: string; messageIndex: number }>
-      // Keep each retrieved session together, including corrections; never register it as new work.
-      for (const id of recalled.sessionIds) {
-        const group = records.filter(r => r.sessionId === id)
-        if (selected.length + group.length > FORMATION_LIMITS.sources) continue
-        const session = sessions.find(s => s.id === id)!
-        if (!group.some(r => { const message = session.messages[r.messageIndex]!; return message.role === 'user' && experience(message.content) })) continue
-        const extra = await Promise.all(group.map(async r => {
-          const message = session.messages[r.messageIndex]!
-          return { ref: await sourceRef(id, r.messageIndex, message), message, scope: 'related-history' as const,
-            sessionTime: { createdAt: session.createdAt || undefined, updatedAt: session.updatedAt || undefined } }
-        }))
-        try { formationRequest([...selected, ...extra], candidates); selected.push(...extra) }
-        catch { /* Optional history must fit the current batch's existing budgets. */ }
-      }
-    }
-    catch { /* Missing/over-budget history leaves the current batch usable. */ }
-    return selected
-  }
+
   async function pump(): Promise<void> {
     if (!status.enabled || status.running) return
     status.running = true
@@ -241,7 +205,7 @@ export function createReflectionFormation(deps: { storage: ReflectionStorage; ge
           const current = await resolveSources(batch.sourceRefs, stage)
           stage = 'candidate-selection'
           const candidates = reflectionCandidates(store.read().reflections, current.map(e => e.message.content).join('\n'))
-          const evidence = await withRelatedHistory(batch.sessionId, current, candidates)
+          const evidence = await withRelatedHistory(batch.sessionId, current, deps.getSessions, evidence => { formationRequest(evidence, candidates) })
           error = 'input-limit'
           stage = 'input-validation'
           const processor = deps.organization?.enabled() ? await deps.organization.prepare(current, batch) : undefined

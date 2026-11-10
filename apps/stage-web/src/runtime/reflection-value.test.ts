@@ -2,6 +2,7 @@ import { createOpenAICompatibleProvider, createUserTextStimulus, type ChatComple
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { estimateMessageTokens, INPUT_TOKEN_LIMIT } from '../../../../packages/core/src/context'
 import { createAislingRuntime } from './aisling'
+import { legacyRecallProvider } from '@aisling/core/legacy-recall'
 import { recallForModel, retrieveRecall } from './memory-recall'
 import { createReflectionRecall, REFLECTION_RECALL_LIMITS } from './reflection-recall'
 import { sourceRef } from './reflection-formation'
@@ -106,7 +107,7 @@ it('delivers an old understanding beside a later raw correction and a current us
     getRecallEvidence: () => {
       const result = retrieveRecall(f.sessions, 'active', query)
       return result.evidence ? recallForModel(result.evidence).evidence : undefined
-    }, getReflectionContext: () => f.recall.retrieve(f.sessions, 'active', query) })
+    }, getHistoryAddon: legacyRecallProvider(() => f.recall.retrieve(f.sessions, 'active', query)) })
   await runtime.ingest(createUserTextStimulus({ source: 'test', text: query }))
   expect(complete).toHaveBeenCalledOnce()
   const messages = complete.mock.calls[0]![0].messages
@@ -158,11 +159,11 @@ it.each(tasks)('compares actual A/B/C requests for %s with isolated sessions and
         if (mode === 'B') return
         const result = retrieveRecall(sessions, active.id, query); rawRecords = result.records
         return result.evidence ? recallForModel(result.evidence).evidence : undefined
-      }, getReflectionContext: async () => {
+      }, getHistoryAddon: legacyRecallProvider(async () => {
         if (mode === 'A') return { candidates: [], durationMs: 0, reason: 'disabled' }
         const result = await f.recall.retrieve(sessions, active.id, query)
         retrievalReason = result.reason; candidateCount = result.candidates.length; return result
-      } })
+      }) })
     expect((await runtime.ingest(createUserTextStimulus({ source: 'test', text: query }))).status).toBe('completed')
     const request = wire.at(-1)!, assembled = diagnostics.find(r => r.type === 'context-assembled')!
     expect(request).toMatchObject({ model: 'offline-ablation', temperature: 0.2, enable_thinking: false })

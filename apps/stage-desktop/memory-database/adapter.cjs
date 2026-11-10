@@ -1,8 +1,12 @@
-const { ddl: noteDdl, noteOperations } = require('./note-v1.cjs')
+const { ddl: noteDdl, noteOperations, snapshotColumn } = require('./note-v1.cjs')
 const {ddl:erasureDdl,erasureOperations}=require('./erasure.cjs')
 
-function openLadybug(api, file, noteV1 = false) {
-  const db = new api.Database(file)
+function openLadybug(api, file, schema = 'p0', readOnly = false) {
+  const snapshot = snapshotColumn(schema)
+  const noteV2 = snapshot !== 'snapshot'
+  const runtime = schema === 'note-v2-runtime'
+  const versioned = schema !== 'p0'
+  const db = readOnly ? new api.Database(file, 0, true, true) : new api.Database(file)
   const connection = new api.Connection(db)
 
   async function query(statement, params = undefined) {
@@ -15,22 +19,32 @@ function openLadybug(api, file, noteV1 = false) {
 
   const graph = {
     async initialize() {
-      const noteColumns = noteV1 ? 'snapshot STRING' : 'content STRING, createdAt INT64'
+      const noteColumns = versioned ? snapshot + ' STRING' : 'content STRING, createdAt INT64'
       const tables = await query('CALL show_tables() RETURN name')
       if (tables.some(row => row.name === 'Note')) {
         const columns = await query("CALL table_info('Note') RETURN name")
-        const expected = noteV1 ? ['id', 'snapshot'] : ['content', 'createdAt', 'id']
+        const expected = versioned ? ['id', snapshot] : ['content', 'createdAt', 'id']
         if (columns.map(row => row.name).sort().join(',') !== expected.join(','))
           throw new Error('Note database schema mismatch')
+      } else if (noteV2 && tables.length) {
+        throw new Error('Note database schema mismatch')
+      }
+      if (readOnly) {
+        if (!['Note', 'NoteRevision', 'NoteOperation', 'Evidence', 'Origin', 'HAS_ORIGIN', 'HAS_EVIDENCE'].every(name => tables.some(row => row.name === name)))
+          throw new Error('Incomplete legacy Note database')
+        return
       }
       for (const ddl of [
         `CREATE NODE TABLE IF NOT EXISTS Note(id STRING PRIMARY KEY, ${noteColumns})`,
-        'CREATE NODE TABLE IF NOT EXISTS Origin(reflectionId STRING PRIMARY KEY)',
         'CREATE NODE TABLE IF NOT EXISTS Evidence(key STRING PRIMARY KEY, sessionId STRING, messageIndex INT64, digest STRING)',
-        'CREATE REL TABLE IF NOT EXISTS HAS_ORIGIN(FROM Note TO Origin)',
         'CREATE REL TABLE IF NOT EXISTS HAS_EVIDENCE(FROM Note TO Evidence)',
-        'CREATE REL TABLE IF NOT EXISTS RELATED(FROM Note TO Note)',
-        ...(noteV1 ? [...noteDdl,...erasureDdl] : []),
+        ...(runtime ? ['CREATE REL TABLE IF NOT EXISTS HAS_CONTEXT(FROM Note TO Evidence)'] : []),
+        ...(!noteV2 ? [
+          'CREATE NODE TABLE IF NOT EXISTS Origin(reflectionId STRING PRIMARY KEY)',
+          'CREATE REL TABLE IF NOT EXISTS HAS_ORIGIN(FROM Note TO Origin)',
+          'CREATE REL TABLE IF NOT EXISTS RELATED(FROM Note TO Note)',
+        ] : []),
+        ...(versioned ? [...noteDdl, ...erasureDdl] : []),
       ]) await query(ddl)
     },
     async insertNote({ id, content, createdAt }) {
@@ -52,15 +66,15 @@ function openLadybug(api, file, noteV1 = false) {
     getOrigins(noteId) {
       return query(`
         MATCH (:Note {id: $noteId})-[:HAS_ORIGIN]->(o:Origin)
-        RETURN o.reflectionId AS reflectionId
+        RETURN o.reflectionId AS reflectionId ${versioned ? 'ORDER BY o.reflectionId LIMIT 65' : ''}
       `, { noteId })
     },
-    async addEvidence(noteId, { sessionId, messageIndex, digest }) {
+    async addEvidence(noteId, { sessionId, messageIndex, digest }, relation = 'HAS_EVIDENCE') {
       const key = JSON.stringify([sessionId, messageIndex, digest])
       const matched = await query(`
         MATCH (n:Note {id: $noteId})
         MERGE (e:Evidence {key: $key, sessionId: $sessionId, messageIndex: $messageIndex, digest: $digest})
-        MERGE (n)-[:HAS_EVIDENCE]->(e)
+        MERGE (n)-[:${relation}]->(e)
         RETURN n.id
       `, { noteId, key, sessionId, messageIndex, digest })
       if (!matched.length) throw new Error('Evidence Note does not exist')
@@ -117,8 +131,8 @@ function openLadybug(api, file, noteV1 = false) {
       finally { await db.close() }
     },
   }
-  const erasure=erasureOperations(query,graph)
-  return { ...graph, ...noteOperations(query, graph, noteV1?erasure.assertWritable:undefined),...erasure }
+  const erasure = erasureOperations(query, graph, noteV2, runtime)
+  return { ...graph, ...noteOperations(query, graph, versioned ? erasure.assertWritable : undefined, schema), ...erasure }
 }
 
 

@@ -19,12 +19,17 @@ import { resolvePersistentStorage } from '../storage/desktop-storage'
 import { createSituationWorkingState, isSituationCorrection, providerSituationExecutor } from '../runtime/situation-working-state'
 import { userTextEnableThinking, situationEnableThinking, formationEnableThinking } from '../runtime/provider-factory'
 import { recallForModel, retrieveRecall, type RecallSource } from '../runtime/memory-recall'
-import { createReflectionFormation } from '../runtime/reflection-formation'
-import { createReflectionRecall } from '../runtime/reflection-recall'
-import { createOrganizationProcessor } from '../runtime/note-organization'
+import type { createLegacyMemory } from '../runtime/legacy-memory'
+import { createNoteFormation } from '../runtime/note-formation'
+import { prepareNoteV2Recall } from '../runtime/note-v2-recall'
 import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
+
+let legacyFactory: typeof createLegacyMemory | undefined
+export async function loadLegacyMemory() {
+  legacyFactory ??= (await import('../runtime/legacy-memory')).createLegacyMemory
+}
 
 /** A message the Stage renders in the interaction dock. */
 export interface DisplayMessage {
@@ -96,58 +101,35 @@ export const useStageStore = defineStore('stage', () => {
   const sessionMessages = ref<ConversationMessage[]>([...activeSession.messages])
   const sessionsList = ref<ConversationSession[]>(conversationStore.list())
   const memoryRecallEnabled = computed(() => settings.config.memory.enabled)
-  // Developer-only comparison; never persist an experiment as the user's Memory preference.
-  const recallMode = ref<'A' | 'B' | 'C'>('C')
-  const memoryRecallMode = computed(() => recallMode.value)
   const memoryRecallDiagnostic = shallowRef<{ sessionIds: string[]; rankedSessionIds: string[]; packingOmittedSessionIds: string[];
     records: number; sources: RecallSource[] }>()
-  const reflectionRecallDiagnostic = shallowRef<import('@aisling/core').ReflectionRecallContext['selection']>()
-  watch(memoryRecallEnabled, () => { memoryRecallDiagnostic.value = undefined; reflectionRecallDiagnostic.value = undefined }, { flush: 'sync' })
-  const formationStatus = shallowRef({ enabled: false, running: false, calls: 0, lastEvent: 'disabled' })
-  const organizationStatus = shallowRef({ ready:false, autoWrite:false, reason:'disabled', pending:0 })
-  const organizationDesired = computed(()=>settings.loaded && settings.config.memory.enabled && settings.config.memory.organizationEnabled===true)
-  const offOrganizationStatus=window.aislingDesktop?.memoryOrganization?.onStatus?.(state=>{organizationStatus.value={...organizationStatus.value,...state}})
-  onScopeDispose(()=>offOrganizationStatus?.())
+  const noteRecallDesired = computed(() => settings.loaded && memoryRecallEnabled.value && settings.config.memory.noteRecallEnabled === true)
+  let noteEpoch = 0
+  let usedNoteEvidence = false
+  const markNoteUsed = () => { usedNoteEvidence = true }
   const freshSessions = () => {
-    const sessions=conversationStore.list()
-    if(conversationStore.getPersistenceError())throw new Error('conversation-read')
+    const sessions = conversationStore.list()
+    if (conversationStore.getPersistenceError()) throw new Error('conversation-read')
     return sessions
   }
-  const organization = window.aislingDesktop?.memoryOrganization ? createOrganizationProcessor({
-    enabled:()=>organizationDesired.value && organizationStatus.value.ready,
-    bridge:window.aislingDesktop.memoryOrganization, getSessions:freshSessions,
-  }) : undefined
-  const reflectionRecall = createReflectionRecall(() => formation.inspect())
-  const formation = createReflectionFormation({
-    storage: { read: () => window.aislingDesktop?.reflectionStorage?.read() ?? { ok: false },
-      write: value => window.aislingDesktop?.reflectionStorage?.write(value) ?? false },
-    getSessions: () => {
-      const sessions = conversationStore.list()
-      if (conversationStore.getPersistenceError()) throw new Error('conversation-read')
-      return sessions
-    },
-    getProvider: () => settings.activeChatProvider,
-    getEnableThinking: () => formationEnableThinking(settings.config.consciousness),
-    organization,
-    changed: () => { formationStatus.value = { ...formation.status }; reflectionRecall.invalidate()
-      try { organizationStatus.value = {...organizationStatus.value,pending:formation.inspect().batches.reduce((n,b)=>n+(b.organization?.items.filter(i=>i.status==='proposed-not-applied').length??0),0)} } catch { /* Storage failure is already reported by Formation. */ }
-    },
-  })
-  watch(() => settings.loaded && settings.config.memory.enabled && (organizationDesired.value ? organizationStatus.value.ready : settings.config.memory.formationEnabled === true),
-    enabled => { void formation.setEnabled(enabled) }, { flush: 'sync', immediate: true })
-  onScopeDispose(() => formation.dispose())
-  let organizationEpoch=0
-  watch(()=>[organizationDesired.value, settings.activeChatProvider] as const, async ([desired,provider], previous)=>{
-    const ticket=++organizationEpoch
-    if(formation.status.enabled && (desired || previous?.[0]))formation.interrupt()
-    organizationStatus.value={...organizationStatus.value,ready:false,reason:desired?'starting':'disabled'}
-    try {
-      const state=await window.aislingDesktop?.memoryOrganization?.setEnabled(desired && !!provider)
-      if(ticket!==organizationEpoch)return
-      organizationStatus.value={...organizationStatus.value,...(state??{ready:false,autoWrite:false,reason:'desktop-required'})}
-    }catch{if(ticket===organizationEpoch)organizationStatus.value={...organizationStatus.value,ready:false,reason:'database-unavailable'}}
-  },{flush:'sync',immediate:true})
-  onScopeDispose(()=>{organizationEpoch++;void window.aislingDesktop?.memoryOrganization?.setEnabled(false).catch(()=>{})})
+  const desktop = window.aislingDesktop
+  const noteV2Recall = desktop?.noteRecall
+  const noteFormation = desktop?.noteFormation && createNoteFormation(desktop.noteFormation, freshSessions,
+    () => formationEnableThinking(settings.config.consciousness))
+  if (noteFormation) {
+    watch(() => settings.loaded && settings.config.memory.enabled && settings.config.memory.formationEnabled === true
+      ? settings.activeChatProvider : undefined,
+      provider => noteFormation.setProvider(provider), { immediate: true, flush: 'sync' })
+    onScopeDispose(() => noteFormation.setProvider(undefined))
+  }
+  const legacy = !noteFormation && !noteV2Recall && (desktop?.memoryOrganization || desktop?.reflectionStorage)
+    ? legacyFactory?.({ settings, freshSessions, sessions: () => toRaw(sessionsList.value), activeId: () => activeSessionId.value,
+        storageFailed: () => !!conversationStore.getPersistenceError(), onUsed: markNoteUsed })
+    : undefined
+  const clearNoteRecall = () => { noteEpoch++; legacy?.invalidate() }
+  watch(noteRecallDesired, clearNoteRecall, { flush: 'sync' })
+  watch(memoryRecallEnabled, () => { memoryRecallDiagnostic.value = undefined }, { flush: 'sync' })
+  onScopeDispose(clearNoteRecall)
 
   const diagnostic = window.aislingDesktop?.desktopDiagnostics?.enabled
     ? (record: import('../runtime/autonomous').DesktopDiagnosticRecord) => {
@@ -167,7 +149,7 @@ export const useStageStore = defineStore('stage', () => {
     history: activeSession.messages,
     getRecallEvidence: stimulus => {
       memoryRecallDiagnostic.value = undefined
-      if (!memoryRecallEnabled.value || recallMode.value === 'B') return
+      if (!memoryRecallEnabled.value) return
       // Submission already refreshed this snapshot after saving the current input.
       const sessions = toRaw(sessionsList.value)
       if (conversationStore.getPersistenceError()) return
@@ -176,17 +158,15 @@ export const useStageStore = defineStore('stage', () => {
       memoryRecallDiagnostic.value = { ...summary, sources: projected?.sources ?? [] }
       return projected?.evidence
     },
-    getReflectionContext: stimulus => {
-      reflectionRecallDiagnostic.value = undefined
-      if (!memoryRecallEnabled.value || recallMode.value === 'A') return { candidates: [], durationMs: 0, reason: 'disabled' }
-      if (conversationStore.getPersistenceError()) return { candidates: [], durationMs: 0, reason: 'conversation-error' }
-      const context = reflectionRecall.retrieve(toRaw(sessionsList.value), activeSessionId.value, stimulus.text)
-      const remember = <T extends import('@aisling/core').ReflectionRecallContext>(value: T): T => {
-        reflectionRecallDiagnostic.value = value.selection
-        return value
-      }
-      return 'then' in context ? context.then(remember) : remember(context)
-    },
+    getNoteContext: noteV2Recall && (async stimulus => {
+      if (!noteRecallDesired.value || conversationStore.getPersistenceError()) return
+      const epoch = noteEpoch
+      const sessionId = activeSessionId.value
+      return prepareNoteV2Recall(noteV2Recall, toRaw(sessionsList.value), sessionId, stimulus.text,
+        () => noteRecallDesired.value && noteEpoch === epoch && activeSessionId.value === sessionId,
+        markNoteUsed)
+    }),
+    getHistoryAddon: legacy?.getHistoryAddon,
     getSituationContext: (stimulus, turnId) => situation.contextFor(stimulus, diagnostic && turnId
       ? selection => { turnDiagnostics.set(turnId, { ...selection }) } : undefined),
     diagnostic: diagnostic ? record => {
@@ -209,13 +189,7 @@ export const useStageStore = defineStore('stage', () => {
   const sending = ref(false)
   const searching = ref(false)
   const visionProcessing = ref(false)
-  function setMemoryRecallMode(mode: 'A' | 'B' | 'C'): void {
-    if (!['A', 'B', 'C'].includes(mode)) throw new Error('Memory Recall mode must be A, B or C')
-    if (sending.value || visionProcessing.value) throw new Error('Wait for the current turn before changing Memory Recall mode')
-    recallMode.value = mode
-    memoryRecallDiagnostic.value = undefined
-    reflectionRecallDiagnostic.value = undefined
-  }
+
   const lastTurn = shallowRef<{ stimulus: Stimulus; output: CharacterOutput } | undefined>()
   const autonomous = reactive(createAutonomousState())
   const desktopBridgeState = ref<DesktopBridgeState>(hasDesktopBridge() ? 'connected' : 'unavailable')
@@ -388,6 +362,7 @@ export const useStageStore = defineStore('stage', () => {
     }
 
     sending.value = true
+    usedNoteEvidence = false
     if (stimulus.kind === 'user-text' && isSituationCorrection(stimulus.text))
       situation.feedback(stimulus.text, situation.currentScope())
     const autonomousTurn = stimulus.kind === 'autonomous' ? {
@@ -455,14 +430,20 @@ export const useStageStore = defineStore('stage', () => {
           messages.value.push({ role: 'assistant', content: turn.output.text })
         }
         const createdAt = Date.now()
+        const noteDerived = usedNoteEvidence || sessionMessages.value.some(message => message.noteDerived)
         const delivered: ConversationMessage = { role: 'assistant', content: turn.output.text, createdAt,
-          ...(autonomousTurn ? { autonomousContext: createAutonomousContext(autonomousTurn.stimulus.candidate, createdAt) } : {}) }
+          ...(autonomousTurn ? { autonomousContext: createAutonomousContext(autonomousTurn.stimulus.candidate, createdAt) } : {}),
+          ...(noteDerived ? { noteDerived: true as const } : {}) }
         sessionMessages.value = [...sessionMessages.value, delivered]
         void speech.speak(turn.output.text)
         persistActiveSession()
         if (!conversationStore.getPersistenceError() && (stimulus.kind === 'user-text' || autonomousTurn)) {
-          const indices = autonomousTurn ? [sessionMessages.value.length - 1] : [formationUserIndex, sessionMessages.value.length - 1]
-          void formation.delivered(formationSessionId, indices)
+          const indices = [...(stimulus.kind === 'user-text' ? [formationUserIndex] : []),
+            ...(noteDerived ? [] : [sessionMessages.value.length - 1])]
+          if (indices.length) {
+            if (noteFormation) noteFormation.delivered(formationSessionId, indices)
+            else void legacy?.formation.delivered(formationSessionId, indices)
+          }
         }
         diagnosticDelivered = true; diagnosticOutcome = 'delivered'
         if (autonomousTurn) {
@@ -540,8 +521,9 @@ export const useStageStore = defineStore('stage', () => {
     const session = conversationStore.get(id)
     if (!session)
       return
-    void formation.flush(activeSessionId.value)
-    if(organizationDesired.value)formation.interrupt()
+    if (noteFormation) noteFormation.flush(activeSessionId.value)
+    else void legacy?.formation.flush(activeSessionId.value)
+    legacy?.interruptOrganization()
     activeSessionId.value = id
     situation.reset()
     conversationStore.setActiveId(id)
@@ -556,8 +538,9 @@ export const useStageStore = defineStore('stage', () => {
     autonomousController.noteHumanInteraction()
     if (sending.value || visionProcessing.value)
       return
-    void formation.flush(activeSessionId.value)
-    if(organizationDesired.value)formation.interrupt()
+    if (noteFormation) noteFormation.flush(activeSessionId.value)
+    else void legacy?.formation.flush(activeSessionId.value)
+    legacy?.interruptOrganization()
     const session = conversationStore.create()
     activeSessionId.value = session.id
     situation.reset()
@@ -573,8 +556,9 @@ export const useStageStore = defineStore('stage', () => {
     if (sending.value || visionProcessing.value)
       return
     const wasActive = id === activeSessionId.value
+    clearNoteRecall()
     conversationStore.delete(id)
-    if(organizationDesired.value)formation.interrupt()
+    legacy?.interruptOrganization()
     sessionsList.value = conversationStore.list()
     if (wasActive) {
       const remaining = sessionsList.value
@@ -587,14 +571,13 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   return {
-    organizationStatus,
-    formationStatus,
-    formation,
+    organizationStatus: legacy?.organizationStatus ?? computed(() => ({ ready: false, autoWrite: false, reason: 'disabled', pending: 0 })),
+    formationStatus: legacy?.formationStatus ?? computed(() => ({ enabled: false, running: false, calls: 0, lastEvent: 'disabled' })),
+    formation: legacy?.formation,
     memoryRecallEnabled,
-    memoryRecallMode,
-    setMemoryRecallMode,
     memoryRecallDiagnostic,
-    reflectionRecallDiagnostic,
+    memoryTraceEnabled: legacy?.memoryTraceEnabled,
+    noteRecallTrace: legacy?.noteRecallTrace,
     autonomous,
     situationStatus,
     desktopBridgeState,

@@ -61,7 +61,8 @@ function normalizeMessages(messages: unknown[]): ConversationMessage[] {
       ...(isValidTimestamp((message as ConversationMessage).createdAt) ? { createdAt: (message as ConversationMessage).createdAt } : {}),
       ...(message.toolCalls ? { toolCalls: message.toolCalls } : {}),
       ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
-      ...(context ? { autonomousContext: context } : {}) }
+      ...(context ? { autonomousContext: context } : {}),
+      ...(message.role === 'assistant' && (message as ConversationMessage).noteDerived === true ? { noteDerived: true as const } : {}) }
   })
 }
 

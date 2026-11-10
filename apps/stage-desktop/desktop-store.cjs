@@ -38,11 +38,11 @@ function readStore(strict = false, file = storeFilePath()) {
   }
 }
 
-function writeStore(data, file = storeFilePath()) {
+function writeStore(data, file = storeFilePath(), flush = false) {
   fs.mkdirSync(path.dirname(file), { recursive: true })
   const temporary = `${file}.tmp`
   try {
-    fs.writeFileSync(temporary, JSON.stringify(data))
+    fs.writeFileSync(temporary, JSON.stringify(data), { flush })
     fs.renameSync(temporary, file)
   }
   finally {
@@ -89,13 +89,13 @@ function readRawReflections() {
   if(state.version!==1||!Array.isArray(state.batches)||!Array.isArray(state.reflections))throw new Error('Invalid reflection storage')
   return state
 }
-function writeRawReflections(state){writeStore(state,reflectionsFile())}
-function writeDesktopData(data){writeStore(data)}
+function writeRawReflections(state){writeStore(state,reflectionsFile(),true)}
+function writeDesktopData(data){writeStore(data, storeFilePath(), true)}
 function readReflections(){return memoryLifecycle?memoryLifecycle.guardedReflections():readRawReflections()}
 
 let registered = false
 
-function registerStorageIpc() {
+function registerStorageIpc(reflection = true, frozen = () => false) {
   if (registered)
     return
   registered = true
@@ -119,6 +119,7 @@ function registerStorageIpc() {
     }
     try {
       const data = readStore(true)
+      if (key === 'aisling.conversations.v1' && frozen()) throw new Error('memory-migration-frozen')
       if(key==='aisling.conversations.v1'&&memoryLifecycle)memoryLifecycle.beforeConversationChange(data,{...data,[key]:value})
       data[key] = value
       if(key==='aisling.conversations.v1'&&memoryLifecycle)Object.assign(data,memoryLifecycle.sanitizedData(data))
@@ -130,11 +131,14 @@ function registerStorageIpc() {
     }
   })
 
+  if (!reflection) return
   ipcMain.on('aisling:reflections:read', event => {
+    if (frozen()) { event.returnValue = { ok: false }; return }
     try { fs.readFileSync(reflectionsFile(),'utf8'); event.returnValue = { ok: true, value: JSON.stringify(readReflections()) } }
     catch (error) { event.returnValue = error.code === 'ENOENT' ? { ok: true, value: null } : { ok: false } }
   })
   ipcMain.on('aisling:reflections:write', (event, value) => {
+    if (frozen()) { event.returnValue = false; return }
     if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 2_000_000) { event.returnValue = false; return }
     try {
       const data = JSON.parse(value)

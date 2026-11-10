@@ -2,11 +2,11 @@ const assert = require('node:assert/strict')
 const { test } = require('node:test')
 const { spawn } = require('node:child_process')
 const { once } = require('node:events')
-const { mkdirSync, mkdtempSync, existsSync, writeFileSync } = require('node:fs')
+const { copyFileSync, mkdirSync, mkdtempSync, existsSync, writeFileSync } = require('node:fs')
 const { join, resolve } = require('node:path')
 const { setTimeout: sleep } = require('node:timers/promises')
 const { createInterface } = require('node:readline')
-const { startWorker } = require('./memory-database/client.cjs')
+const { startWorker, assertPreparedWorkerSource } = require('./memory-database/client.cjs')
 const { MAX_FRAME, VERSION } = require('./memory-database/protocol.cjs')
 const { attachMemoryDatabase } = require('./memory-database/host.cjs')
 const { createMemoryDatabaseStore } = require('./memory-database/store.cjs')
@@ -28,6 +28,15 @@ const waitFor = async check => {
 function fixture(name, fn) {
   test(name, { skip: !resources && 'Set AISLING_MEMORY_DB_P0_TEST_RESOURCES to prepared resources', timeout: 20000 }, fn)
 }
+
+test('default development Worker resources must match the checked-out Worker sources', () => {
+  const prepared = folder()
+  for (const file of ['worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'package.json', 'package-lock.json'])
+    copyFileSync(join(__dirname, 'memory-database', file), join(prepared, file))
+  assert.doesNotThrow(() => assertPreparedWorkerSource(prepared))
+  writeFileSync(join(prepared, 'erasure.cjs'), '// Older erasure implementation with the same protocol version')
+  assert.throws(() => assertPreparedWorkerSource(prepared), { code: 'stale-worker-resources', message: /erasure\.cjs differs/ })
+})
 
 test('P0 refuses the existing profile and unmarked nonempty profiles', () => {
   const normal = folder()

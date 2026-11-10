@@ -25,10 +25,9 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 - Memory: optional cross-session recall from local conversation history,
   with bounded evidence, user-topic anchors for short follow-ups, and distinct
   sources for user reports, stored replies and delivered autonomous speech
-- Reflection Formation: opt-in background batches from delivered interactions,
-  validated sources, independent persistence, cancellation and failure isolation
-- Reflection Recall: local retrieval of completed reflections, checked against
-  their original sources and injected as fallible historical understandings
+- Note-only memory for new Desktop profiles: opt-in background proposals,
+  explicit approval, and local recall backed by original messages
+- Previous-format profiles can check, keep eligible blocked records in history, and confirm a verified upgrade in Memory settings
 - Persistence hardening: unsaved history stays in memory with a visible warning;
   Desktop writes replace the stored file only after a temporary write succeeds
 - Desktop Situation Understanding P1/P1.1: explicit foreground/media candidates,
@@ -46,36 +45,25 @@ Verification distinguishes automated Mock coverage, Electron smoke tests and
 limited real-provider samples; see [release notes](CHANGELOG.md) and
 [research results](docs/research/memory-validation.md).
 
-**Memory:** Open **Settings → Memory** to control cross-session recall and optional
-Reflection Formation. Memory defaults on; an existing saved opt-out is preserved.
-Formation defaults off and appears only while Memory is on. Turning Memory off
-also saves Formation as off and cancels/discards its in-flight results, preserving
-stored reflections and queued work. Both choices survive restarts. Recall allows
-relevant excerpts and completed reflections to be sent to your selected LLM
-Provider with ordinary user text turns. Disabling Formation alone still permits
-reading existing valid reflections.
-Turning it off stops cross-session retrieval for new turns; it does not erase
-existing conversations or retract requests already sent.
+**Memory** in Settings controls cross-session excerpts and starts on for new
+profiles. On the built Desktop Stage, new and upgraded profiles use Note v2.
+**Formation** can use the configured model to propose Notes after delivered
+conversations. New proposals require native approval before writing. **Recall**
+allows relevant, approved Notes to accompany ordinary text requests. Both child
+switches start off for new profiles. Recall uses local lexical retrieval, and
+the current conversation gets budget first.
 
-Memory uses local lexical retrieval, up to five sessions and three reflections,
-with separate budgets and no extra Recall LLM call. It can supply related experiences, corrections
-and state changes for the model to interpret. It can also miss relevant sessions,
-include unrelated excerpts or produce an incorrect recollection. Legacy
-messages may have no individual timestamps: session update times are not
-event dates, and missing dates must remain unknown. New messages retain their
-actual append time. Stored assistant statements prove what was
-said, not that an external action or fictional story really happened.
+A Note preserves its basis, uncertainty and any supported event time. The
+application rechecks original messages before it exposes a Note for recall.
+Storage and message timestamps describe records, and event time describes the
+reported event. Historical semantic quality on real models still needs validation.
 
-Context selects recent history within the active session. Memory retrieves from
-other saved sessions. P2 maintains optional, bounded short-term desktop
-understanding and may make separate background model calls. The optional
-[Reflection Formation](docs/memory-formation-v0.md) makes additional background
-LLM requests; [Reflection Recall](docs/reflection-recall.md) reads only saved,
-valid results and never waits for Formation. Real-model evidence is limited to
-small samples, not long-term quality acceptance. This is not a complete long-term
-memory system. Token counts are estimates; full persisted history can still reach
-storage limits. P2 remains a preview, and the optional native Candidate smoke
-remains inconclusive.
+For existing profiles, **Memory → Check previous memories** checks what can be
+upgraded. Confirming an eligible upgrade preserves verified current memories
+and switches to v2 after validation. Historical operations remain subject to
+source deletion. Profiles with unresolved evidence or history keep their old
+authority or show that an interrupted upgrade needs to resume. See the
+[P5 retirement report](docs/memory-note-only-p5-retirement.md).
 
 Design and limits:
 [Memory Recall](docs/memory.md),
@@ -105,9 +93,16 @@ pnpm start:desktop
 
 This command builds the renderer first, then launches Electron without the Vite
 server. Run it again after changing code. It still requires this source checkout
-and its dependencies; it does not create an installer or mean the app is a stable
-release. Both Desktop modes share saved settings and conversations and are
-intended to offer the same features; both paths need their own verification.
+and its dependencies. The Vite launch uses the legacy development path. Use the
+built Stage to exercise Note v2 or migrate a profile, and use a separate
+development profile if you also need the Vite launch.
+
+Prepare the local Memory Worker with
+[`scripts/prepare-memory-database.ps1`](scripts/prepare-memory-database.ps1)
+before using the built Stage's Note operations. The source checkout checks
+that the default `.local/memory-database` Worker scripts and manifests match
+the checkout before spawning the Worker. See [Memory](docs/memory.md) for
+safe refresh steps.
 
 **Naming note:** `pnpm start` currently aliases `pnpm dev:desktop`, not
 `pnpm start:desktop`.

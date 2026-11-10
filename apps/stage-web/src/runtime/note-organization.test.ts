@@ -5,13 +5,54 @@ import type { ConversationSession } from '../conversation/conversation-store'
 import type { FormationBatch, ReflectionState } from './reflection-store'
 
 const proposal=(content='灯塔 R8 门框为银色，传感器 E2。', subject='S3')=>({origin:'O1',draft:{content,subject,eventTime:null,basis:'direct',kind:'fact',tags:['灯塔'],sources:[{label:'E1',quote:content}]},action:'ADD',target:null,related:[],reason:'新陈述'})
-async function fixture(){
- const sessions:ConversationSession[]=[{id:'source',title:'test',createdAt:1,updatedAt:1,messages:[{role:'user',content:'灯塔 R8 门框为银色，传感器 E2。'},{role:'assistant',content:'已知。'}]}]
+async function fixture(messages:ConversationSession['messages']=[{role:'user',content:'灯塔 R8 门框为银色，传感器 E2。'},{role:'assistant',content:'已知。'}]){
+ const sessions:ConversationSession[]=[{id:'source',title:'test',createdAt:1,updatedAt:1,messages}]
  const evidence=await Promise.all(sessions[0]!.messages.map(async(message,i)=>({message,ref:await sourceRef('source',i,message)})))
  const batch:FormationBatch={id:'batch',sessionId:'source',units:3,status:'pending',attempts:0,reflectionIds:[],sourceRefs:evidence.map(e=>e.ref)}
  const bridge:OrganizationBridge={setEnabled:vi.fn(async()=>({ready:true,autoWrite:false,reason:'privacy-write-blocked'})),candidates:vi.fn(async()=>({notes:[],complete:true})),settle:vi.fn(async()=>({status:'proposed-not-applied' as const,reason:'privacy-write-blocked'}))}
  return {sessions,evidence,batch,bridge,processor:createOrganizationProcessor({enabled:()=>true,bridge,getSessions:()=>sessions})}
 }
+it('presents speaker labels and literal prefixes without exposing internal identity values',async()=>{
+ const f=await fixture(),id=crypto.randomUUID()
+ vi.mocked(f.bridge.candidates).mockResolvedValue({complete:true,notes:[{note:{id,version:1,status:'active',createdAt:1,
+  subject:'profile-user',content:'灯塔门框',eventTime:null,basis:'direct'},grounds:{origins:[],evidence:[f.evidence[0]!.ref]}}]})
+ const {request}=await f.processor.prepare(f.evidence,f.batch)
+ const policy=request.messages[0]!.content as string
+ const input=JSON.parse(request.messages[1]!.content as string)
+ expect(input.subjects.slice(0,3)).toEqual([
+  {label:'S1',description:'user speaker',confirmed:true,mentions:[{label:'E1',text:f.evidence[0]!.message.content!.slice(0,16)}]},
+  {label:'S2',description:'user speaker',confirmed:true,mentions:[{label:'E1',text:f.evidence[0]!.message.content!.slice(0,16)}]},
+  {label:'S3',description:'Aisling speaker',confirmed:true,mentions:[{label:'E2',text:'已知。'}]},
+ ])
+ expect(input.candidates[0]).toMatchObject({label:'N1',subjectAnchor:'S1'})
+ expect(input.candidates[0]).not.toHaveProperty('subject')
+ expect(JSON.stringify(request.messages)).not.toContain('profile-user')
+ expect(policy).toContain('Copy the exact subjects[].label')
+ expect(policy).toContain('用户陈述：')
+ expect(policy).toContain('Aisling 发言：')
+ expect(policy).toContain('For relative time such as 去年 or 昨天, use null')
+})
+
+it.each([
+ {quote:'我把纸舟归档工具改名为栖鹭了。',content:'用户陈述：我把纸舟归档工具改名为栖鹭了。',
+  subject:'profile-user',label:'S1',role:'user',eventTime:null,error:'subject-unconfirmed'},
+ {quote:'那只蓝纸鹤敲的是你去年没买成的手碟，响得像个尴尬的音符。下次见面我一定悄悄告诉你它叫什么。',
+  content:'Aisling 发言：那只蓝纸鹤敲的是你去年没买成的手碟，响得像个尴尬的音符。下次见面我一定悄悄告诉你它叫什么。',
+  subject:'aisling',label:'S2',role:'assistant',eventTime:null,error:'subject-unconfirmed'},
+ {quote:'我去年考虑过买手碟，但那次最终没有买。',content:'用户自述去年考虑过购买手碟，但最终没有买。',
+  subject:'S1',label:'S1',role:'user',eventTime:{kind:'date-range',start:'2025-01-01',end:'2025-12-31'},error:'draft-date-not-in-quote'},
+] as const)('keeps the trusted contract for the P1.10 replay: $error ($subject)',async row=>{
+ const f=await fixture([{role:row.role,content:row.quote}])
+ const prepared=await f.processor.prepare(f.evidence,f.batch)
+ const item=proposal(row.content,row.subject)
+ if(row.role==='assistant') Object.assign(item.draft,{kind:'event',tags:['虚构故事','承诺']})
+ item.draft.sources=[{label:'E1',quote:row.quote}]
+ const parse=(subject:string,eventTime:unknown)=>prepared.parse(JSON.stringify({items:[{...item,draft:{...item.draft,subject,eventTime}}]}))
+ await expect(parse(row.subject,row.eventTime)).rejects.toThrow(row.error)
+ const result=await parse(row.label,null)
+ expect(result.record.items[0]!.draft).toMatchObject({content:row.content,subject:row.role==='user'?'profile-user':'aisling',eventTime:null})
+ expect(f.bridge.settle).not.toHaveBeenCalled()
+})
 it('requires the common exact protocol, forbids forged labels/nulls/extra fields',async()=>{
  const f=await fixture(),prepared=await f.processor.prepare(f.evidence,f.batch)
  for(const patch of [{origin:'O99'},{id:'forged'},{draft:{...proposal().draft,context:null}},{draft:{...proposal().draft,sources:[{label:'E99',quote:proposal().draft.content}]}}]){

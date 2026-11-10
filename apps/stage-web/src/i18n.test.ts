@@ -15,12 +15,12 @@ it('switches UI text immediately and restores the saved language', async () => {
 
   const first = await import('./i18n')
   expect(first.t('Settings')).toBe('Settings')
-  expect(first.t('Reflection Formation')).toBe('Reflection Formation')
+  expect(first.t('Formation')).toBe('Formation')
   first.setLanguage('zh-CN')
   expect(first.t('Settings')).toBe('设置')
-  expect(first.t('Reflection Formation')).toBe('反思形成')
-  expect(first.t('Recall relevant information from previous conversations.')).toBe('回忆过往对话中的相关信息。')
-  expect(first.t('Form structured reflections from new interactions in the background. May make additional LLM requests.')).toContain('额外调用 LLM Provider')
+  expect(first.t('Formation')).toBe('形成')
+  expect(first.t('Recall')).toBe('召回')
+  expect(first.t('Review proposals')).toBe('审核提议')
   expect(html.lang).toBe('zh-CN')
   expect(values.get(first.LANGUAGE_KEY)).toBe('zh-CN')
 

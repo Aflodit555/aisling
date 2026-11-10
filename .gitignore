@@ -22,6 +22,13 @@ codex-task.txt
 # Local runtime data and exported test/release artifacts
 aisling-store.json
 aisling-reflections.v1.json
+*.lbdb
+*.lbdb.wal
+memory-authority
+memory-erasure.v[12].json
+memory-migration.v1.json
+memory-migration-dispositions.v1.json
+note-formation-jobs.v1.json
 *.jsonl
 *.tsbuildinfo
 artifacts/

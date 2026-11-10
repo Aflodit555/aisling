@@ -2,6 +2,7 @@ import { createUserTextStimulus, type ChatCompletionRequest, type ChatRuntimeDia
 import { expect, it, vi } from 'vitest'
 import { estimateMessageTokens, INPUT_TOKEN_LIMIT } from '../../../../packages/core/src/context'
 import { createAislingRuntime } from './aisling'
+import { legacyRecallProvider } from '@aisling/core/legacy-recall'
 import { createReflectionRecall, selectReflectionCandidates, type ReflectionSelectionCandidate } from './reflection-recall'
 import { createReflectionStore, type ReflectionState } from './reflection-store'
 import { selectionFixture } from './__tests__/fixtures/recall-selection'
@@ -30,7 +31,7 @@ it.each([false, true])('selects complementary evidence for all three questions, 
     expect(new TextEncoder().encode(`[${result.candidates.join(',')}]`).length).toBeLessThanOrEqual(4500)
     expect((await recall.retrieve(f.sessions, 'active', question)).candidates).toEqual(result.candidates)
     const requests: ChatCompletionRequest[] = [], diagnostics: ChatRuntimeDiagnostic[] = []
-    const runtime = createAislingRuntime({ getTools: () => [], getReflectionContext: () => result,
+    const runtime = createAislingRuntime({ getTools: () => [], getHistoryAddon: legacyRecallProvider(() => result),
       diagnostic: record => diagnostics.push(record), getChatProvider: () => ({ id: 'offline', complete: async request => {
         requests.push(request); return { text: '' }
       } }) })
@@ -108,7 +109,7 @@ it('reselects from the same verified snapshot under the actual Runtime budget wi
   const requests: ChatCompletionRequest[] = [], diagnostics: ChatRuntimeDiagnostic[] = []
   const runtime = createAislingRuntime({ history: [{ role: 'user', content: 'h'.repeat(3500) }], getTools: () => [],
     getChatProvider: () => ({ id: 'offline', complete: async request => { requests.push(request); return { text: '' } } }),
-    getReflectionContext: () => context, diagnostic: record => diagnostics.push(record) })
+    getHistoryAddon: legacyRecallProvider(() => context), diagnostic: record => diagnostics.push(record) })
   await runtime.ingest(createUserTextStimulus({ source: 'test', text: 'u'.repeat(8500) }))
   const request = requests[0]!, diagnostic = diagnostics.find(d => d.type === 'context-assembled')!
   expect(request.messages.some(m => m.content === 'h'.repeat(3500))).toBe(true)
@@ -148,8 +149,8 @@ it.each(questions)('preserves raw Recall, mode gates and budgets for %s with the
       const runtime = createAislingRuntime({ getTools: () => [],
         getChatProvider: () => ({ id: 'same-offline-provider', complete: async request => { requests.push(request); return { text: '' } } }),
         getRecallEvidence: () => mode === 'B' ? undefined : evidence,
-        getReflectionContext: () => mode === 'A' ? { candidates: [], durationMs: 0, reason: 'disabled' }
-          : recall.retrieve(f.sessions, 'active', question) })
+        getHistoryAddon: legacyRecallProvider(() => mode === 'A' ? { candidates: [], durationMs: 0, reason: 'disabled' }
+          : recall.retrieve(f.sessions, 'active', question)) })
       expect((await runtime.ingest(createUserTextStimulus({ source: 'test', text: question }))).status).toBe('completed')
       const messages = requests.at(-1)!.messages
       expect(messages.some(m => m.content?.startsWith('[Cross-session recall evidence]'))).toBe(mode !== 'B')

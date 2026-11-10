@@ -1,5 +1,7 @@
 # Memory Database P0 正式接入
 
+此页是早期 P0 图实验的历史记录。资源准备仍适用于当前 Worker，正式记忆路径见 [Memory](memory.md)。
+
 2026-11-03。P0 将 LadybugDB 0.22.1 接到正式 Desktop 宿主，使用独立 Windows x64 Node 24.12.0。P0 默认关闭，只能以显式配置和专用 profile 启用。现有聊天、ConversationStore、原始 Recall、Reflection Formation、Reflection Recall、Core 预算和 Provider 继续使用原有路径。系统背景见 [Memory 工程审计](memory-database-audit.md)。
 
 ## 已实现的运行链路
@@ -61,7 +63,7 @@ pnpm test
 pnpm typecheck
 ```
 
-开发者手工启动时先创建新的空目录，再设置 `AISLING_MEMORY_DB_P0=1` 与其绝对 `AISLING_MEMORY_DB_P0_PROFILE`，运行 `pnpm start:desktop` 或 `pnpm dev:desktop`。这些环境变量只对当前命令会话有效。真实 Electron 和本机回环测试需要宿主允许进程运行和回环访问。测试使用合成资料及 mock Provider。
+P5 将 P0 图实验移出日常启动入口。需要复验时运行 `node scripts/test-memory-database.cjs`，脚本提供显式夹具回调并创建隔离目录。这些环境变量只对当前命令会话有效。真实 Electron 和本机回环测试需要宿主允许进程运行和回环访问。测试使用合成资料及 mock Provider。
 
 ## 已测试
 

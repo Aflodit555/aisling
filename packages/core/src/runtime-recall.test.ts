@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { createCharacter } from './character'
+import { legacyRecallProvider } from './legacy-recall'
 import { createCharacterRuntime } from './runtime'
 import { estimateMessageTokens, INPUT_TOKEN_LIMIT } from './context'
 import { createAutonomousStimulus, createUserTextStimulus, createVisualStimulus } from './stimulus'
@@ -63,7 +64,7 @@ it('repacks by relevance priority and preserves chronological presentation when 
     character: createCharacter({ id: 'a', name: 'A', persona: '', capabilities: [] }),
     history: [{ role: 'user', content: 'h'.repeat(3500) }],
     getChatProvider: () => ({ id: 'offline', complete }), getRecallEvidence: () => evidence,
-    getReflectionContext: () => ({ candidates: [JSON.stringify({ content: 'old understanding' })], durationMs: 0, reason: 'selected' }),
+    getHistoryAddon: legacyRecallProvider(() => ({ candidates: [JSON.stringify({ content: 'old understanding' })], durationMs: 0, reason: 'selected' })),
   })
   await runtime.ingest(createUserTextStimulus({ source: 'test', text: 'u'.repeat(4000) }))
   const request = complete.mock.calls[0]![0]

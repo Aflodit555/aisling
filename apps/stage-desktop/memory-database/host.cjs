@@ -1,6 +1,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { createMemoryDatabaseStore } = require('./store.cjs')
+const { localWorkerResources } = require('./client.cjs')
 const { NOTE_V1_FILE } = require('./protocol.cjs')
 
 /** @param {Electron.App} app */
@@ -35,7 +36,7 @@ function attachMemoryDatabase(app, diagnostic, noteV1 = false) {
   const store = createMemoryDatabaseStore(async () => {
     const resources = app.isPackaged
       ? path.join(process.resourcesPath, 'memory-database')
-      : process.env.AISLING_MEMORY_DB_P0_RESOURCES || path.resolve(__dirname, '../../../.local/memory-database')
+      : process.env.AISLING_MEMORY_DB_P0_RESOURCES || localWorkerResources
     if (!path.isAbsolute(resources)) throw new Error('P0 resources must use an absolute directory')
     const node = path.join(resources, 'runtime', 'node.exe')
     const entry = path.join(resources, 'worker.cjs')

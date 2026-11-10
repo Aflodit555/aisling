@@ -65,7 +65,7 @@ export interface PlatformConfig {
   vision: VisionConfig
   webSearch: WebSearchConfig
   /** Memory controls recall; reflection formation requires a separate opt-in. */
-  memory: { enabled: boolean; formationEnabled?: boolean; organizationEnabled?: boolean }
+  memory: { enabled: boolean; formationEnabled?: boolean; organizationEnabled?: boolean; noteRecallEnabled?: boolean }
 }
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'
@@ -103,7 +103,7 @@ export function createDefaultPlatformConfig(): PlatformConfig {
       enabled: true,
       providerType: 'duckduckgo',
     },
-    memory: { enabled: true, formationEnabled: false, organizationEnabled: false },
+    memory: { enabled: true, formationEnabled: false },
   }
 }
 

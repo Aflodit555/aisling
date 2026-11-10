@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest'
 import { createCharacter } from './character'
+import { legacyRecallProvider, type ReadLegacyReflection } from './legacy-recall'
 import { estimateMessageTokens, INPUT_TOKEN_LIMIT } from './context'
 import { createCharacterRuntime, type CharacterRuntimeOptions, type ChatRuntimeDiagnostic } from './runtime'
 import { createAutonomousStimulus, createUserTextStimulus, createVisualStimulus } from './stimulus'
@@ -10,11 +11,12 @@ const candidate = JSON.stringify({ content: 'Aisling inferred the old paperboat 
 const evidence = JSON.stringify([{ conversation: 'C1', role: 'user', sourceScope: 'stored-user-report', content: 'paperboat old report' }])
 const stimulus = () => createUserTextStimulus({ source: 'test', text: 'paperboat export is now cancelled; this is the current update.' })
 
-function fixture(extra: Partial<CharacterRuntimeOptions> = {}) {
+function fixture({ getReflectionContext, ...extra }: Partial<CharacterRuntimeOptions> & { getReflectionContext?: ReadLegacyReflection } = {}) {
   const records: ChatRuntimeDiagnostic[] = []
   const complete = vi.fn(async (_r: ChatCompletionRequest): Promise<ChatCompletionResult> => ({ text: 'ok' }))
   const runtime = createCharacterRuntime({ character: createCharacter({ id: 'a', name: 'A', persona: 'unchanged', capabilities: [] }),
-    getChatProvider: () => ({ id: 'mock', complete }), diagnostic: r => records.push(r), ...extra })
+    getChatProvider: () => ({ id: 'mock', complete }), getHistoryAddon: legacyRecallProvider(getReflectionContext),
+    diagnostic: r => records.push(r), ...extra })
   return { runtime, complete, records }
 }
 
@@ -74,6 +76,29 @@ it('captures reflection once across tool rounds, observing updates only next tur
   }
   await f.runtime.ingest(stimulus())
   expect(JSON.stringify(f.complete.mock.calls.at(-1)![0])).toContain('newly persisted')
+})
+
+it.each([true, false])('packs v2 Notes as user-role data and reuses the same snapshot across tools (valid=%s)', async valid => {
+  let current = true
+  const select = vi.fn(() => [candidate])
+  const getNoteContext = vi.fn(async () => ({ current: async () => current, select }))
+  const getReflectionContext = vi.fn(() => ({ candidates: [candidate], durationMs: 0, reason: 'selected' }))
+  const f = fixture({ getNoteContext, getReflectionContext, getRecallEvidence: () => evidence,
+    history: [{ role: 'user', content: 'current-session-history' }],
+    getTools: () => [{ name: 'search', description: 'search', parameters: {}, run: async () => { current = valid; return 'result' } }],
+  })
+  f.complete.mockResolvedValueOnce({ text: '', toolCalls: [{ id: 'call', name: 'search', arguments: '{}' }] })
+  await f.runtime.ingest(stimulus())
+  const [first, second] = f.complete.mock.calls.map(([request]) => request.messages)
+  const note = first!.find(m => m.content?.startsWith('[Note recall evidence]'))
+  expect(note?.role).toBe('user')
+  expect(first!.some(m => m.content === 'current-session-history')).toBe(true)
+  expect(second!.find(m => m.content?.startsWith('[Note recall evidence]'))).toEqual(valid ? note : undefined)
+  expect(first!.find(m => m.content?.startsWith('[Cross-session recall evidence]')))
+    .toEqual(second!.find(m => m.content?.startsWith('[Cross-session recall evidence]')))
+  expect(getNoteContext).toHaveBeenCalledOnce()
+  expect(select).toHaveBeenCalledOnce()
+  expect(getReflectionContext).not.toHaveBeenCalled()
 })
 
 it('does not reread or replace the snapshot during streamed output', async () => {

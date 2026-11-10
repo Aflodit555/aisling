@@ -1,4 +1,5 @@
 import { isValidTimestamp, normalizeAutonomousContext } from '@aisling/core'
+import { safeText, terms } from '../../../stage-desktop/memory-text.mjs'
 import type { ConversationSession } from '../conversation/conversation-store'
 
 export const RECALL_LIMITS = { topK: 5, minScore: 1, minTerms: 2, chars: 6000, bytes: 6000, scanChars: 250_000, scanMs: 30 } as const
@@ -68,23 +69,7 @@ export function recallForModel(evidence: string): { evidence: string; sources: R
 }
 
 // Keep original quotations or exclude them entirely; never silently rewrite evidence.
-export function safeText(text: string): boolean {
-  return !!text.trim() && text.length <= 3000 && !/^\s*\[image\]\s*$/i.test(text)
-    && !/password|api.?key|access.?token|secret|验证码|密码|口令|密钥|令牌|身份证|银行卡|\bsk-[\w-]{8,}|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|\d{7,}|[A-Za-z0-9_+/=-]{32,}/i.test(text)
-}
-
-export function terms(text: string): string[] {
-  const result: string[] = []
-  for (const run of text.normalize('NFKC').toLowerCase().match(/[\p{Script=Han}]+|[a-z0-9]+/gu) ?? []) {
-    if (/^[a-z0-9]/.test(run)) { result.push(run); continue }
-    const chars = [...run]
-    for (let i = 0; i < chars.length; i++) {
-      result.push(chars[i]!)
-      if (i + 1 < chars.length) result.push(chars[i]! + chars[i + 1]!)
-    }
-  }
-  return result
-}
+export { safeText, terms } from '../../../stage-desktop/memory-text.mjs'
 
 function isVagueFollowup(text: string): boolean {
   const plain = text.normalize('NFKC').replace(/[\s，。！？、,.!?]/gu, '')
@@ -121,7 +106,7 @@ export function retrieveRecall(sessions: readonly ConversationSession[], activeI
       scanned += message.content?.length ?? 0
       if (scanned > RECALL_LIMITS.scanChars || performance.now() - start > RECALL_LIMITS.scanMs) return empty()
       if ((message.role !== 'user' && message.role !== 'assistant') || typeof message.content !== 'string'
-        || message.toolCalls?.length || message.toolCallId || current.has(message.content) || !safeText(message.content)) continue
+        || message.noteDerived || message.toolCalls?.length || message.toolCallId || current.has(message.content) || !safeText(message.content)) continue
       const basis = message.role === 'assistant' ? normalizeAutonomousContext(message.autonomousContext) : undefined
       records.push({ sessionId: session.id, messageIndex, messageId: null, role: message.role,
         sourceScope: basis ? 'stored-autonomous-utterance' : message.role === 'user' ? 'stored-user-report' : 'stored-assistant-utterance',

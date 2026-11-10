@@ -9,17 +9,19 @@ export interface EvidenceRef { sessionId: string; messageIndex: number; digest: 
 
 export type EventTime = null | { kind: 'date'; date: string } | { kind: 'instant'; epochMs: number }
   | { kind: 'date-range'; start: string; end: string }
-export type NoteMeaning = { content: string; subject: string; eventTime: EventTime; context?: string; keywords?: string[]; tags?: string[] }
-  & ({ basis: 'direct'; uncertainty?: string } | { basis: 'mixed' | 'inferred'; uncertainty: string })
+type NoteBasis = { basis: 'direct'; uncertainty?: string } | { basis: 'mixed' | 'inferred'; uncertainty: string }
+type MeaningFields = { content: string; subject: string; eventTime: EventTime; tags?: string[] }
+export type NoteMeaning = MeaningFields & NoteBasis & { context?: string; keywords?: string[] }
 export type NoteV1 = NoteMeaning & { id: string; createdAt: number; status: 'active' | 'superseded' | 'retracted'; version: number }
 export interface NoteSources { origins: Origin[]; evidence: EvidenceRef[] }
 type ExistingNote = { expectedVersion: number }
-export type NoteOperation = { operationId: string; id: string; reason: string; sources: NoteSources } & (
-  | { action: 'ADD'; meaning: NoteMeaning }
-  | (ExistingNote & { action: 'UPDATE'; meaning: NoteMeaning })
+type Operation<Meaning, Sources> = { operationId: string; id: string; reason: string; sources: Sources } & (
+  | { action: 'ADD'; meaning: Meaning }
+  | (ExistingNote & { action: 'UPDATE'; meaning: Meaning })
   | (ExistingNote & { action: 'NOOP' | 'RETRACT' })
-  | (ExistingNote & { action: 'SUPERSEDE'; newId: string; meaning: NoteMeaning; transition: 'explicit-same-scope-change' })
+  | (ExistingNote & { action: 'SUPERSEDE'; newId: string; meaning: Meaning; transition: 'explicit-same-scope-change' })
 )
+export type NoteOperation = Operation<NoteMeaning, NoteSources>
 export interface NoteRevision {
   noteId: string; version: number; operationId: string; action: Exclude<NoteOperation['action'], 'NOOP'>
   changedAt: number; reason: string; grounds: NoteSources; snapshot: NoteV1; successorId?: string
@@ -30,6 +32,40 @@ export interface OperationReceipt {
 }
 export interface VersionSourceChanges { changes: OperationReceipt[]; nextCursor: string | null }
 export interface ErasureScope { operationId: string; evidence: EvidenceRef[]; originIds: string[]; sessionIds: string[] }
+
+export type NoteKind = 'event' | 'fact' | 'pattern' | 'preference' | 'project-state' | 'open-question'
+export type NoteMeaningV2 = MeaningFields & NoteBasis & (
+  | { kind: 'pattern'; uncertainty: string }
+  | { kind: Exclude<NoteKind, 'pattern'> }
+)
+export type NoteV2 = NoteMeaningV2 & Pick<NoteV1, 'id' | 'createdAt' | 'status' | 'version'>
+export interface NoteV2Sources { evidence: EvidenceRef[] }
+export type NoteV2Operation = Operation<NoteMeaningV2, NoteV2Sources>
+export type NoteRuntimeOperation = NoteV2Operation & { contextEvidence: EvidenceRef[] }
+export type NoteV2Revision = Omit<NoteRevision, 'grounds' | 'snapshot'> & { grounds: NoteV2Sources; snapshot: NoteV2 }
+export type NoteV2Receipt = Omit<OperationReceipt, 'links'> & { links?: NoteV2Sources }
+export type EvidenceErasureScope = Omit<ErasureScope, 'originIds'>
+
+export interface NoteV2Authority {
+  /** Fresh ConversationStore snapshot in the Desktop file format. */
+  readData(): Record<string, unknown>
+  /** Caller-owned identity decision. Model output must not supply this decision. */
+  isSubjectConfirmed(subject: string): boolean
+}
+
+export interface NoteV2Store extends Pick<MemoryDatabaseStore, 'open' | 'close' | 'status' | 'erasedNoteIds'> {
+  applyNoteOperation(operation: NoteV2Operation | NoteRuntimeOperation): Promise<NoteV2Receipt>
+  listMemorySources(kind: 'evidence', after?: string): Promise<{sources: Array<{key: string; ref: EvidenceRef}>; nextCursor: string | null}>
+  installErasureBarriers(keys: string[]): Promise<void>
+  eraseSources(scope: EvidenceErasureScope): Promise<{ operationId: string; notes: number; operations: number }>
+  /** Administrative lookup. Use listRecallHeads for eligible memory. */
+  getNoteV2(id: string): Promise<NoteV2 | null>
+  listNoteHeads(afterId?: string): Promise<{ notes: Array<{ note: NoteV2; grounds: NoteV2Sources }>; nextCursor: string | null }>
+  getRevision(id: string, version: number): Promise<NoteV2Revision | null>
+  getOperationReceipt(id: string): Promise<NoteV2Receipt | null>
+  getVersionSourceChanges(id: string, version: number, afterId?: string): Promise<{ changes: NoteV2Receipt[]; nextCursor: string | null }>
+  listRecallHeads(afterId?: string): Promise<{ notes: Array<{ note: NoteV2; grounds: NoteV2Sources; cumulativeEvidence: EvidenceRef[] }>; nextCursor: string | null }>
+}
 
 export type Write =
   | { type: 'createNote'; note: Note }
@@ -45,6 +81,7 @@ export interface MemoryDatabaseStore {
   getNote(id: string): Promise<Note | null>
   addOrigin(id: string, origin: Origin): Promise<void>
   getOrigins(id: string): Promise<Origin[]>
+  listNoteEvidence(id: string, after?: string): Promise<{evidence: EvidenceRef[]; nextCursor: string | null}>
   addEvidence(id: string, evidence: EvidenceRef): Promise<void>
   getEvidence(id: string): Promise<EvidenceRef[]>
   applyNoteOperation(operation: NoteOperation): Promise<OperationReceipt>

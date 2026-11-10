@@ -1,4 +1,5 @@
-import { isValidTimestamp, type ConversationMessage, type ReflectionCandidateDiagnostic } from '@aisling/core'
+import { isValidTimestamp, type ConversationMessage } from '@aisling/core'
+import type { ReflectionCandidateDiagnostic } from '@aisling/core/legacy-recall'
 import type { ConversationSession } from '../conversation/conversation-store'
 import { recallQuery, safeText, terms } from './memory-recall'
 import { reflectionEvidence, sourceRef, type FormationEvidence } from './reflection-formation'
@@ -148,7 +149,7 @@ export function createReflectionRecall(read: () => ReflectionState) {
             const session = sessions.find(s => s.id === ref.sessionId)
             const message = session?.messages[ref.messageIndex]
             if (!message || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string'
-              || !safeText(message.content) || message.toolCalls?.length || message.toolCallId) break
+              || message.noteDerived || !safeText(message.content) || message.toolCalls?.length || message.toolCallId) break
             try {
               if (!hashes.has(message)) hashes.set(message, sourceRef(ref.sessionId, ref.messageIndex, message).then(ref => ref.digest))
               if (await hashes.get(message)! !== ref.digest) break

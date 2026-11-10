@@ -1,10 +1,11 @@
 const assert = require('node:assert/strict')
-const { realpathSync } = require('node:fs')
-const { basename, dirname, join, relative, isAbsolute } = require('node:path')
-const { VERSION, NOTE_V1_FILE, ProtocolError, lines, decode, encode, validateRequest } = require('./protocol.cjs')
+const { lstatSync, realpathSync } = require('node:fs')
+const { dirname, join, relative, isAbsolute } = require('node:path')
+const { VERSION, NOTE_V1_FILE, NOTE_V2_FILE, NOTE_V2_RUNTIME_FILE, isNoteV2, schemaForFile, mutates, ProtocolError, lines, decode, encode, validateRequest } = require('./protocol.cjs')
 const { openLadybug } = require('./adapter.cjs')
 
-const [dbFile] = process.argv.slice(2)
+const readOnly = process.argv[2] === '--read-only'
+const dbFile = process.argv[readOnly ? 3 : 2]
 let ready = false
 process.stdout.on('error', () => { /* The write callback handles broken pipes. */ })
 const detail = error => ({
@@ -20,8 +21,15 @@ async function send(message) {
 async function run() {
   assert.equal(process.versions.electron, undefined)
   assert.equal(process.versions.node, '24.12.0')
-  const noteV1 = basename(dbFile) === NOTE_V1_FILE
-  assert(isAbsolute(dbFile) && dbFile === join(realpathSync(dirname(dbFile)), noteV1 ? NOTE_V1_FILE : 'memory.lbdb'))
+  const schema = schemaForFile(dbFile)
+  const expectedFile = schema === 'note-v2-runtime' ? NOTE_V2_RUNTIME_FILE
+    : schema === 'note-v2' ? NOTE_V2_FILE : schema === 'note-v1' ? NOTE_V1_FILE : 'memory.lbdb'
+  assert(isAbsolute(dbFile) && dbFile === join(realpathSync(dirname(dbFile)), expectedFile))
+  assert(!readOnly || schema === 'note-v1')
+  if (isNoteV2(schema) || readOnly) {
+    const existing = lstatSync(dbFile, { throwIfNoEntry: false })
+    assert((!existing && !readOnly) || (existing?.isFile() && existing.nlink === 1), 'Expected an isolated Note v2 test file')
+  }
   const entry = realpathSync(require.resolve('@ladybugdb/core'))
   const dependencyDir = join(__dirname, 'node_modules')
   const packagePath = relative(dependencyDir, entry)
@@ -29,7 +37,7 @@ async function run() {
   const api = require(entry)
   const { VERSION: ladybug, STORAGE_VERSION: storage } = api
   assert.equal(ladybug, '0.22.1')
-  const store = openLadybug(api, dbFile, noteV1)
+  const store = openLadybug(api, dbFile, schema, readOnly)
   let closed = false
   let highestId = 0
 
@@ -39,7 +47,7 @@ async function run() {
     assert(dependencies.every(file => !relative(dependencyDir, file).startsWith('..')))
     await send({ event: 'ready', pid: process.pid, node: process.versions.node, modules: process.versions.modules,
       napi: process.versions.napi, arch: process.arch, exe: process.execPath,
-      ladybug, storage: String(storage), schema: noteV1 ? 'note-v1' : 'p0' })
+      ladybug, storage: String(storage), schema, ...(readOnly && { readOnly: true }) })
     ready = true
     for await (const line of lines(process.stdin)) {
       let requestId = null
@@ -50,8 +58,9 @@ async function run() {
           if (requestId <= highestId) throw new ProtocolError('duplicate-request-id', 'Request ID already used or out of order')
           highestId = requestId
         }
-        validateRequest(request, noteV1)
+        validateRequest(request, schema)
         const { operation, payload } = request
+        if (readOnly && mutates(operation)) throw new ProtocolError('read-only', 'Migration source is read-only')
         const start = performance.now()
         let result = null
         if (operation === 'close') {

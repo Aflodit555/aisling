@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Framework-agnostic Aisling character runtime: Stimulus, Character, Capability, Provider, Output.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./legacy-recall": "./src/legacy-recall.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

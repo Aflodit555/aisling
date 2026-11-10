@@ -1,16 +1,29 @@
 /// <reference lib="es2024.promise" />
 const { spawn } = require('node:child_process')
-const { basename, dirname, isAbsolute, join } = require('node:path')
+const { readFileSync } = require('node:fs')
+const { basename, dirname, isAbsolute, join, relative, resolve } = require('node:path')
 const { setTimeout: delay } = require('node:timers/promises')
-const { VERSION, NOTE_V1_FILE, MAX_PENDING, ProtocolError, lines, decode, encode, mutates } = require('./protocol.cjs')
+const { VERSION, schemaForFile, MAX_PENDING, ProtocolError, lines, decode, encode, mutates } = require('./protocol.cjs')
 
-/** @param {{node: string, entry: string, file: string, startupMs?: number}} config */
-function startWorker({ node, entry, file, startupMs = 15000 }) {
+const localWorkerResources = resolve(__dirname, '../../../.local/memory-database')
+const resourceFiles = ['worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'package.json', 'package-lock.json']
+
+function assertPreparedWorkerSource(resources) {
+  for (const file of resourceFiles) {
+    const prepared = readFileSync(join(resources, file))
+    if (!prepared.equals(readFileSync(join(__dirname, file))))
+      throw new ProtocolError('stale-worker-resources', `Refresh .local/memory-database with scripts/prepare-memory-database.ps1 (${file} differs)`)
+  }
+}
+
+/** @param {{node: string, entry: string, file: string, startupMs?: number, readOnly?: boolean}} config */
+function startWorker({ node, entry, file, startupMs = 15000, readOnly = false }) {
   if (!isAbsolute(node) || basename(node).toLowerCase() !== 'node.exe' || !isAbsolute(entry))
     throw new Error('Expected absolute paths to independent node.exe and worker entry')
+  if (relative(localWorkerResources, dirname(entry)) === '') assertPreparedWorkerSource(localWorkerResources)
   const started = performance.now()
   const systemRoot = process.env.SystemRoot || 'C:\\Windows'
-  const child = spawn(node, ['--no-global-search-paths', entry, file], {
+  const child = spawn(node, ['--no-global-search-paths', entry, ...(readOnly ? ['--read-only'] : []), file], {
     shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     cwd: dirname(entry),
     env: { SystemRoot: systemRoot, Path: join(systemRoot, 'System32') },
@@ -57,8 +70,8 @@ function startWorker({ node, entry, file, startupMs = 15000 }) {
         if (response.node !== '24.12.0' || response.arch !== 'x64' || response.ladybug !== '0.22.1'
           || typeof response.exe !== 'string' || response.exe.toLowerCase() !== node.toLowerCase())
           throw new ProtocolError('unexpected-runtime', 'Worker did not report the pinned Node and LadybugDB runtime')
-        const expectedSchema = basename(file) === NOTE_V1_FILE ? 'note-v1' : 'p0'
-        if ((response.schema ?? 'p0') !== expectedSchema)
+        const expectedSchema = schemaForFile(file)
+        if ((response.schema ?? 'p0') !== expectedSchema || readOnly && response.readOnly !== true)
           throw new ProtocolError('unexpected-schema', 'Worker reported an incompatible database schema')
         readySeen = true
         clearTimeout(startup)
@@ -120,4 +133,4 @@ function startWorker({ node, entry, file, startupMs = 15000 }) {
     close: () => closingPromise ??= closeWorker(), pid: child.pid }
 }
 
-module.exports = { startWorker }
+module.exports = { startWorker, localWorkerResources, assertPreparedWorkerSource }

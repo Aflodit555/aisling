@@ -1,10 +1,24 @@
 # Memory Recall
 
-Memory Recall 使用本地保存的旧会话，向当前文字轮提供相关历史原文。可选的 [Reflection Formation](memory-formation-v0.md) 在后台形成历史认识，[Reflection Recall](reflection-recall.md) 读取已完成且来源有效的产物；没有引入数据库、Embedding 或完整的长期认识系统。
+使用构建版 Stage 的新建和已迁移 Desktop Profile 以 LadybugDB Note v2 为唯一结构化记忆权威。ConversationStore 持有原始消息，Core Context 负责当前会话。Memory 控制跨会话召回，新资料默认开启。Formation 控制额外的后台模型调用，Recall 控制已批准 Note 的注入，两者在新资料默认关闭。旧设置保留原有选择，移除旧 Organization 开关时不会将它转换为新权限。审核页显示原始引文、依据、不确定性和建议动作。正式 v2 的新提议需要原生确认，随后 Main 重新校验证据、主体及目标版本，并通过事务和 Receipt 恢复已授权的写入。
+
+Core 优先为当前会话保留预算，再装入 Raw 与 Note。Note 使用用户角色承载结构化背景数据。工具续轮复用首轮快照，Main 在每次请求前重新确认 Note 快照未作废。来源删除意图、Worker 重启及 Note 写入都会使快照作废。v2 数据库或完整分页不可用时，聊天继续使用 Context 与可用的 Raw。来源删除不依赖 Recall 开关。详见 [P3 工程记录](memory-note-only-p3-transition.md)。
+
+旧格式资料可在记忆设置运行只读预检。符合条件的资料经原生确认后升级到唯一 v2 权威。旧修订和操作回执留在受删源约束的历史存储，无法验证的资料会明确阻断切换。独立且来源完整的记忆资格阻塞可在原生确认后仅保留为历史，来源完整性和未知历史依赖仍阻断切换。详见 [P5 退役记录](memory-note-only-p5-retirement.md)。
+
+## Worker 准备与开发入口
+
+`pnpm start:desktop` 使用构建版 Stage。`pnpm dev:desktop` 使用 Vite 和旧兼容路径，应为两者使用独立的开发资料。已经选择 v2 权威的资料要求构建版 Stage。
+
+按 [Worker 资源准备](memory-database-p0.md#资源数据隔离与复现) 使用固定版本的 Node 24.12.0 和 LadybugDB 0.22.1。默认目录 `.local/memory-database` 的脚本或依赖清单与当前源码不一致时，Main 拒绝启动该 Worker。刷新时传入 `-OutputDirectory` 准备全新的目录。关闭使用旧资源的 Desktop 后，保留原资源目录作为备份，再将已准备的新目录放到默认位置。此步骤仅涉及项目资源目录。构建 Stage 不会重新准备 Worker。
+
+## 旧资料与共用 Raw Recall
+
+以下保留旧权威资料的行为及共用 Raw Recall 的工程细节。未切换的资料继续使用 [Reflection Formation](memory-formation-v0.md) 与 [Reflection Recall](reflection-recall.md) 的已有行为。早期 [Memory 与 Reflection 实验](research/memory-validation.md) 记录的是当时架构的结果。
 
 ## 使用与用户控制
 
-在 **设置 → 记忆** 中控制。Memory 主开关控制 Recall，默认开启；已有明确关闭的设置继续保持关闭。开启后显示默认关闭的 Reflection Formation 子开关，需单独主动启用，可能额外调用 LLM Provider。关闭主开关会同步关闭并保存 Formation 状态，取消／丢弃其在途结果；不删除历史、Reflection 或待处理批次。再次开启主开关不会自动开启 Formation。选择随现有 `aisling.config.v1` 保存；浏览器使用 localStorage，Electron 使用现有文件存储桥接。ConversationStore 保持原存储键，兼容消息的可选 `createdAt` 字段。
+旧格式 profile 的 **设置 → 记忆** 使用同一页面和旧权限。Memory 主开关默认开启；已有明确关闭的设置继续保持关闭。Formation 需单独主动启用，可能额外调用 LLM Provider。关闭主开关会同步关闭并保存 Formation 状态，取消／丢弃其在途结果；不删除历史、Reflection 或待处理批次。再次开启主开关不会自动开启 Formation。选择随现有 `aisling.config.v1` 保存；浏览器使用 localStorage，Electron 使用现有文件存储桥接。ConversationStore 保持原存储键，兼容消息的可选 `createdAt` 字段。
 
 主开关同时控制原始 Recall 和已持久化的有效 Reflection Recall；关闭 Formation 子开关仅停止形成新认识，不妨碍读取既有产物。
 

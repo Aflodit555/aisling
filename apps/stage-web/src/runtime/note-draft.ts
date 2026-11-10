@@ -70,7 +70,7 @@ export async function adaptReflectionDrafts(reflection: Reflection, proposals: D
       check(sessions.length === 1, 'draft-session-missing-or-ambiguous')
       const message = sessions[0]!.messages[ref.messageIndex]
       check(message && ['user', 'assistant'].includes(message.role) && typeof message.content === 'string'
-        && !message.toolCalls?.length && !message.toolCallId && safeText(message.content), 'draft-message-ineligible')
+        && !message.noteDerived && !message.toolCalls?.length && !message.toolCallId && safeText(message.content), 'draft-message-ineligible')
       check((await sourceRef(ref.sessionId, ref.messageIndex, message)).digest === ref.digest, 'draft-digest-mismatch')
       check(message.content.includes(citation.quote), 'draft-quote-not-in-source')
       if (!references.some(old => sameRef(old, ref))) { references.push({ ...ref }); messages.push(message) }

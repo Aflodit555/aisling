@@ -279,10 +279,11 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       const toggle = document.querySelector('.settings-module input[role="switch"]')
       if (!toggle) throw new Error('Memory settings switch did not mount: ' + document.body.innerText.slice(0, 500))
       const defaultOn = toggle.checked && stage.memoryRecallEnabled === true
-      const formationDefaultOff = document.querySelectorAll('.settings-module input[role="switch"]').length === 3
-        && document.querySelectorAll('.settings-module input[role="switch"]')[1].checked === false
-        && document.querySelectorAll('.settings-module input[role="switch"]')[2].checked === false
-      const formationCopy = document.querySelector('.settings-module').textContent.includes('May make additional LLM requests.')
+      const memorySwitch = label => [...document.querySelectorAll('.settings-module input[role="switch"]')]
+        .find(input => input.closest('label')?.textContent.trim() === label)
+      const formationDefaultOff = ['Formation', 'Recall']
+        .every(label => memorySwitch(label)?.checked === false)
+      const formationCopy = document.querySelector('.settings-module').textContent.includes('Uses your model in the background.')
       async function setMemory(enabled) {
         toggle.checked = enabled
         toggle.dispatchEvent(new Event('change', { bubbles: true }))
@@ -294,9 +295,9 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         throw new Error('Memory consent did not persist')
       }
       async function setFormation(enabled) {
-        for (let n = 0; n < 100 && document.querySelectorAll('.settings-module input[role="switch"]').length !== 3; n++)
+        for (let n = 0; n < 100 && !memorySwitch('Formation'); n++)
           await new Promise(resolve => setTimeout(resolve, 10))
-        const formation = document.querySelectorAll('.settings-module input[role="switch"]')[1]
+        const formation = memorySwitch('Formation')
         if (!formation) throw new Error('Formation switch did not expand')
         formation.checked = enabled
         formation.dispatchEvent(new Event('change', { bubbles: true }))
@@ -308,10 +309,22 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         throw new Error('Formation switch did not persist')
       }
       await setFormation(true)
+      const noteToggle = memorySwitch('Recall')
+      if (!noteToggle || noteToggle.checked) throw new Error('Note Recall must start off')
+      function enableNoteRecall() {
+        const input = memorySwitch('Recall')
+        if (!input) throw new Error('Note Recall switch did not mount')
+        input.checked = true
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+        if (JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1') || '{}').memory?.noteRecallEnabled !== true)
+          throw new Error('Note Recall switch did not persist')
+      }
+      enableNoteRecall()
       await setMemory(false)
       await new Promise(resolve => setTimeout(resolve, 0))
       const collapsedWhenOff = document.querySelectorAll('.settings-module input[role="switch"]').length === 1
         && settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
+        && settings.config.memory.noteRecallEnabled !== true
       await setMemory(true)
       const formationNotReenabled = settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
       const oldId = stage.activeSessionId
@@ -362,6 +375,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         request.tools?.length ? size(JSON.stringify(request.tools)) : 0) <= 14336)
       const deletionEffective = !evidence(requests.at(-1))
       await setFormation(true)
+      enableNoteRecall()
       return { ...report, followupAnchored, contextBounded, deletionEffective, calls: requests.length }
     })()`)
     for (const [key, value] of Object.entries(report)) if (key !== 'calls') assert.equal(value, true, key)
@@ -376,9 +390,11 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
             await globals.$router.push('/settings/memory')
             await new Promise(resolve => setTimeout(resolve, 20))
             const toggle = document.querySelector('.settings-module input[role="switch"]')
+            const switches = [...document.querySelectorAll('.settings-module input[role="switch"]')]
+            const checked = label => switches.some(input => input.closest('label')?.textContent.trim() === label && input.checked)
             const restored = settings.config.memory.enabled && stage.memoryRecallEnabled && toggle?.checked === true
               && settings.config.memory.formationEnabled && stage.formationStatus.enabled
-              && document.querySelectorAll('.settings-module input[role="switch"]')[1]?.checked === true
+              && settings.config.memory.noteRecallEnabled === true && checked('Formation') && checked('Recall')
             if (toggle?.checked) {
               toggle.checked = false
               toggle.dispatchEvent(new Event('change', { bubbles: true }))
@@ -388,6 +404,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
               && settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
               && JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).memory.formationEnabled === false
               && JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).memory.enabled === false
+              && settings.config.memory.noteRecallEnabled !== true
               && document.querySelectorAll('.settings-module input[role="switch"]').length === 1,
               checked: toggle?.checked }
           }

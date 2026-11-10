@@ -26,6 +26,8 @@ export interface ConversationMessage extends ChatMessage {
   /** Actual append time in epoch milliseconds; absent on legacy messages. */
   readonly createdAt?: number
   readonly autonomousContext?: AutonomousReplyContext
+  /** A reply that used Note evidence cannot become independent Memory evidence. */
+  readonly noteDerived?: true
 }
 
 export function isValidTimestamp(value: unknown): value is number {

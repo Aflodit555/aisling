@@ -66,7 +66,7 @@ const timeout=setTimeout(()=>{console.error('Organization smoke timeout');app.ex
    if(request.messages[0]?.content?.startsWith('Form atomic candidates')){
     if(${live}){calls++;const response=await fetch(${JSON.stringify(liveUrl)},{method:'POST',body:JSON.stringify(request)});if(!response.ok)throw new Error('Live test stopped');return await response.json()}
     calls++;const input=JSON.parse(request.messages[1].content),e=input.evidence.find(e=>e.role==='user')
-    const s=input.subjects.find(s=>s.subject==='profile-user'&&s.mentions.some(m=>m.label===e.label)),target=input.candidates.find(n=>n.content==='用户陈述：'+e.content)
+    const s=input.subjects.find(s=>s.confirmed&&s.description==='user speaker'&&s.mentions.some(m=>m.label===e.label)),target=input.candidates.find(n=>n.content==='用户陈述：'+e.content)
     const action=calls===3?'RETRACT':target?'NOOP':'ADD'
     return {text:JSON.stringify({items:[{origin:'O1',draft:{content:'用户陈述：'+e.content,subject:s.label,eventTime:null,basis:'direct',kind:'event',tags:['合成灯塔'],sources:[{label:e.label,quote:e.content}]},action,target:action==='ADD'?null:target.label,related:[],reason:'合成逐字发言'}]}),usage:{inputTokens:100,outputTokens:50}}
    }return {text:'收到。'}
@@ -76,8 +76,8 @@ const timeout=setTimeout(()=>{console.error('Organization smoke timeout');app.ex
   await until(()=>stage.organizationStatus.ready || stage.organizationStatus.reason==='database-unavailable')
   if(${missing})return {missing:!stage.organizationStatus.ready,reason:stage.organizationStatus.reason,chatWorks:!!stage.send}
   await until(()=>stage.formationStatus.enabled && stage.formationStatus.lastEvent==='ready','formation initialization')
-  const switches=[...document.querySelectorAll('.module-toggle')].map(e=>e.textContent)
-  if(!switches.some(s=>s.includes('Memory Organization')))throw new Error('Missing organization toggle')
+  const switches=[...document.querySelectorAll('.module-toggle .toggle-line span')].map(e=>e.textContent.trim())
+  if(!switches.includes('Formation')||!switches.includes('Recall'))throw new Error('Missing legacy Memory controls')
   for(let i=0;i<3;i++){stage.send('合成灯塔 R8 门框为银色，传感器 E2。');await until(()=>!stage.sending)}
   await until(()=>stage.formation.inspect().batches.some(b=>b.organization?.settled),'C settlement')
   if(!${live}){

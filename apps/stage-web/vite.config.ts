@@ -16,8 +16,9 @@ export default defineConfig({
     strictPort: true,
   },
   resolve: {
-    alias: {
-      '@aisling/core': fileURLToPath(new URL('../../packages/core/src/index.ts', import.meta.url)),
-    },
+    alias: [{
+      find: /^@aisling\/core$/,
+      replacement: fileURLToPath(new URL('../../packages/core/src/index.ts', import.meta.url)),
+    }],
   },
 })

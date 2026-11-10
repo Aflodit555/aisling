@@ -1,7 +1,18 @@
-const { uuid, version, validOperation } = require('./note-v1.cjs')
+const { basename } = require('node:path')
+const { uuid, version, validOperation, validNoteV2Operation, validRuntimeOperation } = require('./note-v1.cjs')
 
 const VERSION = 1
 const NOTE_V1_FILE = 'note-v1.lbdb'
+const NOTE_V2_FILE = 'note-v2.test.lbdb'
+const NOTE_V2_RUNTIME_FILE = 'note-v2.lbdb'
+const isNoteV2 = schema => schema === 'note-v2' || schema === 'note-v2-runtime'
+const schemaForFile = file => {
+  const name = basename(file)
+  if (name === NOTE_V2_FILE) return 'note-v2'
+  if (name === NOTE_V2_RUNTIME_FILE) return 'note-v2-runtime'
+  if (name === NOTE_V1_FILE) return 'note-v1'
+  return 'p0'
+}
 const MAX_FRAME = 64 * 1024
 const MAX_PENDING = 32
 const decoder = new TextDecoder('utf-8', { fatal: true })
@@ -65,30 +76,50 @@ const validators = {
     && value.every(item => record(item, ['operation', 'payload']) && writes.has(item.operation)
       && validArgs(validators[item.operation], item.payload))],
 }
+const cursor = value => value === '' || uuid(value)
+const evidenceCursor = value => typeof value === 'string' && value.length <= 1024
+const versionedReads = {
+  close: [], getOperationReceipt: [uuid], erasedNoteIds: [uuid, cursor], listNoteHeads: [cursor],
+  getRevision: [uuid, version], getVersionSourceChanges: [uuid, version, cursor],
+}
 const noteValidators = {
-  eraseSources:[value=>require('./erasure.cjs').validErasure(value)],
-  erasedNoteIds:[uuid,value=>value===''||uuid(value)],
-  listMemorySources:[value=>['evidence','origin'].includes(value),value=>typeof value==='string'&&value.length<=1024],
-  installErasureBarriers:[value=>Array.isArray(value)&&value.length<=32&&value.every(k=>typeof k==='string'&&/^(session|evidence|origin):[a-f0-9]{64}$/.test(k))],
-  listNoteHeads: [value => value === '' || uuid(value)],
-  close: [], applyNoteOperation: [validOperation], getNoteV1: [uuid], getOperationReceipt: [uuid],
-  getRevision: [uuid, version], getVersionSourceChanges: [uuid, version, value => value === '' || uuid(value)],
+  ...versionedReads,
+  eraseSources: [value => require('./erasure.cjs').validErasure(value)],
+  listMemorySources: [value => ['evidence', 'origin'].includes(value), evidenceCursor],
+  installErasureBarriers: [value => Array.isArray(value) && value.length <= 32
+    && value.every(k => typeof k === 'string' && /^(session|evidence|origin):[a-f0-9]{64}$/.test(k))],
+  applyNoteOperation: [validOperation], getNoteV1: [uuid], getOrigins: [uuid], listNoteEvidence: [uuid, evidenceCursor],
+}
+const noteV2Validators = {
+  ...versionedReads,
+  eraseSources: [value => require('./erasure.cjs').validEvidenceErasure(value)],
+  listMemorySources: [value => value === 'evidence', evidenceCursor],
+  listNoteEvidence: [uuid, evidenceCursor],
+  applyNoteOperation: [validNoteV2Operation], getNoteV2: [uuid],
+}
+
+const runtimeValidators = {
+  ...noteV2Validators,
+  applyNoteOperation: [validRuntimeOperation],
+  installErasureBarriers: [value => Array.isArray(value) && value.length <= 32
+    && value.every(k => typeof k === 'string' && /^(session|evidence):[a-f0-9]{64}$/.test(k))],
 }
 
 function validArgs(checks, args) {
   return Array.isArray(args) && args.length === checks.length && checks.every((check, i) => check(args[i]))
 }
 
-function validateRequest(request, noteV1 = false) {
+function validateRequest(request, schema = 'p0') {
   if (!record(request, ['protocolVersion', 'requestId', 'operation', 'payload']) || !integer(request.requestId) || !request.requestId)
     throw new ProtocolError('invalid-request', 'Expected a positive integer request ID and request envelope')
   if (request.protocolVersion !== VERSION)
     throw new ProtocolError('protocol-version', 'Unsupported protocol version')
-  const operations = noteV1 ? noteValidators : validators
+  const operations = schema === 'note-v2-runtime' ? runtimeValidators
+    : schema === 'note-v2' ? noteV2Validators : schema === 'note-v1' ? noteValidators : validators
   if (typeof request.operation !== 'string' || !Object.hasOwn(operations, request.operation))
     throw new ProtocolError('unknown-operation', 'Operation is not on the allowlist')
   if (!validArgs(operations[request.operation], request.payload))
     throw new ProtocolError('invalid-payload', 'Invalid operation arguments')
 }
 
-module.exports = { VERSION, NOTE_V1_FILE, MAX_FRAME, MAX_PENDING, ProtocolError, lines, decode, encode, mutates, validateRequest }
+module.exports = { VERSION, NOTE_V1_FILE, NOTE_V2_FILE, NOTE_V2_RUNTIME_FILE, isNoteV2, schemaForFile, MAX_FRAME, MAX_PENDING, ProtocolError, lines, decode, encode, mutates, validateRequest }

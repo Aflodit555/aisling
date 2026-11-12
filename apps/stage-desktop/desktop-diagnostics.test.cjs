@@ -17,7 +17,7 @@ function fixture(enabled = false, replyText = false) {
   const contents = { mainFrame,isDestroyed:()=>false,send(){} }
   const image = { resize: () => image }
   const electron = {
-    app: { whenReady: async () => {}, on: () => {}, getPath:()=>path.resolve('synthetic-user-data') },
+    app: { whenReady: async () => {}, on: () => {}, getPath:()=>path.resolve('synthetic-user-data'), getVersion:()=>require('./package.json').version },
     Tray: class { setToolTip() {} on() {} },
     nativeImage: { createFromPath: () => image }, nativeTheme: { shouldUseDarkColors: false }, screen: { on: () => {} },
     BaseWindow: class {},

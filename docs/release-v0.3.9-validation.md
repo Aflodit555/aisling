@@ -1,6 +1,6 @@
 # v0.3.9 Git 整合与发布验证
 
-2026-11-12，Asia/Shanghai。目标为 Memory 第一轮工程基线；不提前开发 v0.4.0，不创建安装包或 GitHub Release 页面。当前为本地准备记录，只有下方各门槛取得实际结果后才允许推送。
+2026-11-12，Asia/Shanghai。目标为 Memory 第一轮工程基线；不提前开发 v0.4.0，不创建安装包或 GitHub Release 页面。代码质量门槛已完成；推送和Tag状态按实际执行阶段分别记录。
 
 ## 整理前后与提交组织
 
@@ -8,7 +8,15 @@
 
 运行时、P6与P7共享Main协调、Worker合同/事务和Renderer Recall，逐段核对后将前三组并为一个50文件的完整工程提交，包含启动storeToRefs修复及持续回归，避免人为切出不完整依赖。第二组为32文件的工程文档、隐私排除与历史整理。版本提交仅涉及版本来源、桌面显示和发行说明，不混入新Memory功能。没有重写旧提交、reset、clean或修改独立备份分支。
 
-提交、远程整合、测试和推送结果将在实际执行后记录；本地提交成功、main Push、Tag创建和远程Tag核验分别判断。
+本轮新增本地提交如下（不包含原有271d19e、dbd88f3、3204a51三个未推送成果，也不把远程既有5deab5e当作新造本地提交）。最近的本报告记录提交由上述git log按路径解析，避免不可实现的自引用Hash；所有其他新增提交Hash完整列出。
+
+| 新增Commit Hash | 说明 | 主要文件/范围 |
+| --- | --- | --- |
+| `65cff85ef71c1b766ca4e0e9fcb11e767a9aa5d4` | test(desktop): align diagnostic fixture with app version metadata | 诊断夹具补齐app.getVersion，保留原生产诊断断言 |
+| `bd36037f1c99a5d9c0b8f808da26b0910f0f402a` | merge: integrate origin/main gaze correction for v0.3.9 | 双亲Merge，保留origin/main的idle-life.ts gaze比例修正 |
+| `0a0ca5e09f8b628f538694230f6e1f9b49648445` | release: prepare v0.3.9 Memory engineering baseline | 四份package.json、桌面版本标题、CHANGELOG/README和两份发行文档，10文件 |
+| `a93a2722110636682b8d3e3b7a3bce63aefd5053` | docs(memory): consolidate engineering guides and preserve research limits | README、docs、研究摘要、.gitignore及17历史文档删除，32文件 |
+| `2c6d8fe2d614f0c02631ee9d4f0085f772376528` | feat(memory): establish P0-P7.1 engineering baseline | Main / Worker / Store / Core / Stage、启动修复、50工程文件及持续回归 |
 
 ## 旧实验处理及来源保护
 
@@ -52,13 +60,43 @@ P6、P7、P7.1原始实施报告和失败记录保留。尤其P7.1无有效图�
 
 根项目、apps/stage-desktop、apps/stage-web、packages/core四份package.json统一0.3.9。Stage及Desktop窗口标题从Electron app.getVersion()读取，不另建版本常量。README、docs/README、CHANGELOG及v0.3.9发行说明同步；旧阶段/发行报告仍保留当时版本。Worker package没有项目版本字段，其依赖版本、数据库Schema和协议保持原值。
 
-pnpm锁文件双文档结构使用workspace link和依赖版本，不存上述四个项目的自身版本；两份依赖锁文件不机械修改。版本与实际窗口的运行验证待执行后填入。
+pnpm锁文件双文档结构使用workspace link和依赖版本，不存上述四个项目的自身版本；两份依赖锁文件不机械修改。运行验证实际读取标准Electron Main，四份清单、两个窗口标题和当前文档均为v0.3.9；无改第三方依赖/Schema/协议版本。
 
 ## 最终质量与远程结果
 
-本轮最终Core/Web/Desktop串行、类型、构建、新旧Profile/Memory、旧Smoke、实际版本、隐私与Git检查尚待在远程整合后重新执行。此前审计的112/410/118通过不冒充本轮结果。
+本轮在Merge后的代码上重新执行，没有继承审计通过数。
 
-当前未创建v0.3.9 Tag，未推送main或Tag。若冲突、测试、敏感信息、版本或标签条件任一不成立，保留本地已提交状态并停止推送。最终结果将在实际完成后追加记录。
+| 验证 | 实际结果 |
+| --- | --- |
+| Core全量 | 19文件，112/112通过；含本机HTTP Mock，非真实Provider。 |
+| Stage Web全量 | 43文件，410/410通过；含启动、旧兼容、Formation/Recall及配置回归。 |
+| Desktop最终完整串行 | 118/118通过，0失败/取消/跳过；使用正确独立Windows Worker，实际LadybugDB/HNSW/exact，覆盖新旧Profile、迁移、删除屏障、版本/Receipt恢复、Vite与生产Electron Mock。在依赖稳定和新生产构建完成后重新完整运行。 |
+| 类型检查 | Core、Stage Web与Desktop既有选定JS入口全部通过。 |
+| 生产构建 | 通过，主chunk约797.17kB；保留既有>500kB提示，不做无关拆包。 |
+| 正式旧Organization Smoke | 裁切后Mock全生命周期、Worker缺失降级两个入口均通过；没有付费分支或真实Provider调用。 |
+| 实际应用版本 | 启动真实apps/stage-desktop目录及标准main.cjs，在隔离Profile上验得app.getVersion()=0.3.9、Stage实际挂载；Stage窗口“Aisling v0.3.9”，Desktop窗口“Aisling Desktop v0.3.9”。 |
+| 来源保护 / Git / 隐私 | 起点84路径全部有提交/删除/校验归档归属；3原稿SHA-256一致；私人研究不入Git。diff及cached检查、Markdown本地目标、322个当前跟踪路径和全部待推送提交扫描通过；无常见密钥匹配，不等于隐私形式化证明。 |
+| 锁文件 / 远程gaze / backup | 两份锁文件相对3204a51完全不变；idle-life.ts与整合前origin/main一致；backup仍为2f4762d，未合并/推送。 |
+
+### 本轮失败及恢复记录
+
+版本更新触发pnpm重新核对并重链接锁定依赖；沙箱的首次typecheck尝试被DNS阻断，未完成，之后在正常环境类型检查/构建通过，没有升级依赖。Core/Web执行时复用了现有包缓存，依赖解析仍使用原锁文件。
+
+首轮Desktop过早与依赖重链接/构建重叠：Electron缺失触发自动下载，迁移入口在构建目录替换期间出现ERR_FILE_NOT_FOUND / ERR_UNEXPECTED。另一个明确错误来自本轮版本标题：诊断夹具未模拟app.getVersion()，提前TypeError，已按实际package版本补齐原有Mock。该轮最终通过116、失败2、取消0，不能算发布通过。保留失败项：main distinguishes an actual Jev call, validates snapshot first, and keeps model input unchanged (33.0612ms)；standard Electron entry checks and confirms an upgrade, excludes an old writer, then restarts in v2 (112304.556ms)；failing tests:。第二轮在确认诊断夹具缺失后主动中断，日志另存desktop-interrupted.log，不算通过。没有删除断言、加大产品超时或改写恢复/删除规则；补齐夹具、依赖稳定且新构建完成后，最终完整串行118项通过。
+
+日志和隔离输出均在忽略目录.tmp/release-v039/及artifacts/：workspace-tests.log、typecheck.log（失败记录）、typecheck-full.log、build.log、desktop-tests.log（首轮）、desktop-final.log（最终）、runtime-check.log、runtime-version.json、preflight.json。本轮未调用真实Provider，未使用或改写真实Profile。
+
+### 推送前隐私检查
+
+检查全部当前跟踪路径及origin/main..HEAD的提交内容，排除reports、Profile/.local、artifacts、.tmp、node_modules、dist、.env、数据库/WAL、日志及原生可执行文件；扫描常见API/GitHub/AWS/私钥和长字面量凭据无命中。保留的合成Mock不冒充真实数据。git check-ignore验证私人种子、原稿、Profile、实验输出、环境文件和作业账本有效；所有旧源码原稿保留本地且不进入GitHub。
+
+### 远程分叉整合
+
+本地成果提交后git fetch origin，远程main仍为`5deab5ea289d001c43df5fc8e24cc52d7051d3f7`。使用`git merge --no-ff --no-commit origin/main`审阅后正常提交`bd36037f1c99a5d9c0b8f808da26b0910f0f402a`，双亲为`0a0ca5e09f8b628f538694230f6e1f9b49648445`和远程5deab5e。无冲突；保留远程gaze修正，无整段覆盖、rebase、force push或历史重写。
+
+### main / Tag分别核验
+
+截至本记录提交前，main与Tag尚未推送、Tag尚未创建。质量门槛已通过，只有再次确认远程main未变化且v0.3.9标签仍不存在后才创建带说明Tag并正常推送；任何冲突或失败均停止，不覆盖远程引用。发布回执将在完成后另以纯文档记录提交保存，不重写发布Tag。
 
 ## 未验证的真实使用限制
 

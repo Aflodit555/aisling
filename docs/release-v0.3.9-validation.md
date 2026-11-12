@@ -1,6 +1,6 @@
 # v0.3.9 Git 整合与发布验证
 
-2026-11-12，Asia/Shanghai。目标为 Memory 第一轮工程基线；不提前开发 v0.4.0，不创建安装包或 GitHub Release 页面。代码质量门槛已完成；推送和Tag状态按实际执行阶段分别记录。
+2026-11-12，Asia/Shanghai。目标为 Memory 第一轮工程基线；不提前开发 v0.4.0，不创建安装包或 GitHub Release 页面。以下区分本地提交、实际Push、Tag创建与远程核验；代码基线和文档回执分别可追溯。
 
 ## 整理前后与提交组织
 
@@ -12,6 +12,7 @@
 
 | 新增Commit Hash | 说明 | 主要文件/范围 |
 | --- | --- | --- |
+| `2d3c88c0bd8699d82be7bc2c3b107d61577b5499` | docs(release): record v0.3.9 integration and quality gates | 仅本轮发行验证报告/记录 |
 | `65cff85ef71c1b766ca4e0e9fcb11e767a9aa5d4` | test(desktop): align diagnostic fixture with app version metadata | 诊断夹具补齐app.getVersion，保留原生产诊断断言 |
 | `bd36037f1c99a5d9c0b8f808da26b0910f0f402a` | merge: integrate origin/main gaze correction for v0.3.9 | 双亲Merge，保留origin/main的idle-life.ts gaze比例修正 |
 | `0a0ca5e09f8b628f538694230f6e1f9b49648445` | release: prepare v0.3.9 Memory engineering baseline | 四份package.json、桌面版本标题、CHANGELOG/README和两份发行文档，10文件 |
@@ -82,7 +83,7 @@ pnpm锁文件双文档结构使用workspace link和依赖版本，不存上述�
 
 版本更新触发pnpm重新核对并重链接锁定依赖；沙箱的首次typecheck尝试被DNS阻断，未完成，之后在正常环境类型检查/构建通过，没有升级依赖。Core/Web执行时复用了现有包缓存，依赖解析仍使用原锁文件。
 
-首轮Desktop过早与依赖重链接/构建重叠：Electron缺失触发自动下载，迁移入口在构建目录替换期间出现ERR_FILE_NOT_FOUND / ERR_UNEXPECTED。另一个明确错误来自本轮版本标题：诊断夹具未模拟app.getVersion()，提前TypeError，已按实际package版本补齐原有Mock。该轮最终通过116、失败2、取消0，不能算发布通过。保留失败项：main distinguishes an actual Jev call, validates snapshot first, and keeps model input unchanged (33.0612ms)；standard Electron entry checks and confirms an upgrade, excludes an old writer, then restarts in v2 (112304.556ms)；failing tests:。第二轮在确认诊断夹具缺失后主动中断，日志另存desktop-interrupted.log，不算通过。没有删除断言、加大产品超时或改写恢复/删除规则；补齐夹具、依赖稳定且新构建完成后，最终完整串行118项通过。
+首轮Desktop过早与依赖重链接/构建重叠：Electron缺失触发自动下载，迁移入口在构建目录替换期间出现ERR_FILE_NOT_FOUND / ERR_UNEXPECTED。另一个明确错误来自本轮版本标题：诊断夹具未模拟app.getVersion()，提前TypeError，已按实际package版本补齐原有Mock。该轮最终通过116、失败2、取消0，不能算发布通过。保留失败项：main distinguishes an actual Jev call, validates snapshot first, and keeps model input unchanged (33.0612ms)；standard Electron entry checks and confirms an upgrade, excludes an old writer, then restarts in v2 (112304.556ms)。第二轮在确认诊断夹具缺失后主动中断，日志另存desktop-interrupted.log，不算通过。没有删除断言、加大产品超时或改写恢复/删除规则；补齐夹具、依赖稳定且新构建完成后，最终完整串行118项通过。
 
 日志和隔离输出均在忽略目录.tmp/release-v039/及artifacts/：workspace-tests.log、typecheck.log（失败记录）、typecheck-full.log、build.log、desktop-tests.log（首轮）、desktop-final.log（最终）、runtime-check.log、runtime-version.json、preflight.json。本轮未调用真实Provider，未使用或改写真实Profile。
 
@@ -96,7 +97,11 @@ pnpm锁文件双文档结构使用workspace link和依赖版本，不存上述�
 
 ### main / Tag分别核验
 
-截至本记录提交前，main与Tag尚未推送、Tag尚未创建。质量门槛已通过，只有再次确认远程main未变化且v0.3.9标签仍不存在后才创建带说明Tag并正常推送；任何冲突或失败均停止，不覆盖远程引用。发布回执将在完成后另以纯文档记录提交保存，不重写发布Tag。
+带说明Tag创建成功：对象`8c8067b237a3a5593beeb809a592549b0bda6f6e`，解引用提交`2d3c88c0bd8699d82be7bc2c3b107d61577b5499`。首次main Push成功、Tag Push成功，已通过git ls-remote核对main及Tag对象/解引用均与本地一致。
+
+本报告在Tag之后的纯文档记录提交只补充实际回执，不改变版本或运行代码；最终main包含该记录，Tag固定在已验证的发布基线，不移动、不覆盖。报告不能自嵌自身提交Hash，记录提交用`git log -1 --format=%H -- docs/release-v0.3.9-validation.md`解析；任务收尾再次核对远程main等于本地HEAD且包含Tag。完整机器回执保留于本地忽略的.tmp/release-v039/push-receipt.json及final-remote.json。
+
+收尾状态：工作区及暂存区为空，main与origin/main同步，主分支没有待提交或待推送成果；私人研究/运行资料继续忽略且保留。backup/pre-history-cleanup未变、未合并、未推送，其5个旧历史提交不是本次发布积压。v0.3.9是已验证工程基线，标签后的差异仅为本报告回执；没有二进制安装包或GitHub Release页面。
 
 ## 未验证的真实使用限制
 

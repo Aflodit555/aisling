@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('aislingDesktop', {
     noteRecall: {
       snapshot: () => ipcRenderer.invoke('aisling:note-recall:snapshot'),
       current: version => ipcRenderer.invoke('aisling:note-recall:current', version),
+      neighbors: (ids, version, evolution = false, history = false) => ipcRenderer.invoke('aisling:note-recall:neighbors', ids, version, evolution, history),
+      candidates: (query, version) => ipcRenderer.invoke('aisling:note-recall:candidates', query, version),
     },
     noteReview: {
       list: () => ipcRenderer.invoke('aisling:note-review:list'),

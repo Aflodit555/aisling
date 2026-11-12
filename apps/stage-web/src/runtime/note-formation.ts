@@ -1,25 +1,28 @@
 import type { ChatProvider } from '@aisling/core'
 import type { EvidenceRef } from '../../../stage-desktop/memory-database/store'
-import { formationInput, limits, parseNoteProposals, type NoteFormationContext } from '../../../stage-desktop/note-formation-contract.mjs'
+import { formationInput, limits, parseNoteBatch, type NoteFormationContext } from '../../../stage-desktop/note-formation-contract.mjs'
 import speakers from '../../../stage-desktop/memory-subjects.json'
 import type { ConversationSession } from '../conversation/conversation-store'
 import { sourceRef, withRelatedHistory, type FormationEvidence } from './formation-evidence'
 import { safeText } from './memory-recall'
+import { organizationInput, parseSemanticRelations, semanticLimits } from '../../../stage-desktop/note-semantic-contract.mjs'
 
-type Attempt = { id: string; attempt: number; sessionId: string; refs: EvidenceRef[] }
+type Attempt = { id: string; attempt: number; sessionId: string; refs: EvidenceRef[]; kind?: 'organization' }
 export interface NoteFormationBridge {
   delivered(sessionId: string, indices: number[]): Promise<void>
   flush(sessionId: string): Promise<void>
-  next(): Promise<Attempt | null>
+  next(allowSemantic?: boolean): Promise<Attempt | null>
   prepare(id: string, attempt: number, history: EvidenceRef[]): Promise<NoteFormationContext>
   submit(id: string, attempt: number, raw: string): Promise<void>
   fail(id: string, attempt: number, reason: string): Promise<void>
 }
 
-export function createNoteFormation(bridge: NoteFormationBridge, getSessions: () => ConversationSession[], getEnableThinking: () => false | undefined) {
+export function createNoteFormation(bridge: NoteFormationBridge, getSessions: () => ConversationSession[], getEnableThinking: () => false | undefined,
+  isChatBusy: () => boolean = () => false) {
   let provider: ChatProvider | undefined
   let epoch = 0, pumping = false, requested = false
   let active: AbortController | undefined
+  let poll: ReturnType<typeof setTimeout> | undefined
 
   async function resolve(refs: EvidenceRef[]): Promise<FormationEvidence[]> {
     const sessions = getSessions()
@@ -45,7 +48,7 @@ export function createNoteFormation(bridge: NoteFormationBridge, getSessions: ()
     try {
       stillCurrent()
       const current = await resolve(job.refs)
-      const evidence = await withRelatedHistory(job.sessionId, current, getSessions, sources => {
+      const evidence = job.kind === 'organization' ? current : await withRelatedHistory(job.sessionId, current, getSessions, sources => {
         formationInput({ notes: [], speakers, evidence: sources.map(source => ({
           ref: source.ref, message: source.message as NoteFormationContext['evidence'][number]['message'],
           scope: source.scope === 'related-history' ? 'history' : 'current',
@@ -55,18 +58,20 @@ export function createNoteFormation(bridge: NoteFormationBridge, getSessions: ()
       const context = await bridge.prepare(job.id, job.attempt, evidence.slice(current.length).map(e => e.ref))
       await resolve(context.evidence.map(e => e.ref))
       stillCurrent()
-      const { messages } = formationInput(context)
+      const semantic = context.mode === 'organization'
+      const { messages } = semantic ? organizationInput(context) : formationInput(context)
       const output = await Promise.race([
-        selected.complete({ messages, temperature: 0.2, maxOutputTokens: 1500, enableThinking: getEnableThinking(), signal: controller.signal }),
+        selected.complete({ messages, temperature: 0.2, maxOutputTokens: semantic ? semanticLimits.outputTokens : 1500, enableThinking: getEnableThinking(), signal: controller.signal }),
         new Promise<never>((_, reject) => {
           controller.signal.addEventListener('abort', () => reject(new Error(error === 'timeout' ? error : 'cancelled')), { once: true })
-          timer = setTimeout(() => { error = 'timeout'; controller.abort() }, limits.timeoutMs)
+          timer = setTimeout(() => { error = 'timeout'; controller.abort() }, semantic ? semanticLimits.timeoutMs : limits.timeoutMs)
         }),
       ])
       stillCurrent()
       if (output.toolCalls?.length) throw new Error('invalid-proposal')
       error = 'invalid-proposal'
-      parseNoteProposals(output.text, context)
+      if (semantic) parseSemanticRelations(output.text, context)
+      else parseNoteBatch(output.text, context)
       await resolve(context.evidence.map(e => e.ref))
       stillCurrent()
       await bridge.submit(job.id, job.attempt, output.text)
@@ -88,7 +93,7 @@ export function createNoteFormation(bridge: NoteFormationBridge, getSessions: ()
         requested = false
         const ticket = epoch, selected = provider
         while (ticket === epoch) {
-          const job = await bridge.next()
+          const job = await bridge.next(!isChatBusy())
           if (!job) break
           await generate(job, selected, ticket)
         }
@@ -98,12 +103,18 @@ export function createNoteFormation(bridge: NoteFormationBridge, getSessions: ()
   }
 
   function wake() { requested = true; void pump() }
+  function pollIdle() {
+    clearTimeout(poll)
+    if (!provider) return
+    poll = setTimeout(() => { if (!isChatBusy()) wake(); pollIdle() }, 15_000)
+  }
   return {
     setProvider(next: ChatProvider | undefined) {
       if (next === provider) return
       provider = next
       epoch++
       active?.abort()
+      pollIdle()
       if (provider) wake()
     },
     delivered(sessionId: string, indices: number[]) {

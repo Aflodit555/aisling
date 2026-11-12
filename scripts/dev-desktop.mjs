@@ -4,14 +4,14 @@
 //   pnpm start:desktop        → build stage-web, launch Electron against the built renderer
 //
 // It owns the child-process lifecycle end to end: it starts the renderer/runtime
-// dependency, waits for it (by polling the HTTP endpoint, never a fixed sleep),
+// dependency, waits for the Vite child to report its listening address,
 // starts Electron, and cleans the renderer process up when Electron exits.
 import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import http from 'node:http'
+import { stripVTControlCharacters } from 'node:util'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, '..')
@@ -20,6 +20,7 @@ const STAGE_DESKTOP_DIR = join(ROOT, 'apps', 'stage-desktop')
 
 const DEFAULT_STAGE_URL = 'http://localhost:5174'
 const READY_TIMEOUT_MS = 60_000
+const DEV_RESTART_EXIT = 75
 const PROD = process.argv.includes('--prod')
 
 const stageWebRequire = createRequire(pathToFileURL(join(STAGE_WEB_DIR, 'package.json')))
@@ -90,40 +91,21 @@ function resolveElectronBin() {
   return exe
 }
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-/** Polls the Stage dev server instead of guessing with a fixed sleep. */
-function probeHttp(url) {
-  return new Promise((resolveProbe) => {
-    const req = http.get(url, (res) => {
-      res.resume()
-      resolveProbe(res.statusCode === 200)
-    })
-    req.on('error', () => resolveProbe(false))
-    req.setTimeout(1500, () => {
-      req.destroy()
-      resolveProbe(false)
-    })
-  })
-}
-
-async function waitForVite(vite) {
+function waitForVite(vite) {
   log(`waiting for the Stage dev server at ${DEFAULT_STAGE_URL} …`)
-  const started = Date.now()
-  while (Date.now() - started < READY_TIMEOUT_MS) {
-    if (vite.exitCode !== null) {
-      fail(`the Stage dev server exited early (code ${vite.exitCode}) — see the logs above`)
-      return
+  return new Promise((ready, reject) => {
+    let output = ''
+    const timeout = setTimeout(() => reject(new Error(`Vite did not listen at ${DEFAULT_STAGE_URL}`)), READY_TIMEOUT_MS)
+    const onData = chunk => {
+      output = (output + chunk.toString()).slice(-4096)
+      const local = /(?:^|\s)Local:\s+(\S+)/.exec(stripVTControlCharacters(output))
+      if (local?.[1] !== DEFAULT_STAGE_URL + '/') return
+      clearTimeout(timeout)
+      vite.stdout.off('data', onData)
+      ready()
     }
-    if (await probeHttp(DEFAULT_STAGE_URL)) {
-      log('Stage dev server is ready')
-      return
-    }
-    await sleep(250)
-  }
-  fail(`timed out after ${READY_TIMEOUT_MS / 1000}s waiting for ${DEFAULT_STAGE_URL}`)
+    vite.stdout.on('data', onData)
+  })
 }
 
 function launchElectron(extraEnv = {}) {
@@ -139,6 +121,11 @@ function launchElectron(extraEnv = {}) {
   })
   electron.on('exit', (code, signal) => {
     log(`Electron exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`)
+    children.splice(children.indexOf(electron), 1)
+    if (!cleanedUp && extraEnv.AISLING_DEV === '1' && code === DEV_RESTART_EXIT) {
+      launchElectron(extraEnv)
+      return
+    }
     cleanup()
     process.exit(code ?? 0)
   })
@@ -148,15 +135,19 @@ function launchElectron(extraEnv = {}) {
 function runDev() {
   const viteBin = resolveViteBin()
   log('starting the Stage dev server (Vite)')
-  const vite = spawn(process.execPath, [viteBin], {
+  const vite = spawn(process.execPath, [viteBin, '--host', 'localhost', '--port', '5174', '--strictPort'], {
     cwd: STAGE_WEB_DIR,
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'inherit'],
     env: { ...process.env },
     detached: process.platform !== 'win32',
   })
   children.push(vite)
+  vite.stdout.pipe(process.stdout, { end: false })
   vite.on('error', (error) => {
     fail(`failed to start Vite: ${error.message}`)
+  })
+  vite.on('exit', code => {
+    if (!cleanedUp) fail(`the Stage dev server exited (code ${code})`)
   })
 
   void waitForVite(vite)
@@ -180,7 +171,7 @@ function runProd() {
   if (build.status !== 0)
     fail(`stage-web build failed (exit ${build.status})`)
   log('launching Electron against the built renderer (aisling://stage)')
-  launchElectron({})
+  launchElectron({ AISLING_STAGE_URL: '', AISLING_DEV: '' })
 }
 
 process.on('SIGINT', () => {

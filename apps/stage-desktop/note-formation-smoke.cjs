@@ -1,17 +1,23 @@
 // Invoked by note-formation-electron.test.cjs with a marked synthetic profile.
-const { app, dialog } = require('electron')
+const { app, dialog, WebContentsView } = require('electron')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { once } = require('node:events')
 const { setTimeout: delay } = require('node:timers/promises')
 const { startDesktop } = require('./desktop-app.cjs')
 const { noteFormationFixture } = require('./note-formation-test-host.cjs')
 
 const [phase, profile, resources] = process.argv.slice(2)
-assert(['default', 'write', 'reopen', 'erase'].includes(phase))
+assert(['default', 'write', 'reopen', 'erase', 'dev', 'autonomous', 'semantic', 'associative'].includes(phase))
+let fixtureClock = Date.now()
+if (['semantic','associative'].includes(phase)) Date.now = () => fixtureClock
 assert.equal(fs.readFileSync(path.join(profile, '.note-formation-test'), 'utf8'), 'aisling-note-formation-p1-fixture\n')
-app.setPath('userData', profile)
-app.setPath('sessionData', profile)
+const dev = phase === 'dev'
+const initialProfile = dev ? path.join(profile, 'unused-built-profile') : profile
+if (dev) fs.mkdirSync(initialProfile)
+app.setPath('userData', initialProfile)
+app.setPath('sessionData', initialProfile)
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-background-networking')
 const jobs = () => JSON.parse(fs.readFileSync(path.join(profile, 'note-formation-jobs.v1.json'), 'utf8')).batches
@@ -28,17 +34,139 @@ async function until(predicate, description) {
 
 ;(async () => {
   let service
-  const fixture = phase === 'default' ? undefined : noteFormationFixture(app, resources)
+  const embeddingCalls = []
+  const fixture = dev ? {} : phase === 'default' ? undefined : noteFormationFixture(app, resources)
   let confirmation = 1, dialogs = 0
   if (fixture) dialog.showMessageBox = async () => { dialogs++; return { response: confirmation } }
-  const win = await startDesktop({ show: false, diagnostics: false, stageUrl: 'aisling://stage/',
-    noteOnlyForNewProfiles: phase !== 'default', noteV2: fixture && { ...fixture, onService: value => { service = value } } })
+  if (dev) {
+    await assert.rejects(startDesktop({ stageUrl: 'http://localhost:5175', noteOnlyForNewProfiles: true }), /untrusted-stage-origin/)
+    await assert.rejects(startDesktop({ stageUrl: 'https://example.invalid', noteOnlyForNewProfiles: true }), /untrusted-stage-origin/)
+  }
+  // Client-route transitions need animation frames, which hidden windows may suspend.
+  const win = await startDesktop({ show: phase === 'write' || phase === 'associative', diagnostics: false, stageUrl: dev ? undefined : 'aisling://stage/',
+    noteOnlyForNewProfiles: phase !== 'default', noteV2: fixture && { ...fixture, onService: value => { service = value },
+      ...(phase === 'associative' && { embeddingConfig: () => ({modelId:'mock/embedding',model:'mock',apiKey:'synthetic',endpoint:'https://mock.invalid'}),
+        embeddingRequest: async (_config,texts,type) => { embeddingCalls.push(type); return texts.map(()=>[1,...Array(1023).fill(0)]) } }) } })
   const web = win.contentView.children[0].webContents
+  if (dev) web.on('console-message', details => {
+    if (details.level === 'error') console.error(details.message)
+  })
   if (phase === 'default') {
     assert.equal(await web.executeJavaScript('Boolean(window.aislingDesktop?.noteFormation)'), false)
     assert(!fs.existsSync(path.join(profile, 'memory-authority')))
     assert(!fs.existsSync(path.join(profile, 'memory-note-v2')))
     console.log(JSON.stringify({ phase, result: 'note-formation-passed', pid: process.pid }))
+    clearTimeout(timeout)
+    app.quit()
+    return
+  }
+  if (['autonomous','semantic','associative'].includes(phase)) {
+    await web.executeJavaScript('window.semanticMemoryFixture = ' + JSON.stringify(phase !== 'autonomous') + '; window.associativeMemoryFixture = ' + JSON.stringify(phase === 'associative'))
+    dialog.showMessageBox = async () => { assert.fail('Normal autonomous memory must not require approval') }
+    await web.executeJavaScript('(' + (async function () {
+      let stage, settings
+      for (let i = 0; i < 600; i++) {
+        const pinia = document.querySelector('#app')?.__vue_app__?.config.globalProperties.$pinia
+        stage = pinia?._s.get('stage'); settings = pinia?._s.get('settings')
+        if (stage && settings?.loaded) break
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      await settings.setMemoryEnabled(true)
+      await settings.setMemoryFormationEnabled(true)
+      await settings.setNoteRecallEnabled(true)
+      let calls = 0, semanticCalls = 0, lastChat
+      const semantic = window.semanticMemoryFixture === true
+      const associative = window.associativeMemoryFixture === true
+      settings.activeChatProvider = { id: 'offline-autonomous', complete: async request => {
+        if (request.messages[0]?.content?.startsWith('Note-only Organization.')) {
+          semanticCalls++
+          const input = JSON.parse(request.messages[1].content)
+          const stageOf = text => associative ? text.includes('Live2D') ? 2 : text.includes('Agent') ? 1 : 0
+            : text.includes('恢复') || text.includes('重新') ? 2 : text.includes('暂停') ? 1 : 0
+          const sorted = [...input.notes].sort((a, b) => stageOf(a.content) - stageOf(b.content))
+          const relations = sorted.slice(0, -1).map((from, i) => ({ from: from.label, to: sorted[i + 1].label,
+            type: associative ? 'ASSOCIATED_WITH' : 'STATE_CHANGE', scope: associative ? '自主性设计' : '钢琴练习',
+            reason: associative ? 'Memory Organization 的认识决策、Agent 行动选择与 Live2D 意图表达在研究自主性时互相提供设计线索，不是事实证明' : '两个独立原始报告描述练习状态的变化',
+            sources: [...from.sources, ...sorted[i + 1].sources].map(label => ({ label,
+              quote: input.evidence.find(entry => entry.label === label).content })) }))
+          return { text: JSON.stringify({ relations: relations.slice(0, 2) }) }
+        }
+        if (!request.messages[0]?.content?.startsWith('Note-only Formation.')) { lastChat = request.messages; return { text: '收到。' } }
+        calls++
+        const input = JSON.parse(request.messages[1].content)
+        const evidence = input.evidence.find(e => e.role === 'user' && e.scope === 'current')
+        const content = evidence.content
+        const value = content.includes('重新') ? '重新开始' : content.includes('暂停') ? '暂停' : '开始'
+        const summary = content.includes('重新') ? '用户恢复钢琴练习。' : content.includes('暂停') ? '用户暂停钢琴练习。' : '用户开始钢琴练习。'
+        return { text: JSON.stringify({ items: [{ action: 'ADD', target: null, reason: '原文状态报告',
+          draft: { content: associative ? content : semantic ? summary : content, kind: 'event', basis: 'direct', subject: 'S1', eventTime: null,
+            tags: associative ? [content.includes('Memory') ? 'Memory' : content.includes('Agent') ? 'Agent' : 'Live2D'] : ['钢琴'],
+            ...(!semantic && { state: { scope: '练习钢琴', value } }), sources: [{ label: evidence.label, quote: content }] },
+          ...(semantic && { semantic: { relation: 'independent', target: null, scope: associative ? '自主性设计' : '钢琴练习',
+            sources: [{ label: evidence.label, quote: content }], targetSources: [] } }) }] }) }
+      } }
+      window.autonomousMemoryFixture = {
+        async send(content) {
+          for (let i = 0; i < 3; i++) {
+            stage.send(content)
+            for (let attempt = 0; stage.sending && attempt < 600; attempt++) await new Promise(resolve => setTimeout(resolve, 10))
+            if (stage.sending) throw new Error('Chat did not finish')
+          }
+        }, calls: () => calls, semanticCalls: () => semanticCalls,
+        wake() { stage.newConversation() },
+        async query() {
+          stage.send(associative ? 'Memory Organization 和以前的自主性研究有什么联系？' : '我现在还在练钢琴吗？')
+          for (let i = 0; stage.sending && i < 600; i++) await new Promise(resolve => setTimeout(resolve, 10))
+          return lastChat
+        },
+      }
+    }).toString() + ')()')
+    const experiences = phase === 'associative' ? ['我研究 Memory Organization 的认识决策。','我研究 Agent 的自主行动选择。','我用 Live2D 表达角色自主意图。']
+      : ['我现在开始练习钢琴。', '我现在暂停练习钢琴。', '我现在重新开始练习钢琴。']
+    for (const [i, content] of experiences.entries()) {
+      await web.executeJavaScript('window.autonomousMemoryFixture.send(' + JSON.stringify(content) + ')')
+      await until(() => jobs().filter(batch => batch.items?.some(item => item.status === 'applied')).length >= i + 1, 'No autonomous commit')
+    }
+    for (let i = 0; i < 6; i++) await service.organize()
+    if (phase === 'associative') await service.syncEmbeddings()
+    if (['semantic','associative'].includes(phase)) {
+      fixtureClock += 60_001
+      await web.executeJavaScript('window.autonomousMemoryFixture.wake()')
+      await until(() => {
+        const organization = JSON.parse(fs.readFileSync(path.join(profile, 'note-formation-jobs.v1.json'), 'utf8')).organization
+        return organization.semanticCalls.length >= 2 && !organization.tasks.some(task => ['running', 'settling'].includes(task.semantic?.status))
+      }, 'Background semantic organization did not finish')
+    }
+    assert.equal((await service.reviews()).pending, 0)
+    const snapshot = await service.recallSnapshot()
+    assert.equal(snapshot.reason, 'ready')
+    assert.equal(snapshot.notes.length, 3)
+    const graph = await web.executeJavaScript('window.aislingDesktop.noteRecall.neighbors(' + JSON.stringify(snapshot.notes.map(head => head.note.id)) + ',' + JSON.stringify(snapshot.version) + ')')
+    assert(graph.relations.length >= 2)
+    if (['semantic','associative'].includes(phase)) {
+      assert(graph.relations.every(relation => relation.method === 'semantic'))
+      const request = await web.executeJavaScript('window.autonomousMemoryFixture.query()')
+      assert(request.some(message => message.content?.includes(phase === 'associative' ? 'ASSOCIATED_WITH' : 'latest-known-report')), JSON.stringify(request))
+      if (phase === 'associative') { assert(embeddingCalls.includes('document')); assert(embeddingCalls.includes('query')) }
+      assert.equal(await web.executeJavaScript('window.autonomousMemoryFixture.semanticCalls()'), 2)
+    }
+    assert.equal(await web.executeJavaScript('window.autonomousMemoryFixture.calls()'), 3)
+    assert.equal(dialogs, 0)
+    if (phase === 'associative') await web.executeJavaScript('(' + (async function () {
+      const vm=document.querySelector('#app').__vue_app__.config.globalProperties
+      await vm.$router.push({name:'settings-memory'})
+      for(let i=0;i<400&&!document.querySelector('#embedding-title');i++) await new Promise(r=>setTimeout(r,10))
+      const form=document.querySelector('#embedding-title')?.parentElement.querySelector('form')
+      if(!form)throw new Error('Embedding form absent')
+      const model=form.querySelector('input');model.value='qwen3.7-text-embedding';model.dispatchEvent(new Event('input',{bubbles:true}))
+      const endpoint=form.querySelector('input[type="url"]');endpoint.value='https://dashscope.aliyuncs.com';endpoint.dispatchEvent(new Event('input',{bubbles:true}))
+      await Promise.resolve();form.querySelector('button[type="submit"]').click()
+      for(let i=0;i<400;i++){const config=JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1'))
+        if(config.memory.embedding?.credentialSource==='reuse'&&config.memory.embedding.model==='qwen3.7-text-embedding')return
+        await new Promise(r=>setTimeout(r,10))}
+      throw new Error('Embedding UI save did not persist')
+    }).toString() + ')()')
+    console.log(JSON.stringify({ phase, result: 'note-formation-passed', pid: process.pid, notes: 3, relations: graph.relations.length }))
     clearTimeout(timeout)
     app.quit()
     return
@@ -86,6 +214,7 @@ async function until(predicate, description) {
       }
       let items = []
       if (mode === 'bad') return { text: 'invalid JSON' }
+      if (mode === 'dev') items = [item(draft(users[0], '用户报告已经开始练手碟。'))]
       if (mode === 'drafts') {
         const historical = input.evidence.find(e => e.role === 'user' && e.scope === 'history' && e.content.includes('原本'))
         if (!historical) throw new Error('missing historical original')
@@ -165,7 +294,70 @@ async function until(predicate, description) {
     }
   }).toString() + ')()')
 
-  if (phase === 'write') {
+  if (dev) {
+    assert.equal(app.getPath('userData'), profile)
+    assert.equal(app.getPath('sessionData'), profile)
+    assert(!fs.existsSync(path.join(initialProfile, 'memory-authority')))
+    assert.equal(await web.executeJavaScript('!!window.aislingDesktop.noteFormation && !window.aislingDesktop.reflectionStorage && typeof require === "undefined"'), true)
+    await invoke('mode', 'dev')
+    await invoke('send', ['手碟练习已开始。', '我已经练了一次手碟。', '已安排练习。'], true)
+    await until(() => jobs()[0]?.items?.[0]?.status === 'review', 'Vite proposal')
+    const [{ key, approvable }] = (await invoke('review')).items
+    assert(approvable)
+    assert.deepEqual((await invoke('snapshot')).notes, [])
+    assert.equal(await invoke('decide', key, true), 'applied')
+    assert.equal(dialogs, 1)
+    assert.equal(await web.executeJavaScript("Boolean(document.querySelector('#review-title'))"), true)
+    await web.executeJavaScript(`(async () => {
+      const { createHotContext } = await import('/@vite/client')
+      const hot = createHotContext('/__aisling_test_hmr')
+      const updated = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Vite update did not arrive')), 6000)
+        hot.on('vite:afterUpdate', () => { clearTimeout(timeout); resolve() })
+      })
+      if (!(await fetch('/__aisling_test_hmr', { method: 'POST' })).ok) throw new Error('Could not trigger Vite update')
+      await updated
+    })()`)
+    assert.equal(await invoke('decide', key, true), 'applied')
+    assert.equal(dialogs, 1)
+    assert.equal(await invoke('calls'), 1)
+    assert.equal(jobs().length, 1)
+    assert.equal((await invoke('snapshot')).notes.length, 1)
+    const recalled = await invoke('recallTurn')
+    assert(recalled.some(message => message.content?.startsWith('[Note recall evidence]') && message.content.includes('已经开始练手碟')))
+    const original = jobs()[0]
+    await invoke('deleteSession', original.sessionId)
+    await service.recover()
+    assert.deepEqual((await invoke('snapshot')).notes, [])
+    await invoke('enable')
+    await invoke('fresh')
+    await invoke('mode', 'cancel')
+    await invoke('send', ['重载期间暂停手碟练习。', '手碟第二条。', '手碟第三条。'])
+    await until(() => jobs().some(batch => batch.status === 'running' && batch.prepared), 'formation before reload')
+    const interrupted = jobs().find(batch => batch.status === 'running')
+    const loaded = once(web, 'did-finish-load')
+    web.reload()
+    await loaded
+    await until(() => jobs().some(batch => batch.id === interrupted.id && batch.status === 'failed' && batch.error === 'cancelled'),
+      'reload did not cancel the old document attempt')
+    const staleCall = 'window.aislingDesktop.noteFormation.submit(' + JSON.stringify(interrupted.id) + ', ' + interrupted.attempts + ', "{}")'
+    await assert.rejects(web.executeJavaScript(staleCall), /stale-formation-attempt/)
+    const other = new WebContentsView({ webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'), sandbox: true, contextIsolation: true, nodeIntegration: false,
+      additionalArguments: ['--aisling-note-v2'],
+    } })
+    const verifyDenied = async contents => {
+      assert.equal(await contents.executeJavaScript("window.aislingDesktop.storage.setItem('aisling.config.v1', '{}')"), false)
+      assert.equal(await contents.executeJavaScript("window.aislingDesktop.storage.getItem('aisling.config.v1')"), null)
+      await assert.rejects(contents.executeJavaScript('window.aislingDesktop.noteReview.list()'), /Untrusted Note review/)
+    }
+    try {
+      await other.webContents.loadURL('http://localhost:5174/')
+      await verifyDenied(other.webContents)
+    } finally { other.webContents.close() }
+    await web.loadURL('data:text/html,untrusted-origin')
+    await verifyDenied(web)
+  } else if (phase === 'write') {
     const run = async (mode, messages, index, done = b => b.status === 'completed') => {
       await invoke('mode', mode)
       await invoke('send', messages, true)
@@ -174,9 +366,10 @@ async function until(predicate, description) {
         const { items } = await invoke('review')
         for (const item of items.filter(row => row.approvable)) {
           if (mode === 'drafts' && dialogs === 0) {
+            const savedBefore = (await invoke('snapshot')).notes.length
             confirmation = 0
             assert.equal(await invoke('decide', item.key, true), 'cancelled')
-            assert.equal((await invoke('snapshot')).notes.length, 0)
+            assert.equal((await invoke('snapshot')).notes.length, savedBefore)
             confirmation = 1
           }
           await invoke('decide', item.key, true)

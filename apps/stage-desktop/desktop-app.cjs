@@ -19,6 +19,8 @@ const { registerStorageIpc, readStoredConfig, readStoredLanguage, readDesktopDat
 registerStageScheme()
 
 const DEFAULT_STAGE_URL = 'http://localhost:5174'
+const DEV_STAGE_ORIGINS = new Set([DEFAULT_STAGE_URL, 'http://127.0.0.1:5174'])
+const DEV_RESTART_EXIT = 75
 const desktopObserver = createDesktopObserver()
 const semanticJudge = createTypeSafeJudge()
 const desktopDiagnosticsEnabled = process.env.AISLING_DESKTOP_DIAGNOSTICS === '1'
@@ -259,9 +261,10 @@ let appEventsRegistered = false
 function stageOriginOf(value) {
   try {
     const url = new URL(value)
+    if (url.username || url.password) return null
     if (url.protocol === 'aisling:')
       return `aisling://${url.host}`
-    return url.origin
+    return url.protocol === 'http:' ? url.origin : null
   }
   catch {
     return null
@@ -282,15 +285,25 @@ function isStageUrl(value, stageUrl) {
  *  - otherwise                      → development fallback (keeps smoke/back-compat)
  * @returns {{ mode: 'dev' | 'prod', url: string, origin: string | null }}
  */
-function resolveStageTarget() {
-  const envUrl = process.env.AISLING_STAGE_URL
-  if (envUrl)
-    return { mode: 'dev', url: envUrl, origin: stageOriginOf(envUrl) }
-  if (isBuiltRendererAvailable()) {
-    const url = buildStageUrl()
-    return { mode: 'prod', url, origin: stageOriginOf(url) }
-  }
-  return { mode: 'dev', url: DEFAULT_STAGE_URL, origin: stageOriginOf(DEFAULT_STAGE_URL) }
+function resolveStageTarget(stageUrl = process.env.AISLING_STAGE_URL) {
+  const url = stageUrl || (isBuiltRendererAvailable() || app.isPackaged ? buildStageUrl() : DEFAULT_STAGE_URL)
+  const origin = stageOriginOf(url)
+  if (origin === 'aisling://stage') return { mode: 'prod', url, origin }
+  if (!app.isPackaged && DEV_STAGE_ORIGINS.has(origin)) return { mode: 'dev', url, origin }
+  throw new Error('untrusted-stage-origin')
+}
+
+function configureDevProfile() {
+  const explicit = process.env.AISLING_DEV_PROFILE
+  const directory = explicit ?? path.resolve(__dirname, '../../.local/desktop-dev-profile')
+  if (!path.isAbsolute(directory) || (explicit && !fs.statSync(directory, { throwIfNoEntry: false })?.isDirectory()))
+    throw new Error('dev-profile-must-be-an-existing-absolute-directory')
+  if (!explicit) fs.mkdirSync(directory, { recursive: true })
+  const profile = fs.realpathSync(directory)
+  if (path.relative(profile, directory) || fs.lstatSync(directory).isSymbolicLink())
+    throw new Error('canonical-memory-profile-required')
+  app.setPath('userData', profile)
+  app.setPath('sessionData', profile)
 }
 
 /** @param {boolean} enabled @param {string} message @param {...unknown} rest */
@@ -457,7 +470,7 @@ function stopDesktopAwareness() {
 async function createWindow(options = {}) {
   const show = options.show ?? true
   const diagnostics = options.diagnostics ?? true
-  const stageUrl = options.stageUrl ?? resolveStageTarget().url
+  const { url: stageUrl } = resolveStageTarget(options.stageUrl)
   if (stageUrl.startsWith('aisling:'))
     registerStageProtocol()
   const preloadPath = path.join(__dirname, 'preload.cjs')
@@ -491,6 +504,13 @@ async function createWindow(options = {}) {
   const contents = stageView.webContents
   diagnostic(diagnostics, 'Stage window created')
 
+  if (options.noteV2) {
+    contents.on('did-start-navigation', details => {
+      if (details.isMainFrame && !details.isSameDocument) revokeNoteDocument()
+    })
+    contents.on('render-process-gone', revokeNoteDocument)
+    contents.once('destroyed', revokeNoteDocument)
+  }
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   contents.on('will-navigate', (event, url) => {
     if (!isStageUrl(url, stageUrl)) event.preventDefault()
@@ -572,22 +592,34 @@ let organization
 let migration
 /** @type {ReturnType<typeof import('./note-formation.cjs').createNoteFormationService> | undefined} */
 let noteFormation
+let noteDocument = 0
+/** @type {{ id: string, attempt: number } | undefined} */
+let noteAttempt
+
+function revokeNoteDocument() {
+  noteDocument++
+  const attempt = noteAttempt
+  noteAttempt = undefined
+  if (attempt && noteFormation)
+    void noteFormation.fail(attempt.id, attempt.attempt, 'cancelled').catch(error => console.error('[note-v2] could not cancel renderer attempt', error.code ?? error.name))
+}
 
 /** @param {{ show?: boolean, diagnostics?: boolean, stageUrl?: string,
  * onMemoryDatabase?: (store: import('./memory-database/store').MemoryDatabaseStore | undefined, ready: Promise<void> | undefined) => void,
  * memoryDatabaseDiagnostic?: (event: string, detail: any) => void,
  * noteOnlyForNewProfiles?: boolean,
- * noteV2?: { resources?: string,
+ * noteV2?: { resources?: string, embeddingConfig?: () => any, embeddingRequest?: typeof import('./note-embedding.cjs').embed,
  * onService?: (service: ReturnType<typeof import('./note-formation.cjs').createNoteFormationService>) => void } }} [options] */
 async function startDesktop(options = {}) {
   const diagnostics = options.diagnostics ?? true
+  const target = resolveStageTarget(options.stageUrl)
+  if (options.noteOnlyForNewProfiles && target.mode === 'dev') configureDevProfile()
   const { assertMemoryAuthority, canStartNoteV2, readMigration } = require('./memory-authority.cjs')
   if ((options.noteOnlyForNewProfiles || options.noteV2) && !app.requestSingleInstanceLock())
     throw new Error('Memory requires exclusive profile access')
   const p0Experiment = !!options.onMemoryDatabase && process.env.AISLING_MEMORY_DB_P0 === '1'
   const useNoteV2 = options.noteOnlyForNewProfiles
-    ? !p0Experiment && stageOriginOf(options.stageUrl ?? resolveStageTarget().url) === 'aisling://stage'
-      && canStartNoteV2(app.getPath('userData'))
+    ? !p0Experiment && canStartNoteV2(app.getPath('userData'))
     : Boolean(options.noteV2)
   if (useNoteV2 && p0Experiment)
     throw new Error('Note v2 and legacy database experiment are mutually exclusive')
@@ -601,13 +633,12 @@ async function startDesktop(options = {}) {
   const migrationState = readMigration(profile)
   const frozen = () => migration?.frozen() === true
   if (useNoteV2) {
-    if (stageOriginOf(options.stageUrl ?? resolveStageTarget().url) !== 'aisling://stage')
-      throw new Error('Note v2 requires the built Stage origin')
     const v2Resources = options.noteV2?.resources ?? resources
     const { createNoteFormationService } = require('./note-formation.cjs')
     const archive = migrationState && require('./memory-archive.cjs').legacyArchive({ profile, resources: v2Resources, readData: readDesktopData,
       writeData: writeDesktopData, readReflections: readRawReflections, writeReflections: writeRawReflections })
     noteFormation = createNoteFormationService({
+      autonomous: true,
       profile, resources: v2Resources, archive,
       consent: () => {
         const memory = /** @type {any} */ (readStoredConfig()?.memory)
@@ -619,6 +650,8 @@ async function startDesktop(options = {}) {
         return memory?.enabled === true && memory?.noteRecallEnabled === true
       },
       readData: readDesktopData, writeData: writeDesktopData,
+      embeddingConfig: options.noteV2?.embeddingConfig ?? (() => require('./note-embedding.cjs').resolveEmbeddingConfig(readStoredConfig())),
+      ...(options.noteV2?.embeddingRequest && { embeddingRequest: options.noteV2.embeddingRequest }),
       report: (event, error) => console.error('[note-v2]', event, error.code ?? error.name),
     })
     configureMemoryLifecycle(noteFormation.privacy)
@@ -634,12 +667,11 @@ async function startDesktop(options = {}) {
       consent:()=>{const config=readStoredConfig();const memory=/** @type {any} */(config?.memory);return !frozen()&&memory?.enabled===true&&memory?.organizationEnabled===true},
       recallConsent:()=>{const memory=/** @type {any} */(readStoredConfig()?.memory);return !frozen()&&memory?.enabled===true&&memory?.noteRecallEnabled===true},
     })
-    if (options.noteOnlyForNewProfiles && !p0Experiment
-      && stageOriginOf(options.stageUrl ?? resolveStageTarget().url) === 'aisling://stage') {
+    if (options.noteOnlyForNewProfiles && !p0Experiment) {
       migration = require('./memory-migration.cjs').createMemoryMigration({ profile, resources: legacyResources, readData: readDesktopData,
         readReflections: readRawReflections, legacy: organization, freeze: () => organization.freeze() })
     }
-    if (migrationState && !migration) throw new Error('memory-migration-requires-built-stage')
+    if (migrationState && !migration) throw new Error('memory-migration-requires-standard-main')
     configureMemoryLifecycle(organization.privacy)
     if (!frozen()) void organization.recoverSources().catch(()=>{})
   }
@@ -661,7 +693,6 @@ async function startDesktop(options = {}) {
     if(organization){const service=organization;organization=undefined;event.preventDefault();void service.close().finally(()=>app.quit());return true}
     return false
   })
-  registerStorageIpc(!noteFormation, frozen)
   screen.on('display-metrics-changed', () => {
     if (desktopWindow && !desktopWindow.isDestroyed()) desktopWindow.setContentBounds(desktopBounds())
   })
@@ -669,13 +700,6 @@ async function startDesktop(options = {}) {
     if (desktopWindow && !desktopWindow.isDestroyed()) desktopWindow.setContentBounds(desktopBounds())
   })
 
-  const target = options.stageUrl
-    ? {
-        mode: options.stageUrl.startsWith('aisling:') ? 'prod' : 'dev',
-        url: options.stageUrl,
-        origin: stageOriginOf(options.stageUrl),
-      }
-    : resolveStageTarget()
   if (target.mode === 'prod')
     registerStageProtocol()
 
@@ -683,8 +707,10 @@ async function startDesktop(options = {}) {
     ipcRegistered = true
     const allowedOrigin = target.origin
     const trusted = event => Boolean(stageView && event.sender === stageView.webContents
+      && event.senderFrame
       && event.senderFrame === stageView.webContents.mainFrame
       && stageOriginOf(event.senderFrame.url) === allowedOrigin)
+    registerStorageIpc(trusted, !noteFormation, frozen)
     if (noteFormation) {
       ipcMain.handle('aisling:note-recall:snapshot', event => {
         if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note Recall request')
@@ -692,6 +718,14 @@ async function startDesktop(options = {}) {
       })
       ipcMain.handle('aisling:note-recall:current', (event, version) => {
         return trusted(event) && noteFormation?.recallCurrent(version) === true
+      })
+      ipcMain.handle('aisling:note-recall:neighbors', (event, ids, version, evolution = false, history = false) => {
+        if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note Recall request')
+        return noteFormation.recallNeighbors(ids, version, evolution, history)
+      })
+      ipcMain.handle('aisling:note-recall:candidates', (event, query, version) => {
+        if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note Recall request')
+        return noteFormation.recallCandidates(query, version)
       })
       ipcMain.handle('aisling:note-review:list', event => {
         if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note review request')
@@ -724,9 +758,23 @@ async function startDesktop(options = {}) {
         } finally { confirming = false }
       })
       for (const method of ['delivered', 'flush', 'next', 'prepare', 'submit', 'fail']) {
-        ipcMain.handle('aisling:note-formation:' + method, (event, ...args) => {
-          if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note Formation request')
-          return noteFormation[method](...args)
+        ipcMain.handle('aisling:note-formation:' + method, async (event, ...args) => {
+          const service = noteFormation
+          if (!trusted(event) || !service) throw new Error('Untrusted Note Formation request')
+          if (method === 'next') {
+            const document = noteDocument
+            const job = await service.next()
+            if (job && (document !== noteDocument || !trusted(event))) {
+              await service.fail(job.id, job.attempt, 'cancelled')
+              return null
+            }
+            if (job) noteAttempt = job
+            return job
+          }
+          if (['prepare', 'submit', 'fail'].includes(method)
+            && (!noteAttempt || noteAttempt.id !== args[0] || noteAttempt.attempt !== args[1]))
+            throw new Error('stale-formation-attempt')
+          return service[method](...args)
         })
       }
     }
@@ -779,7 +827,10 @@ async function startDesktop(options = {}) {
           if (confirmed.response !== 1 || !trusted(event)) return migration.status()
           try {
             const result = await migration.execute()
-            app.relaunch()
+            if (target.mode === 'dev' && process.env.AISLING_DEV === '1')
+              app.once('will-quit', () => app.exit(DEV_RESTART_EXIT))
+            else
+              app.relaunch()
             setTimeout(() => app.quit(), 100)
             return result
           } catch (error) {

@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { t } from '../../i18n'
 import ModuleToggle from '../../components/settings/ModuleToggle.vue'
 import MemoryMigration from '../../components/settings/MemoryMigration.vue'
+import EmbeddingForm from '../../components/settings/EmbeddingForm.vue'
 import LegacyMemoryControls from '../../components/settings/LegacyMemoryControls.vue'
 import { useSettingsStore } from '../../stores/settings'
 
@@ -79,13 +80,14 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
     <p v-else-if="legacy" class="memory-state" role="status">{{ t('This profile uses the previous memory format.') }}</p>
     <LegacyMemoryControls v-if="legacy && !migrationFrozen" />
     <template v-if="memory.enabled">
+      <EmbeddingForm v-if="bridge" :configured="state?.embeddingConfigured" />
       <template v-if="bridge">
         <p v-if="!state?.ready" class="memory-state" role="status">{{ t(database) }}</p>
         <ModuleToggle label="Formation" :enabled="memory.formationEnabled === true"
           :disabled="!state?.ready && memory.formationEnabled !== true"
           :unavailable="state?.ready && !settings.activeChatProvider ? 'Configure the LLM first.' : ''"
           :status="!state?.ready ? '' : state.forming ? 'Running' : state.failed ? 'Processing failed'
-            : 'Uses your model in the background to propose memories.'"
+            : 'Organizes memories automatically; up to 8 background model checks per hour.'"
           @change="settings.setMemoryFormationEnabled($event)" />
         <ModuleToggle label="Recall" :enabled="memory.noteRecallEnabled === true"
           :disabled="!state?.ready && memory.noteRecallEnabled !== true"

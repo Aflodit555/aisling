@@ -17,6 +17,11 @@ export function setLanguage(next: Language): void {
 }
 
 export const zh: Record<string, string> = {
+  'Embedding Model':'向量模型','API Endpoint':'API 地址','Credential source':'凭据来源','Reuse existing DashScope':'复用已有 DashScope','Dedicated DashScope key':'专用 DashScope 密钥',
+  'Dense vectors, 1024 dimensions. Model changes rebuild vectors in the background.':'Dense 向量，1024 维。模型变更后在后台渐进重建向量。',
+  'DashScope HTTPS only. Leave blank to reuse the configured region.':'仅支持 DashScope HTTPS 地址。留空复用已有地域配置。',
+  'Embedding configured; connection is verified by actual requests.':'向量配置可用；连接结果以实际请求为准。',
+  'Embedding unavailable: save a valid DashScope endpoint and credential source.':'向量功能不可用：请保存有效的 DashScope 地址及凭据来源。',
   General: '通用', Language: '语言', Modules: '功能模块',
   Consciousness: 'LLM', Speech: 'TTS', Vision: '视觉', 'Web Search': '搜索', 'Desktop Awareness': '桌面感知',
   Memory: '记忆',
@@ -53,6 +58,8 @@ export const zh: Record<string, string> = {
   'A previous proposal still requires attention.': '有旧提议仍需处理。', 'Some previous records require attention.': '有旧记录仍需处理。',
   Formation: '形成', Recall: '召回', 'Uses your model in the background to propose memories.': '在后台调用所选模型，生成待审核提议。',
   'Uses your model in the background.': '会在后台调用所选模型。',
+  'Organizes source-backed memories automatically; uncertain changes await review.': '自动整理有来源的记忆；不确定的修改保留待审。',
+  'Organizes memories automatically; up to 8 background model checks per hour.': '自动整理记忆；每小时最多额外调用模型8次。',
   'Uses approved memories when relevant.': '在相关对话中使用已批准的记忆。',
   'Controls saved notes in this profile.': '控制当前资料中已保存笔记的召回。',
   'Memory database unavailable.': '记忆数据库暂不可用。',

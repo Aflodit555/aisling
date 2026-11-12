@@ -55,7 +55,13 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             webSearch,
             memory: { enabled: memoryEnabled, formationEnabled: memoryEnabled && parsed.memory?.formationEnabled === true,
               ...(!noteOnly && { organizationEnabled: memoryEnabled && parsed.memory?.organizationEnabled === true }),
-              ...(memoryEnabled && parsed.memory?.noteRecallEnabled === true ? { noteRecallEnabled: true } : {}) },
+              ...(memoryEnabled && parsed.memory?.noteRecallEnabled === true ? { noteRecallEnabled: true } : {}),
+              ...(parsed.memory?.embedding && { embedding: {
+                ...(parsed.memory.embedding.credentialSource === 'dedicated' ? {credentialSource: 'dedicated' as const, apiKey: typeof parsed.memory.embedding.apiKey === 'string' ? parsed.memory.embedding.apiKey : ''}
+                  : parsed.memory.embedding.credentialSource === 'reuse' ? {credentialSource: 'reuse' as const} : {}),
+                ...(typeof parsed.memory.embedding.endpoint === 'string' && {endpoint: parsed.memory.embedding.endpoint}),
+                ...(typeof parsed.memory.embedding.model === 'string' && {model: parsed.memory.embedding.model}),
+              } }) },
           }
           if (Object.hasOwn(parsed, 'hearing')
             || (noteOnly && Object.hasOwn(parsed.memory ?? {}, 'organizationEnabled'))

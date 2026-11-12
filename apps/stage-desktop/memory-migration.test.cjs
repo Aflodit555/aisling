@@ -2,11 +2,14 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { randomUUID } = require('node:crypto')
-const { spawnSync } = require('node:child_process')
+const { execFile, spawnSync } = require('node:child_process')
+const { createRequire } = require('node:module')
+const { pathToFileURL } = require('node:url')
+const { promisify } = require('node:util')
 const test = process.env.AISLING_MIGRATION_CHILD === '1' ? () => {} : require('node:test').test
 const { createMemoryMigration } = require('./memory-migration.cjs')
 const { legacyArchive } = require('./memory-archive.cjs')
-const { dispositionName, migratedJournal, readMigration: readState, assertMemoryAuthority, canStartNoteV2 } = require('./memory-authority.cjs')
+const { dispositionName, migratedJournal, stateName, readMigration: readState, assertMemoryAuthority, canStartNoteV2 } = require('./memory-authority.cjs')
 const { createMemoryLifecycle } = require('./memory-lifecycle.cjs')
 const { createMemoryOrganization } = require('./memory-organization.cjs')
 const { createNoteFormationService } = require('./note-formation.cjs')
@@ -351,25 +354,84 @@ test('target transactions roll back and a lost successful ADD reply reuses the m
   assert.deepEqual(await inspect(), [committed])
 })
 
-test('standard Electron entry checks and confirms an upgrade, excludes an old writer, then restarts in v2', native, () => {
+function desktopProfiles() {
   const s = session('a', '用户报告纸舟第一版已发布。')
   const original = row('migration-entry', s.messages[0].content, [ref(s)])
   const ambiguous = row('migration-ambiguous', '有个项目可能发布了。', [ref(s)])
   const records = [original, ambiguous]
   const f = fixture([s], records, records.map(record => batch(record, { sessionId: s.id, units: 1, attempts: 1 })))
-  const fresh = fixture([])
-  for (const profile of [f.profile, fresh.profile]) fs.writeFileSync(path.join(profile, '.migration-fixture'), 'aisling-p4-synthetic\n')
+  const fresh = fs.realpathSync(fs.mkdtempSync(path.join(root, 'profile-')))
+  const unmarked = fixture([s]).profile
+  const blocked = fixture([s]).profile
+  fs.writeFileSync(path.join(blocked, stateName), JSON.stringify({
+    version: 1, id: randomUUID(), digest: 'a'.repeat(64), total: 1, done: 0, phase: 'migrating',
+  }))
+  for (const profile of [f.profile, fresh, unmarked, blocked]) fs.writeFileSync(path.join(profile, '.migration-fixture'), 'aisling-p4-synthetic\n')
   f.writeData({ ...f.readData(), 'aisling.config.v1': JSON.stringify({ memory: { enabled: true, noteRecallEnabled: true } }) })
+  return [['legacy', f.profile], ['v2', f.profile], ['fresh', fresh], ['unmarked', unmarked], ['blocked', blocked]]
+}
+
+const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AISLING_|ELECTRON_RUN_AS_NODE$|TYPESAFE_API_KEY$)/i.test(name)))
+
+test('standard Electron entry checks and confirms an upgrade, excludes an old writer, then restarts in v2', native, () => {
   const electron = require('electron')
-  for (const [phase, profile] of [['legacy', f.profile], ['v2', f.profile], ['fresh', fresh.profile]]) {
-    const child = spawnSync(electron, [path.join(__dirname, 'memory-migration-smoke.cjs'), phase, profile, f.resources], {
+  for (const [phase, profile] of desktopProfiles()) {
+    const child = spawnSync(electron, [path.join(__dirname, 'memory-migration-smoke.cjs'), phase, profile, resources], {
       windowsHide: true, encoding: 'utf8', timeout: 55_000,
-      env: { ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AISLING_|ELECTRON_RUN_AS_NODE$|TYPESAFE_API_KEY$)/i.test(name))),
-        ...(phase === 'fresh' && { AISLING_MEMORY_DB_P0: '1' }) },
+      env: { ...cleanEnv(), ...(phase === 'fresh' && { AISLING_MEMORY_DB_P0: '1' }) },
     })
     assert.ifError(child.error)
     assert.equal(child.status, 0, child.stdout + child.stderr)
     assert(child.stdout.includes('p4-smoke:' + phase), child.stdout + child.stderr)
+  }
+})
+
+test('real Vite and Electron use the same authority, review, Recall, erasure and IPC boundaries', { ...native, timeout: 180_000 }, async () => {
+  const stage = path.resolve(__dirname, '../stage-web')
+  const stageRequire = createRequire(path.join(stage, 'package.json'))
+  const viteEntry = path.join(path.dirname(stageRequire.resolve('vite/package.json')), 'dist/node/index.js')
+  const { createServer } = await import(pathToFileURL(viteEntry).href)
+  const server = await createServer({ root: stage, logLevel: 'error', plugins: [{
+    name: 'aisling-test-hot-update',
+    configureServer(server) {
+      server.middlewares.use('/__aisling_test_hmr', async (_request, response) => {
+        try {
+          const module = await server.moduleGraph.getModuleByUrl('/src/pages/settings/memory.vue')
+          assert(module?.isSelfAccepting)
+          await server.reloadModule(module)
+          response.end('updated')
+        } catch (error) {
+          response.statusCode = 500
+          response.end(error.message)
+        }
+      })
+    },
+  }] })
+  const electron = require('electron')
+  const launch = promisify(execFile)
+  try {
+    await server.listen()
+    for (const [phase, profile] of desktopProfiles()) {
+      const result = await launch(electron, [path.join(__dirname, 'memory-migration-smoke.cjs'), phase, profile, resources], {
+        windowsHide: true, timeout: 50_000, env: { ...cleanEnv(), AISLING_DEV: '1', AISLING_DEV_PROFILE: profile },
+      }).catch(error => {
+        if (phase === 'legacy' && error.code === 75) return error
+        throw new Error(phase + '\n' + error.stdout + '\n' + error.stderr, { cause: error })
+      })
+      if (phase === 'legacy') assert.equal(result.code, 75)
+      assert.match(result.stdout, new RegExp('p4-smoke:' + phase), result.stderr)
+    }
+    const fixtureRoot = path.resolve(__dirname, '../../artifacts/memory-note-only-p1')
+    fs.mkdirSync(fixtureRoot, { recursive: true })
+    const profile = fs.realpathSync(fs.mkdtempSync(path.join(fixtureRoot, 'vite-')))
+    fs.writeFileSync(path.join(profile, '.note-formation-test'), 'aisling-note-formation-p1-fixture\n')
+    const result = await launch(electron, [path.join(__dirname, 'note-formation-smoke.cjs'), 'dev', profile], {
+      windowsHide: true, timeout: 80_000,
+      env: { ...cleanEnv(), AISLING_STAGE_URL: 'http://localhost:5174/settings/memory', AISLING_DEV_PROFILE: profile },
+    }).catch(error => { throw new Error(error.stdout + '\n' + error.stderr, { cause: error }) })
+    assert.match(result.stdout, /"result":"note-formation-passed"/, result.stderr)
+  } finally {
+    await server.close()
   }
 })
 

@@ -32,11 +32,14 @@ const noteKinds = ['event', 'fact', 'pattern', 'preference', 'project-state', 'o
 
 function meaning(value, noteV2) {
   const required = ['content', 'subject', 'eventTime', 'basis']
-  const optional = noteV2 ? ['uncertainty', 'tags'] : ['uncertainty', 'context', 'keywords', 'tags']
+  const optional = noteV2 ? ['uncertainty', 'tags', 'state'] : ['uncertainty', 'context', 'keywords', 'tags']
   if (noteV2) required.push('kind')
   return record(value, required, optional)
     && (!noteV2 || noteKinds.includes(value.kind) && (value.kind !== 'pattern' || text(value.uncertainty, 300)))
     && text(value.content, 800) && text(value.subject, 128) && eventTime(value.eventTime)
+    && (!Object.hasOwn(value, 'state') || record(value.state, ['scope', 'value'])
+      && text(value.state.scope, 120) && text(value.state.value, 120)
+      && !/[\n;；。!?！？]/u.test(value.state.scope + value.state.value))
     && ['direct', 'inferred', 'mixed'].includes(value.basis)
     && (value.basis === 'direct' && !Object.hasOwn(value, 'uncertainty') || text(value.uncertainty, 300))
     && (!Object.hasOwn(value, 'context') || text(value.context, 800))
@@ -81,6 +84,18 @@ function validateOperation(value, noteV2, runtime = false) {
 const validOperation = value => validateOperation(value, false)
 const validNoteV2Operation = value => validateOperation(value, true)
 const validRuntimeOperation = value => validateOperation(value, true, true)
+
+function validRelationOperation(value) {
+  return record(value, ['operationId', 'action', 'from', 'to', 'fromVersion', 'toVersion', 'type', 'basis', 'order', 'reason', 'sources'], ['uncertainty', 'scope', 'method'])
+    && uuid(value.operationId) && ['LINK', 'UNLINK'].includes(value.action) && uuid(value.from) && uuid(value.to) && value.from !== value.to
+    && version(value.fromVersion) && version(value.toVersion) && ['STATE_CHANGE', 'CONTINUES', 'SUPPLEMENTS', 'CONFLICTS', 'ASSOCIATED_WITH'].includes(value.type)
+    && (value.type !== 'ASSOCIATED_WITH' || value.from < value.to && value.method === 'semantic' && value.basis === 'inferred' && value.order === 'unknown')
+    && ['direct', 'inferred'].includes(value.basis) && ['event', 'report', 'unknown'].includes(value.order) && text(value.reason, 300)
+    && (!Object.hasOwn(value, 'scope') || text(value.scope, 120))
+    && (!Object.hasOwn(value, 'method') || value.method === 'semantic' && value.basis === 'inferred' && text(value.scope, 120))
+    && (value.basis === 'direct' && !Object.hasOwn(value, 'uncertainty') || text(value.uncertainty, 300))
+    && record(value.sources, ['evidence']) && list(value.sources.evidence, evidence) && value.sources.evidence.length > 0
+}
 
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
@@ -181,6 +196,11 @@ function noteOperations(query, graph, assertWritable, schema) {
         const data = JSON.stringify(note)
         if (version === 1) await query(`CREATE (:Note {id: $noteId, ${snapshot}: $data})`, { noteId, data })
         else await query(`MATCH (n:Note {id: $noteId}) SET n.${snapshot} = $data`, { noteId, data })
+        if (schema === 'note-v2-runtime' && version > 1 && note.status !== 'superseded')
+          await query('MATCH (e:NOTE_EMBEDDING {noteId:$noteId}) DELETE e', { noteId })
+        if (schema === 'note-v2-runtime' && version > 1) await query(`MATCH (a:Note)-[r:NOTE_LINK]->(b:Note)
+          WHERE (a.id = $noteId OR b.id = $noteId) AND r.status = 'active'
+          SET r.status = 'stale', r.endedAt = $changedAt`, { noteId, changedAt })
         const revision = { noteId, version, operationId, action, changedAt, reason, grounds: sources, snapshot: note, successorId }
         await query('CREATE (:NoteRevision {key: $key, data: $data})', { key: revisionKey(noteId, version), data: JSON.stringify(revision) })
         await attach(noteId, sources)
@@ -243,9 +263,63 @@ function noteOperations(query, graph, assertWritable, schema) {
     }
     return { notes, nextCursor: rows.length > pageSize ? rows[pageSize - 1].id : null }
   }
+
+  async function listNoteRelations(id, afterKey, activeOnly) {
+    const rows = await query(`MATCH (a:Note)-[r:NOTE_LINK]->(b:Note)
+      WHERE (a.id = $id OR b.id = $id) AND r.key > $afterKey ${activeOnly ? "AND r.status = 'active'" : ''}
+      RETURN r.key AS key, r.data AS data, r.status AS status, r.createdAt AS createdAt, r.endedAt AS endedAt
+      ORDER BY r.key LIMIT 9`, { id, afterKey })
+    const relations = rows.slice(0, 8).map(row => ({ ...JSON.parse(row.data), key: row.key,
+      status: row.status, createdAt: Number(row.createdAt), endedAt: row.endedAt === null ? null : Number(row.endedAt) }))
+    return { relations, nextCursor: rows.length > 8 ? rows[7].key : null }
+  }
+
+  async function applyRelationOperation(input) {
+    const command = normalize(input)
+    const fingerprint = operationFingerprint(command)
+    const key = createHash('sha256').update(JSON.stringify([command.from, command.fromVersion, command.to, command.toVersion, command.type])).digest('hex')
+    return graph.transaction(async () => {
+      await assertWritable({ ...command, id: command.from, newId: command.to })
+      const existing = await getOperationReceipt(command.operationId)
+      if (existing) {
+        requireState(existing.fingerprint === fingerprint, 'operation-id-conflict', 'Relation operation ID conflict')
+        return existing
+      }
+      const [from, to] = await Promise.all([getNote(command.from), getNote(command.to)])
+      requireState(from && to && from.status === 'active' && to.status === 'active', 'invalid-endpoint', 'Active Note endpoints required')
+      requireState(from.version === command.fromVersion && to.version === command.toVersion, 'stale-version', 'Relation endpoint changed')
+      requireState(command.type === 'ASSOCIATED_WITH' || from.subject === to.subject, 'subject-changed', 'Relation requires the same confirmed subject')
+      const grounds = await Promise.all([getRevision(from.id, from.version), getRevision(to.id, to.version)])
+      const allowed = new Set(grounds.flatMap(revision => sourceKeys(revision.grounds)))
+      requireState(sourceKeys(command.sources).every(key => allowed.has(key))
+        && grounds.every(revision => sourceKeys(revision.grounds).some(key => sourceKeys(command.sources).includes(key))),
+      'invalid-evidence', 'Relation must cite both endpoint grounds')
+      const changedAt = Date.now()
+      const [prior] = await query(`MATCH (:Note)-[r:NOTE_LINK]->(:Note) WHERE r.key = $key RETURN r.status AS status, r.data AS data`, { key })
+      if (command.action === 'UNLINK') {
+        requireState(prior, 'relation-missing', 'Relation does not exist')
+        await query(`MATCH (:Note)-[r:NOTE_LINK]->(:Note) WHERE r.key = $key SET r.status = 'retracted', r.endedAt = $changedAt`, { key, changedAt })
+      } else if (!prior) {
+        await query(`MATCH (a:Note {id:$from}), (b:Note {id:$to})
+          CREATE (a)-[:NOTE_LINK {key:$key, data:$data, status:'active', createdAt:$changedAt}]->(b)`,
+        { from: from.id, to: to.id, key, data: JSON.stringify(command), changedAt })
+      } else {
+        requireState(prior.status === 'active', 'invalid-transition', 'Inactive relation cannot be revived')
+        const { operationId: oldId, reason: oldReason, ...oldMeaning } = JSON.parse(prior.data)
+        const { operationId: newId, reason: newReason, ...newMeaning } = command
+        requireState(canonical(oldMeaning) === canonical(newMeaning), 'relation-conflict', 'Existing relation has different grounds or meaning')
+      }
+      const receipt = { operationId: command.operationId, fingerprint, action: command.action, changedAt,
+        affectedNotes: [{ id: from.id, version: from.version }, { id: to.id, version: to.version }], relationKey: key,
+        reason: command.reason, sources: command.sources }
+      await query(`CREATE (:NoteOperation {operationId:$operationId, data:$data})`, { operationId: command.operationId, data: JSON.stringify(receipt) })
+      return receipt
+    })
+  }
   return { applyNoteOperation, [noteV2 ? 'getNoteV2' : 'getNoteV1']: getNote,
-    getRevision, getOperationReceipt, getVersionSourceChanges, listNoteHeads }
+    getRevision, getOperationReceipt, getVersionSourceChanges, listNoteHeads,
+    ...(schema === 'note-v2-runtime' && { applyRelationOperation, listNoteRelations }) }
 }
 
 const operationFingerprint = input => createHash('sha256').update(canonical(normalize(input))).digest('hex')
-module.exports = { uuid, version, validOperation, validNoteV2Operation, validRuntimeOperation, MAX_CONTEXT_EVIDENCE, needsMultipleSources, ddl, noteOperations, snapshotColumn, operationFingerprint }
+module.exports = { uuid, version, validOperation, validNoteV2Operation, validRuntimeOperation, validRelationOperation, MAX_CONTEXT_EVIDENCE, needsMultipleSources, ddl, noteOperations, snapshotColumn, operationFingerprint }

@@ -5,7 +5,7 @@
   "description": "Windows Electron host for the Aisling Stage.",
   "main": "main.cjs",
   "scripts": {
-    "dev": "electron .",
+    "dev": "node ../../scripts/dev-desktop.mjs",
     "test:smoke": "electron smoke.cjs",
     "test:smoke:prod": "electron prod-smoke.cjs",
     "typecheck": "tsc --allowJs --checkJs --noEmit --skipLibCheck --resolveJsonModule --target ES2022 --module commonjs main.cjs desktop-app.cjs preload.cjs desktop-activity.cjs desktop-judge.cjs desktop-protocol.cjs desktop-store.cjs memory-database/worker.cjs"

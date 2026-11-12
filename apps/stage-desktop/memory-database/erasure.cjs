@@ -40,7 +40,7 @@ function erasureOperations(query,graph,noteV2=false,runtime=false){
     for(;;){
      const rows=await query('MATCH(o:NoteOperation) WHERE o.operationId > $after RETURN o.operationId AS id,o.data AS data ORDER BY o.operationId LIMIT 128',{after})
      for(const row of rows){const receipt=JSON.parse(row.data)
-      if(receipt.affectedNotes.some(n=>notes.has(n.id))){operations.add(row.id);for(const n of receipt.affectedNotes)if(!notes.has(n.id)){notes.add(n.id);changed=true}}
+      if(receipt.affectedNotes.some(n=>notes.has(n.id))){operations.add(row.id);if(receipt.action==='SUPERSEDE')for(const n of receipt.affectedNotes)if(!notes.has(n.id)){notes.add(n.id);changed=true}}
      }
      if(rows.length<128)break;after=rows.at(-1).id
     }
@@ -48,6 +48,7 @@ function erasureOperations(query,graph,noteV2=false,runtime=false){
    const keys=[...notes].map(n=>'note:'+n).concat([...operations].map(o=>'operation:'+o),command.sessionIds.map(s=>'session:'+hash(s)),command.evidence.map(r=>'evidence:'+sourceKey(r)),(command.originIds??[]).map(o=>'origin:'+hash(o)))
    for(const key of keys)await query('MERGE(t:MemoryTombstone {key:$key}) ON CREATE SET t.erasureId=$id',{key,id:command.operationId})
    for(const noteId of notes){
+    if(runtime)await query('MATCH(e:NOTE_EMBEDDING {noteId:$noteId}) DELETE e',{noteId})
     await query('MATCH(r:NoteRevision) WHERE r.key STARTS WITH $prefix DELETE r',{prefix:JSON.stringify([noteId]).slice(0,-1)+','})
     await query('MATCH(n:Note {id:$id}) DETACH DELETE n',{id:noteId})
    }

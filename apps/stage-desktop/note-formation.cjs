@@ -2,12 +2,16 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { randomUUID } = require('node:crypto')
 const { createNoteV2Store } = require('./memory-database/store.cjs')
-const { validNoteV2Operation, validRuntimeOperation, MAX_CONTEXT_EVIDENCE, operationFingerprint } = require('./memory-database/note-v1.cjs')
+const { uuid, validNoteV2Operation, validRuntimeOperation, validRelationOperation, MAX_CONTEXT_EVIDENCE, operationFingerprint } = require('./memory-database/note-v1.cjs')
 const { messageDigest, readConversationSessions, sourceMessageLookup } = require('./memory-evidence.cjs')
 const { hash, sourceKey } = require('./memory-database/erasure.cjs')
 const { createMemoryLifecycle } = require('./memory-lifecycle.cjs')
-const { formationInput, parseNoteProposals, limits } = require('./note-formation-contract.mjs')
-const { rankNoteHeads, safeText } = require('./memory-text.mjs')
+const { formationInput, parseNoteProposals, parseNoteBatch, limits } = require('./note-formation-contract.mjs')
+const { safeText } = require('./memory-text.mjs')
+const { createOrganizationIndex, authorizeOrganization, sameRecognition, planNoteRelation } = require('./note-organization-v2.mjs')
+const { organizationInput, parseSemanticRelations, semanticRelationPlan, semanticLimits, refKey } = require('./note-semantic-contract.mjs')
+const { discoverCandidates, buildNoteEmbeddingText, projectionVersion } = require('./note-candidates.mjs')
+const { embed, embeddingIdentity } = require('./note-embedding.cjs')
 const speakers = require('./memory-subjects.json')
 const { databasePath, migratedJournal, readMigration, assertMemoryAuthority } = require('./memory-authority.cjs')
 
@@ -25,9 +29,11 @@ function check(value, code) {
 
 
 
-/** Main-only authorization. Without an explicitly trusted policy, proposals await review. */
+/** Main owns authorization; model and Renderer cannot grant it. */
 function createNoteFormationService({ profile, resources, readData: readRawData, writeData, consent,
-  authorize = (_proposal, _command) => false, recallConsent = consent, reviewConsent = consent, archive = undefined,
+  autonomous = false, authorize = (proposal, _command, context) => autonomous && authorizeOrganization(proposal, context),
+  recallConsent = consent, reviewConsent = consent, archive = undefined, now = Date.now,
+  embeddingConfig = () => undefined, embeddingRequest = embed,
   report = (_event, _detail) => {} }) {
   assertMemoryAuthority(profile, true)
   check(!!archive === !!readMigration(profile), 'migration-archive-required')
@@ -54,6 +60,35 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     check(Buffer.byteLength(raw) <= 2_000_000, 'formation-job-limit')
     const stored = JSON.parse(raw)
     check(stored.version === 1 && stored.progress && Array.isArray(stored.batches), 'invalid-formation-jobs')
+    if (stored.organization) check((stored.organization.cursor === '' || uuid(stored.organization.cursor))
+      && typeof stored.organization.bootstrapped === 'boolean' && Array.isArray(stored.organization.tasks)
+      && stored.organization.tasks.length <= 2304 && stored.organization.tasks.every(task => uuid(task.id)
+        && Number.isSafeInteger(task.version) && task.version > 0 && ['pending', 'completed', 'stale', 'failed'].includes(task.status)
+        && Number.isSafeInteger(task.attempts) && task.attempts >= 0 && task.attempts <= 2
+        && (!task.commands || Array.isArray(task.commands) && task.commands.length <= 2 && task.commands.every(validRelationOperation))
+        && (!task.semantic || ['pending', 'running', 'settling', 'completed', 'failed'].includes(task.semantic.status)
+          && Number.isSafeInteger(task.semantic.attempts) && task.semantic.attempts >= 0 && task.semantic.attempts <= 2
+          && (!task.semantic.signature || /^[a-f0-9]{64}$/.test(task.semantic.signature))
+          && (!task.semantic.refs || Array.isArray(task.semantic.refs) && task.semantic.refs.length <= 12 && task.semantic.refs.every(evidenceRef))
+          && (!task.semantic.notes || Array.isArray(task.semantic.notes) && task.semantic.notes.length <= 5 && task.semantic.notes.every(note => uuid(note.id)
+            && Number.isSafeInteger(note.version) && note.version > 0 && Array.isArray(note.grounds) && note.grounds.length <= 12 && note.grounds.every(evidenceRef)))
+          && (!task.semantic.commands || Array.isArray(task.semantic.commands) && task.semantic.commands.length <= 2 && task.semantic.commands.every(validRelationOperation)))), 'invalid-formation-jobs')
+    if (stored.organization?.semanticVersion === 1) check(Array.isArray(stored.organization.semanticSeen) && stored.organization.semanticSeen.length <= 4096
+      && stored.organization.semanticSeen.every(key => typeof key === 'string' && /^[a-f0-9]{64}$/.test(key))
+      && Array.isArray(stored.organization.semanticCalls) && stored.organization.semanticCalls.length <= semanticLimits.callsPerHour
+      && stored.organization.semanticCalls.every(time => Number.isSafeInteger(time) && time >= 0), 'invalid-formation-jobs')
+    if (stored.embedding) check(typeof stored.embedding.space === 'string' && stored.embedding.space.length <= 200
+      && (stored.embedding.cursor === '' || uuid(stored.embedding.cursor)) && Array.isArray(stored.embedding.calls)
+      && stored.embedding.calls.length <= 60 && stored.embedding.calls.every(time => Number.isSafeInteger(time) && time >= 0)
+      && Array.isArray(stored.embedding.failures) && stored.embedding.failures.length <= 2048
+      && stored.embedding.failures.every(key => typeof key === 'string' && key.length < 150)
+      && (!stored.embedding.pending || /^[a-f0-9]{64}$/.test(stored.embedding.pending.signature)
+        && Number.isInteger(stored.embedding.pending.attempts) && stored.embedding.pending.attempts >= 1 && stored.embedding.pending.attempts <= 3
+        && Number.isSafeInteger(stored.embedding.pending.retryAt)), 'invalid-embedding-jobs')
+    if (stored.queryEmbeddingCalls) check(Array.isArray(stored.queryEmbeddingCalls) && stored.queryEmbeddingCalls.length <= 60
+      && stored.queryEmbeddingCalls.every(time => Number.isSafeInteger(time) && time >= 0), 'invalid-embedding-jobs')
+    if (stored.embeddingPriority) check(Array.isArray(stored.embeddingPriority) && stored.embeddingPriority.length <= 64
+      && stored.embeddingPriority.every(uuid), 'invalid-embedding-jobs')
     state = stored
   } catch (error) {
     if (error.code !== 'ENOENT') throw error
@@ -70,6 +105,26 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     state = next
   }
 
+  if (autonomous && !state.organization) update(next => {
+    next.organization = { cursor: '', bootstrapped: false, tasks: [] }
+  })
+  if (autonomous && state.organization.semanticVersion !== 1) update(next => {
+    Object.assign(next.organization, { semanticVersion: 1, semanticSeen: [], semanticCalls: [], cursor: '', bootstrapped: false })
+  })
+  if (autonomous && state.organization.associativeVersion !== 1) update(next => {
+    next.organization.associativeVersion = 1
+    next.organization.cursor = ''; next.organization.bootstrapped = false
+    for (const task of next.organization.tasks) if (['completed','failed'].includes(task.semantic?.status)) delete task.semantic
+  })
+  if (autonomous && state.organization.tasks.some(task => task.semantic?.status === 'running')) update(next => {
+    for (const task of next.organization.tasks) if (task.semantic?.status === 'running') {
+      task.semantic.status = task.semantic.attempts < 2 ? 'pending' : 'failed'
+      task.semantic.error = 'interrupted'
+      if (task.semantic.status === 'failed' && task.semantic.signature)
+        next.organization.semanticSeen = [...new Set([...next.organization.semanticSeen, task.semantic.signature])].slice(-4096)
+    }
+  })
+
   if (state.batches.some(batch => batch.status === 'running' || batch.status === 'collecting')) update(next => {
     for (const batch of next.batches) {
       if (batch.status === 'running') { batch.status = 'failed'; batch.error = 'interrupted'; delete batch.prepared }
@@ -80,6 +135,11 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
   let serial = Promise.resolve()
   let closing = false, synchronized = -1
   let snapshotRead, publishedRecall
+  const headIndex = createOrganizationIndex(store, () => recallVersion, () => sourceMessageLookup(readData()))
+  let organizationTimer
+  let embeddingRunning = false, embeddingAbort
+  let embeddingGeneration = 0
+  const queryVectors = new Map()
   /** @template T @param {() => T | Promise<T>} work @returns {Promise<T>} */
   function queue(work) {
     const result = serial.then(work)
@@ -99,9 +159,21 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
           && candidates.every(candidate => !erased.has(candidate.id) && candidate.evidence.every(lookup))
           && (batch.items ?? []).every(item => !erased.has(item.noteId) && !(item.result ?? []).some(note => erased.has(note.id)))
       })
-      if (keep.length !== state.batches.length) update(next => { next.batches = keep })
+      const tasks = state.organization?.tasks.filter(task => !erased.has(task.id)
+          && (task.semantic?.refs ?? []).every(lookup) && (task.semantic?.notes ?? []).every(note => !erased.has(note.id))
+          && (!task.commands || task.commands.every(command => !erased.has(command.from) && !erased.has(command.to)
+            && command.sources.evidence.every(lookup))))
+      if (keep.length !== state.batches.length || tasks && tasks.length !== state.organization.tasks.length) update(next => {
+        next.batches = keep
+        if (tasks) next.organization.tasks = tasks
+        next.embeddingPriority = (next.embeddingPriority ?? []).filter(id => !erased.has(id))
+        if (next.embedding) next.embedding.failures = next.embedding.failures.filter(key => !erased.has(key.split(':')[1]))
+      })
     },
     invalidate(reason) {
+      embeddingGeneration++
+      queryVectors.clear()
+      embeddingAbort?.abort()
       recallVersion = randomUUID()
       if (reason === 'intent' && !closing && !privacy.isRecovering())
         void queue(ready).catch(error => report('erasure-pending', error))
@@ -137,7 +209,23 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
   }
 
   function editBatch(batchId, change) {
-    update(next => change(next.batches.find(batch => batch.id === batchId)))
+    update(next => change(next.batches.find(batch => batch.id === batchId), next))
+  }
+
+  function registerNotes(next, notes) {
+    const jobs = next.organization.tasks
+    for (const note of notes) if (!jobs.some(task => task.id === note.id && task.version === note.version))
+      jobs.push({ id: note.id, version: note.version, status: 'pending', attempts: 0 })
+    const latest = new Map()
+    for (const task of jobs.filter(task => task.status !== 'pending')) {
+      if (!latest.has(task.id) || latest.get(task.id).version <= task.version) latest.set(task.id, task)
+    }
+    const finished = [...latest.values()].slice(-2048)
+    next.organization.tasks = [...jobs.filter(task => task.status === 'pending'), ...finished]
+  }
+
+  function scheduleNotes(notes) {
+    if (autonomous) update(next => registerNotes(next, notes))
   }
 
   function evidenceFor(refs, currentCount, lookup) {
@@ -151,16 +239,20 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
   async function reconstruct(batch) {
     const { refs, candidates } = batch.prepared
     const notes = []
+    /** @type {Record<string, import('./memory-database/store').EvidenceRef[]>} */
+    const noteGrounds = {}
     const dependencies = [...refs]
     for (const candidate of candidates) {
       const revision = await store.getRevision(candidate.id, candidate.version)
       check(revision?.snapshot.status === 'active', 'source-changed')
       notes.push(revision.snapshot)
+      noteGrounds[candidate.id] = revision.grounds.evidence
       dependencies.push(...candidate.evidence)
     }
     const lookup = sourceMessageLookup(readData())
     check(dependencies.every(lookup), 'source-changed')
-    return { context: { evidence: evidenceFor(refs, batch.evidence.length, lookup), notes, speakers }, dependencies }
+    return { context: { evidence: evidenceFor(refs, batch.evidence.length, lookup), notes, speakers,
+      candidatesComplete: batch.prepared.complete === true, noteGrounds }, dependencies }
   }
 
   function commandFor(proposal, item, dependencies) {
@@ -177,12 +269,50 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     return existing
   }
 
-  function finishItem(batchId, index, status, reason, result) {
-    editBatch(batchId, batch => {
+  function proposedRelations(proposal, item, context) {
+    if (proposal.action !== 'ADD' || !proposal.semantic?.target) return []
+    const judgment = proposal.semantic
+    const type = { 'state-change': 'STATE_CHANGE', continuation: 'CONTINUES', supplement: 'SUPPLEMENTS', conflict: 'CONFLICTS' }[judgment.relation]
+    if (!type) return []
+    const created = { note: { ...proposal.draft.meaning, id: item.noteId, version: 1, status: 'active', createdAt: now() },
+      grounds: { evidence: proposal.draft.citations.map(source => source.ref) } }
+    const target = { note: judgment.target, grounds: { evidence: context.noteGrounds[judgment.target.id] } }
+    const plan = semanticRelationPlan(type, judgment.scope, created, target, [...judgment.sources, ...judgment.targetSources],
+      sourceMessageLookup(readData()), proposal.reason)
+    return plan ? [{ ...plan, operationId: randomUUID(), action: 'LINK' }] : []
+  }
+
+  async function commitRelations(commands) {
+    const outcomes = []
+    for (const command of commands ?? []) {
+      if (!consent() || privacy.pending()) return null
+      const receipt = await store.getOperationReceipt(command.operationId)
+      if (receipt) {
+        check(receipt.fingerprint === operationFingerprint(command), 'receipt-conflict')
+        outcomes.push({ operationId: command.operationId, status: 'applied' })
+      }
+      else {
+        recallVersion = randomUUID()
+        try { await store.applyRelationOperation(command); outcomes.push({ operationId: command.operationId, status: 'applied' }) }
+        catch (error) {
+          if (!['stale-version', 'invalid-endpoint', 'invalid-transition', 'invalid-evidence', 'erased', 'relation-conflict'].includes(error.code)) throw error
+          // Keep independent Notes and prior relation decisions when an optional link cannot be applied.
+          outcomes.push({ operationId: command.operationId, status: error.code === 'relation-conflict' ? 'review' : 'stale', reason: error.code })
+        }
+      }
+    }
+    return outcomes
+  }
+
+  function finishItem(batchId, index, status, reason, result, relations = undefined) {
+    editBatch(batchId, (batch, next) => {
       const item = batch.items[index]
       item.status = status
       item.reason = reason
       if (result) item.result = result.affectedNotes
+      if (relations) item.relations = relations
+      if (result && autonomous) registerNotes(next, result.affectedNotes)
+      if (result && autonomous) next.embeddingPriority = [...new Set([...result.affectedNotes.map(note => note.id), ...(next.embeddingPriority ?? [])])].slice(0,64)
       if (status !== 'review' && status !== 'outcome-unknown') delete item.wire
     })
   }
@@ -196,7 +326,9 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         const receipt = await store.getOperationReceipt(item.operationId)
         if (receipt) {
           check(receipt.fingerprint === item.fingerprint, 'receipt-conflict')
-          finishItem(batch.id, index, 'applied', 'receipt-confirmed', receipt)
+          const relations = await commitRelations(item.relationCommands)
+          if (relations === null && privacy.pending()) return false
+          finishItem(batch.id, index, 'applied', 'receipt-confirmed', receipt, relations ?? [{ status: 'deferred' }])
           continue
         }
 
@@ -205,9 +337,11 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         const command = commandFor(proposal, item, dependencies)
         check(validRuntimeOperation(command) && operationFingerprint(command) === item.fingerprint, 'invalid-proposal')
         if (!allowed() || privacy.pending()) return false
+        const candidates = !item.approved ? await headIndex() : undefined
         if (!proposal.draft.confirmed || !confirmed(proposal.draft.meaning.subject)
-          || (!item.approved && authorize(proposal, command) !== true)) {
-          finishItem(batch.id, index, 'review', 'review-required')
+          || (!item.approved && authorize(proposal, command, { heads: candidates.heads,
+            complete: candidates.complete, lookup: sourceMessageLookup(readData()) }) !== true)) {
+          finishItem(batch.id, index, 'review', candidates && !candidates.complete ? 'index-incomplete' : 'review-required')
         } else {
           if (proposal.target) {
             const head = await store.getNoteV2(command.id)
@@ -221,7 +355,9 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
           recallVersion = randomUUID()
           const result = await store.applyNoteOperation(command)
           if (privacy.pending()) return false
-          finishItem(batch.id, index, 'applied', 'committed', result)
+          const relations = await commitRelations(item.relationCommands)
+          if (relations === null && privacy.pending()) return false
+          finishItem(batch.id, index, 'applied', 'committed', result, relations ?? [{ status: 'deferred' }])
         }
       } catch (error) {
         if (error.code === 'outcome-unknown') {
@@ -254,31 +390,264 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     await ready()
     const generation = recallVersion
     const conversation = conversationFingerprint()
-    const notes = []
-    let afterId = ''
-    const deadline = performance.now() + 200
-    // shortcut: scan up to 256 heads and degrade safely; use bounded search when larger profiles are supported.
-    for (let page = 0; page < 64 && performance.now() < deadline; page++) {
-      const result = await store.listRecallHeads(afterId)
-      if (!recallReadable(generation)) return { reason: 'snapshot-changed' }
-      notes.push(...result.notes.map(({ note, grounds }) => ({ note, grounds })))
-      if (!result.nextCursor) {
-        if (conversationFingerprint() !== conversation) return { reason: 'snapshot-changed' }
-        if (publishedRecall?.generation !== generation || publishedRecall.conversation !== conversation)
-          publishedRecall = { generation, conversation, version: randomUUID() }
-        return { reason: 'ready', version: publishedRecall.version, notes }
-      }
-      check(result.nextCursor > afterId, 'invalid-recall-cursor')
-      afterId = result.nextCursor
-    }
-    return { reason: 'index-incomplete' }
+    const pool = await headIndex()
+    if (!recallReadable(generation) || conversationFingerprint() !== conversation) return { reason: 'snapshot-changed' }
+    if (!pool.complete) return { reason: 'index-incomplete' }
+    const notes = pool.heads.map(({ note, grounds }) => ({ note, grounds }))
+    if (Buffer.byteLength(JSON.stringify(notes)) > 4_000_000) return { reason: 'index-incomplete' }
+    if (publishedRecall?.generation !== generation || publishedRecall.conversation !== conversation)
+      publishedRecall = { generation, conversation, version: randomUUID(), notes }
+    return { reason: 'ready', version: publishedRecall.version, notes }
   }
 
   async function recover() {
     await ready()
-    for (const batch of state.batches.filter(row => row.status === 'settling' && row.items.some(item => item.approved)))
+    for (const batch of state.batches.filter(row => row.status === 'settling'
+      && (row.items.some(item => item.approved) || autonomous && consent())))
       if (!await settle(batch)) break
+    if (autonomous && consent()) for (const task of state.organization.tasks.filter(task => task.semantic?.status === 'settling'))
+      await settleSemantic(task)
   }
+
+  const semanticTask = jobId => typeof jobId === 'string' && jobId.startsWith('organization-')
+    ? state.organization?.tasks.find(task => 'organization-' + task.id + '-' + task.version === jobId) : undefined
+  function editSemantic(task, change) {
+    update(next => change(next.organization.tasks.find(row => row.id === task.id && row.version === task.version).semantic, next.organization))
+  }
+
+  /** @returns {Promise<import('./note-formation-contract.mjs').NoteFormationContext>} */
+  async function semanticContext(task) {
+    const work = task.semantic, notes = []
+    /** @type {Record<string, import('./memory-database/store').EvidenceRef[]>} */
+    const noteGrounds = {}
+    check(work && Array.isArray(work.refs) && Array.isArray(work.notes), 'stale-organization-attempt')
+    for (const saved of work.notes) {
+      const note = await store.getNoteV2(saved.id)
+      check(note?.status === 'active' && note.version === saved.version && note.basis === 'direct', 'source-changed')
+      const revision = await store.getRevision(note.id, note.version)
+      check(JSON.stringify(revision.grounds.evidence.map(refKey).sort()) === JSON.stringify(saved.grounds.map(refKey).sort()), 'source-changed')
+      notes.push(note); noteGrounds[note.id] = saved.grounds
+    }
+    const lookup = sourceMessageLookup(readData())
+    check(work.refs.every(ref => lookup(ref) && safeText(lookup(ref).content)), 'source-changed')
+    return { mode: 'organization', notes, noteGrounds, speakers, evidence: evidenceFor(work.refs, 0, lookup) }
+  }
+
+  async function settleSemantic(task) {
+    if (!consent() || privacy.pending()) return
+    try {
+      const outcomes = await commitRelations(task.semantic.commands)
+      if (outcomes === null || !consent() || privacy.pending()) return
+      editSemantic(task, (work, organization) => {
+        work.status = 'completed'
+        work.results = outcomes
+        organization.semanticSeen = [...new Set([...organization.semanticSeen, work.signature])].slice(-4096)
+        delete work.refs; delete work.notes; delete work.commands
+      })
+    } catch (error) {
+      if (error.code === 'outcome-unknown') await store.close().catch(closeError => report('worker-close-failed', closeError))
+      throw error
+    }
+  }
+
+  async function nextSemantic() {
+    if (!autonomous || !consent()) return null
+    await organize()
+    const org = state.organization
+    if (org.tasks.some(task => ['running', 'settling'].includes(task.semantic?.status))) return null
+    const calls = org.semanticCalls.filter(time => time > now() - 3600_000)
+    if (calls.length >= semanticLimits.callsPerHour || calls.length && now() - calls.at(-1) < semanticLimits.intervalMs) return null
+    const pool = await headIndex()
+    if (!pool.complete) return null
+    for (const task of org.tasks.filter(task => task.status === 'completed' && (!task.semantic || task.semantic.status === 'pending')).slice(0, 8)) {
+      const focus = pool.heads.find(head => head.note.id === task.id && head.note.version === task.version)
+      if (!focus || focus.note.basis !== 'direct' || !focus.grounds.evidence.every(ref => {
+        const message = sourceMessageLookup(readData())(ref)
+        return message?.role === 'user' && safeText(message.content)
+      })) {
+        update(next => { next.organization.tasks.find(row => row.id === task.id && row.version === task.version).semantic = { status: 'completed', attempts: 0 } })
+        continue
+      }
+      const existing = await store.listNoteRelations(focus.note.id)
+      const linked = existing.relations.filter(relation => relation.status === 'active').flatMap(relation => [relation.from, relation.to])
+      const lookup = sourceMessageLookup(readData())
+      const vectorHits = await documentCandidates(focus.note)
+      const candidates = discoverCandidates(focus.note.content + ' ' + (focus.note.tags ?? []).join(' '), pool.heads, vectorHits, focus.note, pool.complete).candidates
+        .map(item => item.head).slice(0,4).filter(head => head.note.basis === 'direct'
+          && !linked.includes(head.note.id) && !planNoteRelation(focus, head, lookup)
+          && head.grounds.evidence.every(ref => lookup(ref)?.role === 'user' && safeText(lookup(ref).content)))
+      const chosen = [focus, ...candidates]
+      /** @type {import('./note-formation-contract.mjs').NoteFormationContext | undefined} */
+      let context
+      while (chosen.length >= 2) {
+        const refs = [...new Map(chosen.flatMap(head => head.grounds.evidence).map(ref => [refKey(ref), ref])).values()]
+        context = { mode: 'organization', notes: chosen.map(head => head.note),
+          noteGrounds: Object.fromEntries(chosen.map(head => [head.note.id, head.grounds.evidence])),
+          evidence: evidenceFor(refs, 0, lookup), speakers }
+        try { organizationInput(context); break } catch (error) {
+          if (error.message !== 'input-limit') throw error
+          chosen.pop(); context = undefined
+        }
+      }
+      const signature = context && hash(['associative-v1', chosen.map(head => [head.note.id, head.note.version, head.grounds.evidence.map(refKey).sort()]).sort()])
+      if (!context || org.semanticSeen.includes(signature)) {
+        update(next => { next.organization.tasks.find(row => row.id === task.id && row.version === task.version).semantic = { status: 'completed', attempts: 0, signature } })
+        continue
+      }
+      const attempts = (task.semantic?.attempts ?? 0) + 1
+      update(next => {
+        next.organization.semanticCalls = [...calls, now()]
+        next.organization.tasks.find(row => row.id === task.id && row.version === task.version).semantic = {
+          status: 'running', attempts, signature, refs: context.evidence.map(entry => entry.ref),
+          notes: chosen.map(head => ({ id: head.note.id, version: head.note.version, grounds: head.grounds.evidence })),
+        }
+      })
+      return { id: 'organization-' + task.id + '-' + task.version, attempt: attempts, kind: 'organization', sessionId: '', refs: context.evidence.map(entry => entry.ref) }
+    }
+    return null
+  }
+
+  async function organize() {
+    if (!autonomous || closing || !consent() || privacy.pending()) return
+    await recover()
+    const pool = await headIndex()
+    if (!pool.complete) return
+    if (!state.organization.bootstrapped && state.organization.tasks.filter(task => task.status === 'pending').length < 256) {
+      const page = await store.listNoteHeads(state.organization.cursor)
+      scheduleNotes(page.notes.map(head => head.note))
+      update(next => {
+        next.organization.cursor = page.nextCursor ?? next.organization.cursor
+        next.organization.bootstrapped = !page.nextCursor
+      })
+    }
+    const waiting = state.batches.find(batch => batch.items?.some(item => item.status === 'review' && item.reason === 'index-incomplete'))
+    if (waiting) {
+      editBatch(waiting.id, batch => {
+        batch.status = 'settling'
+        for (const item of batch.items) if (item.status === 'review' && item.reason === 'index-incomplete') item.status = 'proposed'
+      })
+      await settle(state.batches.find(batch => batch.id === waiting.id))
+      return
+    }
+    const task = state.organization.tasks.find(task => task.status === 'pending')
+    if (!task) return
+    const editTask = change => update(next => change(next.organization.tasks.find(row => row.id === task.id && row.version === task.version)))
+    try {
+      if (!task.commands) {
+        const head = pool.heads.find(head => head.note.id === task.id && head.note.version === task.version)
+        if (!head) { editTask(row => { row.status = 'stale' }); return }
+        const lookup = sourceMessageLookup(readData())
+        const plans = pool.heads.map(other => planNoteRelation(head, other, lookup)).filter(Boolean)
+        const byId = new Map(pool.heads.map(head => [head.note.id, head.note]))
+        // Keep nearest stored reports in each direction; no all-pairs graph or model re-inference.
+        const before = plans.filter(plan => plan.to === task.id).sort((a, b) => byId.get(b.from).createdAt - byId.get(a.from).createdAt)
+        const after = plans.filter(plan => plan.from === task.id).sort((a, b) => byId.get(a.to).createdAt - byId.get(b.to).createdAt)
+        editTask(row => { row.commands = [before[0], after[0]].filter(Boolean).map(plan => ({ ...plan, action: 'LINK', operationId: randomUUID() })) })
+      }
+      const current = state.organization.tasks.find(row => row.id === task.id && row.version === task.version)
+      for (const command of current.commands) {
+        const receipt = await store.getOperationReceipt(command.operationId)
+        if (receipt) check(receipt.fingerprint === operationFingerprint(command), 'receipt-conflict')
+        else {
+          if (!consent() || privacy.pending()) return
+          recallVersion = randomUUID()
+          await store.applyRelationOperation(command)
+        }
+      }
+      editTask(row => { row.status = 'completed'; delete row.commands })
+    } catch (error) {
+      editTask(row => {
+        row.attempts++
+        row.error = error.code ?? 'organization-failed'
+        if (['stale-version', 'invalid-endpoint', 'invalid-transition', 'erased', 'invalid-evidence'].includes(error.code)) row.status = 'stale'
+        else if (row.attempts >= 2) row.status = 'failed'
+      })
+      if (error.code === 'outcome-unknown') await store.close().catch(closeError => report('worker-close-failed', closeError))
+      report('organization-pending', error)
+    }
+  }
+
+  async function documentCandidates(note) {
+    try {
+      const config = embeddingConfig()
+      if (!config) return []
+      const saved = await store.getEmbedding(note.id), identity = embeddingIdentity(note, config)
+      if (!saved || Object.keys(identity).some(key => saved[key] !== identity[key])) return []
+      const result = await store.searchEmbeddings({ modelId: config.modelId, projectionVersion, embedding: saved.embedding })
+      return result.hits
+    } catch { return [] }
+  }
+
+  /** The durable cursor/pending batch reuses the Main job file; network work runs outside its queue. */
+  async function syncEmbeddings() {
+    if (embeddingRunning || closing || !autonomous || !consent() || !embeddingConfig()) return
+    embeddingRunning = true
+    let plan
+    try {
+      plan = await queue(async () => {
+        await ready()
+        const config = embeddingConfig(), generation = embeddingGeneration
+        if (!config || !consent()) return
+        if (state.embedding?.space !== config.modelId || state.embedding?.projectionVersion !== projectionVersion)
+          update(next => { next.embedding = { space: config.modelId, projectionVersion, cursor: '', calls: [], failures: [] } })
+        const calls = state.embedding.calls.filter(time => time > now() - 3600_000)
+        if (calls.length >= 60 || state.embedding.pending?.retryAt > now()) return
+        const priority = (state.embeddingPriority ?? []).slice(0,4)
+        const page = priority.length ? { notes: (await Promise.all(priority.map(id => store.getEmbeddingHead(id)))).filter(Boolean), nextCursor: state.embedding.cursor }
+          : await store.listEmbeddingHeads(state.embedding.cursor)
+        const selected = []
+        for (const head of page.notes) {
+          const identity = embeddingIdentity(head.note, config), saved = await store.getEmbedding(head.note.id)
+          if (!safeText(buildNoteEmbeddingText(head.note)) || saved && Object.keys(identity).every(key => saved[key] === identity[key])
+            || state.embedding.failures.includes(identity.contentHash + ':' + identity.noteId + ':' + identity.noteVersion)) continue
+          selected.push({ identity, text: buildNoteEmbeddingText(head.note) })
+        }
+        if (!selected.length) { update(next => { next.embedding.cursor = page.nextCursor ?? ''; next.embeddingPriority = (next.embeddingPriority ?? []).filter(id => !priority.includes(id)); delete next.embedding.pending }); return }
+        const signature = hash(selected.map(item => item.identity)), attempts = state.embedding.pending?.signature === signature ? state.embedding.pending.attempts + 1 : 1
+        if (attempts > 3) {
+          update(next => { next.embedding.failures = [...new Set([...next.embedding.failures, ...selected.map(item => item.identity.contentHash + ':' + item.identity.noteId + ':' + item.identity.noteVersion)])].slice(-2048)
+            next.embedding.cursor = page.nextCursor ?? ''; next.embeddingPriority = (next.embeddingPriority ?? []).filter(id => !priority.includes(id)); delete next.embedding.pending }); return
+        }
+        update(next => { next.embedding.calls = [...calls, now()]; next.embedding.pending = { signature, attempts, retryAt: now() + 30000 } })
+        return { config, generation, selected, attempts, priority, cursor: page.nextCursor ?? '' }
+      })
+      if (!plan || closing) return
+      embeddingAbort = new AbortController()
+      const vectors = await embeddingRequest(plan.config, plan.selected.map(item => item.text), 'document', { signal: embeddingAbort.signal })
+      await queue(async () => {
+        if (closing || !consent() || plan.generation !== embeddingGeneration || embeddingConfig()?.modelId !== plan.config.modelId
+          || embeddingConfig()?.apiKey !== plan.config.apiKey) return
+        for (const [i, item] of plan.selected.entries()) {
+          try { await store.putEmbedding({ ...item.identity, embedding: vectors[i] }) }
+          catch (error) { if (!['stale-version','invalid-evidence','erased'].includes(error.code)) throw error }
+        }
+        update(next => { next.embedding.cursor = plan.cursor; next.embeddingPriority = (next.embeddingPriority ?? []).filter(id => !plan.priority.includes(id)); delete next.embedding.pending
+          // New embeddings allow a bounded revisit of previously unlinked, current-version semantic tasks.
+          for (const task of next.organization.tasks) if (task.semantic?.status === 'completed') delete task.semantic
+        })
+      })
+    } catch (error) {
+      if (plan && !closing) await queue(async () => {
+        if (state.embedding?.space !== plan.config.modelId) return
+        const reason = /^embedding-http-\d{3}$/.test(error.message) ? error.message : error.name === 'TimeoutError' ? 'embedding-timeout' : 'embedding-failed'
+        update(next => { next.embedding.error = reason })
+        if (plan.attempts >= 3) update(next => {
+          next.embedding.failures = [...new Set([...next.embedding.failures, ...plan.selected.map(item => item.identity.contentHash + ':' + item.identity.noteId + ':' + item.identity.noteVersion)])].slice(-2048)
+          next.embedding.cursor = plan.cursor; next.embeddingPriority = (next.embeddingPriority ?? []).filter(id => !plan.priority.includes(id)); delete next.embedding.pending
+        })
+      })
+      report('embedding-pending', { code: 'embedding-failed' })
+    } finally { embeddingRunning = false; embeddingAbort = undefined }
+  }
+
+  function wakeOrganization() {
+    if (!autonomous || closing) return
+    organizationTimer = setTimeout(() => {
+      void queue(organize).then(() => syncEmbeddings()).catch(error => report('organization-pending', error)).finally(wakeOrganization)
+    }, 1500)
+    organizationTimer.unref?.()
+  }
+  wakeOrganization()
 
   async function reviewItem(batch, item) {
     const { context } = await reconstruct(batch)
@@ -291,9 +660,85 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
 
   return {
     privacy,
+    syncEmbeddings,
     recover: () => queue(recover),
+    organize: () => queue(organize),
     listRecallHeads: (afterId = '') => queue(async () => { await ready(); return store.listRecallHeads(afterId) }),
     recallCurrent,
+    async recallCandidates(query, version) {
+      check(typeof query === 'string' && safeText(query) && typeof version === 'string', 'invalid-candidate-query')
+      const seed = await queue(async () => {
+        if (!recallCurrent(version)) return
+        const config = embeddingConfig(), heads = publishedRecall.notes
+        return { config, heads, generation: embeddingGeneration }
+      })
+      if (!seed) return { candidates: [], complete: false, vectorStatus: 'unavailable' }
+      let hits = [], vectorStatus = 'unavailable'
+      if (seed.config) try {
+        const key = hash([seed.config.modelId, query]), cached = queryVectors.get(key)
+        let vector = cached?.expires > now() ? cached.vector : undefined
+        if (!vector) {
+          const allowed = await queue(async () => {
+            if (!recallCurrent(version)) return false
+            const times = (state.queryEmbeddingCalls ?? []).filter(time => time > now() - 3600_000)
+            if (times.length >= 60) return false
+            update(next => { next.queryEmbeddingCalls = [...times, now()] }); return true
+          })
+          if (!allowed) throw new Error('query-budget')
+          ;[vector] = await embeddingRequest(seed.config, [query], 'query', { timeoutMs: 700 })
+          if (closing || seed.generation !== embeddingGeneration || !recallCurrent(version)) throw new Error('stale-query')
+          queryVectors.set(key, { vector, expires: now() + 300000 })
+          if (queryVectors.size > 32) queryVectors.delete(queryVectors.keys().next().value)
+        }
+        hits = await queue(async () => {
+          if (!recallCurrent(version) || embeddingConfig()?.modelId !== seed.config.modelId) return []
+          const result = await store.searchEmbeddings({ modelId: seed.config.modelId, projectionVersion, embedding: vector })
+          vectorStatus = result.complete ? 'incremental' : 'index-incomplete'
+          return result.hits.filter(hit => { const head = seed.heads.find(head => head.note.id === hit.noteId)
+            return head && hit.contentHash === embeddingIdentity(head.note, seed.config).contentHash })
+        })
+      } catch { /* Query embedding is optional and never blocks fallback after its deadline. */ }
+      if (!recallCurrent(version) || closing || seed.generation !== embeddingGeneration) return { candidates: [], complete: false, vectorStatus: 'unavailable' }
+      const fused = discoverCandidates(query, seed.heads, hits)
+      return { complete: fused.complete, vectorStatus, candidates: fused.candidates.map(item => ({ noteId: item.head.note.id,
+        noteVersion: item.head.note.version, channels: item.channels, score: item.score })) }
+    },
+    recallNeighbors: (ids, version, evolution = false, includeHistory = false) => queue(async () => {
+      check(Array.isArray(ids) && ids.length <= 3 && ids.every(id) && typeof version === 'string' && typeof evolution === 'boolean' && typeof includeHistory === 'boolean', 'invalid-neighbor-request')
+      if (!recallCurrent(version)) return { notes: [], relations: [] }
+      const available = new Map(publishedRecall.notes.map(head => [head.note.id, head]))
+      const lookup = sourceMessageLookup(readData())
+      const relations = new Map()
+      const queueIds = ids.map(id => ({ id, depth: 0, path: [] })), visited = new Set(), paths = []
+      for (let index = 0; index < queueIds.length && visited.size < 8; index++) {
+        const item = queueIds[index], noteId = item.id
+        if (visited.has(noteId)) continue
+        visited.add(noteId)
+        if (!available.has(noteId)) continue
+        const page = await store.listNoteRelations(noteId)
+        // Reuse this source-checked snapshot; the final generation/fingerprint check fences concurrent changes.
+        for (const relation of page.relations) if (relations.size < 16 && relation.status === 'active'
+          && available.get(relation.from)?.note.version === relation.fromVersion
+          && available.get(relation.to)?.note.version === relation.toVersion && relation.sources.evidence.every(lookup)) {
+          relations.set(relation.key, relation)
+          const other = relation.from === noteId ? relation.to : relation.from
+          if (item.depth < 2 && !visited.has(other)) {
+            const steps = [...item.path, { from: noteId, to: other, type: relation.type, reason: relation.reason }]
+            if (!ids.includes(other) && !paths.some(path => path.noteId === other)) paths.push({ noteId: other, steps })
+            if (item.depth < 1) queueIds.push({ id: other, depth: item.depth + 1, path: steps })
+          }
+        }
+      }
+      const history = []
+      if (includeHistory) for (const noteId of ids.slice(0, 1)) {
+        const revision = await store.getRecallHistory(noteId)
+        if (revision) history.push({ forId: noteId, revision })
+      }
+      if (!recallCurrent(version)) return { notes: [], relations: [] }
+      const chosen = [...relations.values()].slice(0, 16)
+      const endpoints = new Set(chosen.flatMap(relation => [relation.from, relation.to]))
+      return { notes: [...endpoints].slice(0,12).map(id => available.get(id)), relations: chosen, history, paths: paths.slice(0,12) }
+    }),
     recallSnapshot() {
       if (!recallConsent()) return Promise.resolve({ reason: 'disabled' })
       snapshotRead ??= queue(readRecallSnapshot).finally(() => { snapshotRead = undefined })
@@ -318,12 +763,15 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       }
       privacy.assertReadable()
       return { ready: true, pending, items,
-        forming: state.batches.some(batch => batch.status === 'running'), failed: state.batches.at(-1)?.status === 'failed' }
+        embeddingConfigured: !!embeddingConfig(),
+        forming: state.batches.some(batch => batch.status === 'running') || state.organization?.tasks.some(task => task.semantic?.status === 'running'),
+        failed: state.batches.at(-1)?.status === 'failed' }
     }),
     approvalOutcome(key) {
       if (!reviewConsent() || !id(key)) return 'stale'
       const item = state.batches.flatMap(batch => batch.items ?? []).find(row => row.operationId === key)
-      return item?.approved && ['applied', 'rejected', 'outcome-unknown'].includes(item.status) ? item.status : 'stale'
+      return item?.status === 'applied' ? 'applied'
+        : item?.approved && ['rejected', 'outcome-unknown'].includes(item.status) ? item.status : 'stale'
     },
     decide: (key, approved) => queue(async () => {
       check(id(key) && typeof approved === 'boolean' && reviewConsent(), 'review-unavailable')
@@ -350,7 +798,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       await settle(state.batches.find(row => row.id === batch.id))
       return state.batches.find(row => row.id === batch.id)?.items[index].status ?? 'stale'
     }),
-    close() { closing = true; return queue(() => store.close()) },
+    close() { closing = true; embeddingAbort?.abort(); clearTimeout(organizationTimer); return queue(() => store.close()) },
     delivered(sessionId, indices) {
       return queue(async () => {
         check(consent() && id(sessionId) && Array.isArray(indices) && indices.length >= 1 && indices.length <= 2
@@ -387,34 +835,34 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         if (batch) editBatch(batch.id, row => { row.status = 'pending' })
       })
     },
-    next() {
+    next(allowSemantic = true) {
       return queue(async () => {
+        check(typeof allowSemantic === 'boolean', 'invalid-organization-allowance')
         if (!consent()) return null
         await ready()
         for (const batch of state.batches.filter(row => row.status === 'settling'))
           if (!await settle(batch)) return null
         if (state.batches.some(row => row.status === 'running')) return null
         const batch = state.batches.find(row => row.status === 'pending')
-        if (!batch) return null
+        if (!batch) return allowSemantic ? nextSemantic() : null
         editBatch(batch.id, row => { row.status = 'running'; row.attempts++ })
         return { id: batch.id, attempt: batch.attempts + 1, sessionId: batch.sessionId, refs: batch.evidence }
       })
     },
     prepare(batchId, attempt, history) {
       return queue(async () => {
+        const task = semanticTask(batchId)
+        if (task) {
+          check(consent() && task.semantic?.status === 'running' && task.semantic.attempts === attempt && Array.isArray(history) && !history.length, 'stale-organization-attempt')
+          return semanticContext(task)
+        }
         const batch = current(batchId, attempt)
         check(!batch.prepared && Array.isArray(history) && history.length + batch.evidence.length <= limits.sources
           && history.every(ref => evidenceRef(ref) && ref.sessionId !== batch.sessionId)
           && new Set(history.map(ref => JSON.stringify([ref.sessionId, ref.messageIndex]))).size === history.length, 'invalid-history')
         readData()
-        const heads = []
-        let cursor = ''
-        for (let i = 0; i < 32; i++) {
-          const page = await store.listRecallHeads(cursor)
-          heads.push(...page.notes.filter(({ note }) => safeText([note.content, note.subject, note.uncertainty, ...(note.tags ?? [])].join(' '))))
-          if (!page.nextCursor) break
-          cursor = page.nextCursor
-        }
+        const pool = await headIndex()
+        const heads = pool.heads.filter(({ note }) => safeText([note.content, note.subject, note.uncertainty, ...(note.tags ?? [])].join(' ')))
         const lookup = sourceMessageLookup(readData())
         const currentEvidence = evidenceFor(batch.evidence, batch.evidence.length, lookup)
         const invalidSessions = new Set(history.filter(ref => {
@@ -423,14 +871,20 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         }).map(ref => ref.sessionId))
         const validHistory = history.filter(ref => !invalidSessions.has(ref.sessionId))
         const refs = [...batch.evidence, ...validHistory]
-        const ranked = rankNoteHeads(currentEvidence.map(e => e.message.content).join('\n'), heads)
+        const ranked = discoverCandidates(currentEvidence.map(e => e.message.content).join('\n'), heads.filter(head => head.grounds.evidence.every(ref => {
+          const message = lookup(ref)
+          return message && safeText(message.content)
+        }))).candidates.map(item => item.head).slice(0,5)
         const notes = ranked.map(head => head.note)
         for (;;) {
-          const context = { evidence: evidenceFor(refs, batch.evidence.length, lookup), notes, speakers }
+          const selected = ranked.slice(0, notes.length)
+          const withGrounds = [...new Map([...refs, ...selected.flatMap(head => head.grounds.evidence)].map(ref => [refKey(ref), ref])).values()]
+          const noteGrounds = Object.fromEntries(selected.map(head => [head.note.id, head.grounds.evidence]))
+          const context = { evidence: evidenceFor(withGrounds, batch.evidence.length, lookup), notes, speakers, candidatesComplete: pool.complete, noteGrounds }
           try {
             formationInput(context)
             check(consent(), 'stale-formation-attempt')
-            editBatch(batchId, row => { row.prepared = { refs, candidates: ranked.slice(0, notes.length).map(({ note, cumulativeEvidence }) => ({
+            editBatch(batchId, row => { row.prepared = { refs: withGrounds, complete: pool.complete, candidates: ranked.slice(0, notes.length).map(({ note, cumulativeEvidence }) => ({
               id: note.id, version: note.version, evidence: cumulativeEvidence,
             })) } })
             return context
@@ -448,13 +902,37 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     },
     submit(batchId, attempt, raw) {
       return queue(async () => {
+        const task = semanticTask(batchId)
+        if (task) {
+          check(consent() && task.semantic?.status === 'running' && task.semantic.attempts === attempt, 'stale-organization-attempt')
+          const context = await semanticContext(task)
+          const proposals = parseSemanticRelations(raw, context), lookup = sourceMessageLookup(readData())
+          const commands = proposals.map(proposal => semanticRelationPlan(proposal.type, proposal.scope,
+            { note: proposal.from, grounds: { evidence: context.noteGrounds[proposal.from.id] } },
+            { note: proposal.to, grounds: { evidence: context.noteGrounds[proposal.to.id] } }, proposal.sources, lookup, proposal.reason))
+            .filter(Boolean).map(plan => ({ ...plan, action: 'LINK', operationId: randomUUID() }))
+          check(consent() && !privacy.pending(), 'stale-organization-attempt')
+          editSemantic(task, work => { work.commands = commands; work.status = 'settling' })
+          await settleSemantic(state.organization.tasks.find(row => row.id === task.id && row.version === task.version))
+          return
+        }
         const batch = current(batchId, attempt)
         check(batch.prepared, 'formation-not-prepared')
         check(typeof raw === 'string' && raw.length <= limits.outputChars, 'output-limit')
         const { context, dependencies } = await reconstruct(batch)
-        const proposals = parseNoteProposals(raw, context)
-        const wire = JSON.parse(raw).items
+        let parsed = parseNoteBatch(raw, context)
+        const wire = parsed.map(item => item.wire)
+        let proposals = parsed.map(item => item.proposal)
+        if (autonomous) {
+          for (const [index, proposal] of proposals.entries()) if (proposal?.action === 'ADD') {
+            const duplicate = context.notes.findIndex(note => sameRecognition(note, proposal.draft.meaning))
+            if (duplicate >= 0) { wire[index].action = 'NOOP'; wire[index].target = 'N' + (duplicate + 1); delete wire[index].semantic }
+          }
+          parsed = parseNoteBatch(JSON.stringify({ items: wire }), context)
+          proposals = parsed.map(item => item.proposal)
+        }
         const items = proposals.map((proposal, index) => {
+          if (!proposal) return { action: 'INVALID', status: 'rejected', reason: parsed[index].error }
           if (!proposal.draft) return { action: proposal.action, status: 'undecided' }
           const item = { action: proposal.action, status: 'proposed', wire: wire[index], operationId: randomUUID(),
             ...(['ADD', 'SUPERSEDE'].includes(proposal.action) ? { noteId: randomUUID() } : {}) }
@@ -463,7 +941,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
           if (contextEvidence.length > MAX_CONTEXT_EVIDENCE) return { ...item, status: 'review', reason: 'context-limit' }
           const command = { ...base, contextEvidence }
           check(validRuntimeOperation(command), 'invalid-proposal')
-          return { ...item, fingerprint: operationFingerprint(command) }
+          return { ...item, fingerprint: operationFingerprint(command), relationCommands: proposedRelations(proposal, item, context) }
         })
         check(consent(), 'stale-formation-attempt')
         editBatch(batchId, row => { row.status = items.length ? 'settling' : 'completed'; row.items = items })
@@ -471,6 +949,15 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     },
     fail(batchId, attempt, reason) {
       return queue(async () => {
+        const task = semanticTask(batchId)
+        if (task) {
+          if (task.semantic?.status === 'running' && task.semantic.attempts === attempt) editSemantic(task, (work, organization) => {
+            work.status = work.attempts < 2 && reason !== 'source-changed' ? 'pending' : 'failed'
+            work.error = knownErrors.has(reason) ? reason : 'invalid-proposal'
+            if (work.status === 'failed') organization.semanticSeen = [...new Set([...organization.semanticSeen, work.signature])].slice(-4096)
+          })
+          return
+        }
         const batch = state.batches.find(row => row.id === batchId)
         if (batch?.status === 'running' && batch.attempts === attempt) editBatch(batchId, row => {
           row.status = 'failed'

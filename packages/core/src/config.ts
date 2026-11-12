@@ -65,7 +65,8 @@ export interface PlatformConfig {
   vision: VisionConfig
   webSearch: WebSearchConfig
   /** Memory controls recall; reflection formation requires a separate opt-in. */
-  memory: { enabled: boolean; formationEnabled?: boolean; organizationEnabled?: boolean; noteRecallEnabled?: boolean }
+  memory: { enabled: boolean; formationEnabled?: boolean; organizationEnabled?: boolean; noteRecallEnabled?: boolean;
+    embedding?: { endpoint?: string; model?: string; credentialSource?: 'reuse' | 'dedicated'; apiKey?: string } }
 }
 
 export const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1'

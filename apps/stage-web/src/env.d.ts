@@ -23,7 +23,7 @@ interface Window {
     noteFormation?: import('./runtime/note-formation').NoteFormationBridge
     noteRecall?: import('./runtime/note-v2-recall').NoteV2RecallBridge
     noteReview?: {
-      list(): Promise<{ ready: boolean; pending: number; forming: boolean; failed: boolean; items: Array<{
+      list(): Promise<{ ready: boolean; pending: number; forming: boolean; failed: boolean; embeddingConfigured?: boolean; items: Array<{
         key: string; action: string; content: string; kind: string; basis: string; uncertainty?: string;
         reason: string; target?: string; quotes: string[]; approvable: boolean;
       }> }>

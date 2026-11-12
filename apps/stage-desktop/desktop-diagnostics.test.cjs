@@ -206,6 +206,7 @@ test('main distinguishes an actual Jev call, validates snapshot first, and keeps
   assert.equal(calls[1].mode, 'actual-call')
   assert.equal(calls[1].sampleId, diagnostic.sampleId)
   assert.equal(calls[1].judgmentId, diagnostic.judgmentId)
+  await assert.rejects(handler({ ...f.event, senderFrame: { url: f.event.senderFrame.url } }, request), /Untrusted desktop awareness/)
   await assert.rejects(handler(f.event, { ...request, diagnostic, candidate: { ...request.candidate, snapshot: { ...request.candidate.snapshot, sequence: 2 } } }), /snapshot changed/)
   assert.equal(f.requests.length, 2)
   assert.equal(f.lines.filter(record => record.type === 'jev-call').length, 2)

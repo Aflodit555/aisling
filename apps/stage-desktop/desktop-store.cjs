@@ -95,13 +95,14 @@ function readReflections(){return memoryLifecycle?memoryLifecycle.guardedReflect
 
 let registered = false
 
-function registerStorageIpc(reflection = true, frozen = () => false) {
+/** @param {(event: Electron.IpcMainEvent) => boolean} trusted */
+function registerStorageIpc(trusted, reflection = true, frozen = () => false) {
   if (registered)
     return
   registered = true
 
   ipcMain.on(CHANNELS.get, (event, key) => {
-    if (!isValidKey(key)) {
+    if (!trusted(event) || !isValidKey(key)) {
       event.returnValue = null
       return
     }
@@ -113,7 +114,7 @@ function registerStorageIpc(reflection = true, frozen = () => false) {
   })
 
   ipcMain.on(CHANNELS.set, (event, key, value) => {
-    if (!isValidKey(key) || typeof value !== 'string') {
+    if (!trusted(event) || !isValidKey(key) || typeof value !== 'string') {
       event.returnValue = false
       return
     }
@@ -133,12 +134,12 @@ function registerStorageIpc(reflection = true, frozen = () => false) {
 
   if (!reflection) return
   ipcMain.on('aisling:reflections:read', event => {
-    if (frozen()) { event.returnValue = { ok: false }; return }
+    if (!trusted(event) || frozen()) { event.returnValue = { ok: false }; return }
     try { fs.readFileSync(reflectionsFile(),'utf8'); event.returnValue = { ok: true, value: JSON.stringify(readReflections()) } }
     catch (error) { event.returnValue = error.code === 'ENOENT' ? { ok: true, value: null } : { ok: false } }
   })
   ipcMain.on('aisling:reflections:write', (event, value) => {
-    if (frozen()) { event.returnValue = false; return }
+    if (!trusted(event) || frozen()) { event.returnValue = false; return }
     if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 2_000_000) { event.returnValue = false; return }
     try {
       const data = JSON.parse(value)

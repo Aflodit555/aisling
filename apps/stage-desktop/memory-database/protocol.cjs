@@ -1,5 +1,5 @@
 const { basename } = require('node:path')
-const { uuid, version, validOperation, validNoteV2Operation, validRuntimeOperation } = require('./note-v1.cjs')
+const { uuid, version, validOperation, validNoteV2Operation, validRuntimeOperation, validRelationOperation } = require('./note-v1.cjs')
 
 const VERSION = 1
 const NOTE_V1_FILE = 'note-v1.lbdb'
@@ -67,7 +67,7 @@ const evidence = value => record(value, ['sessionId', 'messageIndex', 'digest'])
   && id(value.sessionId) && integer(value.messageIndex)
   && typeof value.digest === 'string' && /^[a-f0-9]{64}$/.test(value.digest)
 const writes = new Set(['insertNote', 'addOrigin', 'addEvidence', 'relate'])
-const mutates = operation => writes.has(operation) || operation === 'transaction' || operation === 'applyNoteOperation' || operation === 'eraseSources' || operation === 'installErasureBarriers'
+const mutates = operation => writes.has(operation) || operation === 'putEmbedding' || operation === 'transaction' || operation === 'applyNoteOperation' || operation === 'applyRelationOperation' || operation === 'eraseSources' || operation === 'installErasureBarriers'
 const validators = {
   close: [], getNote: [id], getOrigins: [id], getEvidence: [id],
   outgoingOne: [id], outgoingTwo: [id], insertNote: [note], addOrigin: [id, origin],
@@ -101,9 +101,19 @@ const noteV2Validators = {
 const runtimeValidators = {
   ...noteV2Validators,
   applyNoteOperation: [validRuntimeOperation],
+  applyRelationOperation: [validRelationOperation],
+  getEmbedding: [uuid],
+  putEmbedding: [value => record(value, ['noteId','noteVersion','modelId','dimension','projectionVersion','contentHash','embedding'])
+    && uuid(value.noteId) && version(value.noteVersion) && space(value) && value.dimension === 1024
+    && /^[a-f0-9]{64}$/.test(value.contentHash) && vector(value.embedding)],
+  searchEmbeddings: [value => record(value, ['modelId','projectionVersion','embedding']) && space(value) && vector(value.embedding)],
+  listNoteRelations: [uuid, value => value === '' || typeof value === 'string' && /^[a-f0-9]{64}$/.test(value), value => typeof value === 'boolean'],
   installErasureBarriers: [value => Array.isArray(value) && value.length <= 32
     && value.every(k => typeof k === 'string' && /^(session|evidence):[a-f0-9]{64}$/.test(k))],
 }
+
+const space = value => typeof value.modelId === 'string' && value.modelId.length > 0 && value.modelId.length <= 200 && version(value.projectionVersion)
+const vector = value => Array.isArray(value) && value.length === 1024 && value.every(n => typeof n === 'number' && Number.isFinite(n) && Math.abs(n) < 1e10) && value.some(n => n !== 0)
 
 function validArgs(checks, args) {
   return Array.isArray(args) && args.length === checks.length && checks.every((check, i) => check(args[i]))

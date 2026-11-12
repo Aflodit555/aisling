@@ -26,11 +26,12 @@ function fixture() {
         unlinkSync: target => { files.delete(target) },
       } : require(name),
   })
-  module.exports.registerStorageIpc()
+  module.exports.registerStorageIpc(event => event.trusted)
   return { files, file, api:module.exports,setFailWrite: value => { failWrite = value }, setFailRead: value => { failRead = value },
-    invoke(channel, ...args) {
+    invoke(channel, ...args) { return this.invokeFrom(true, channel, ...args) },
+    invokeFrom(trusted, channel, ...args) {
       let response, answered = false
-      const event = {}
+      const event = { trusted }
       // Electron sendSync observes the first reply, not the handler's last assignment.
       Object.defineProperty(event, 'returnValue', { set(value) { if (!answered) { response = value; answered = true } } })
       handlers.get(channel)(event, ...args)
@@ -67,6 +68,16 @@ test('failed desktop write returns a result and preserves all previously durable
   f.setFailWrite(false)
   assert.equal(f.invoke('aisling:storage:set', 'aisling.conversations.v1', 'new history'), true)
   assert.deepEqual(JSON.parse(f.files.get(f.file)), { 'aisling.conversations.v1': 'new history', 'aisling.config.v1': 'old config' })
+})
+
+test('storage and Reflection IPC reject an untrusted sender before touching a Profile', () => {
+  const f = fixture()
+  f.setFailRead(true)
+  assert.equal(f.invokeFrom(false, 'aisling:storage:get', 'aisling.config.v1'), null)
+  assert.equal(f.invokeFrom(false, 'aisling:storage:set', 'aisling.config.v1', '{}'), false)
+  assert.equal(f.invokeFrom(false, 'aisling:reflections:read').ok, false)
+  assert.equal(f.invokeFrom(false, 'aisling:reflections:write', '{}'), false)
+  assert.equal(f.files.size, 0)
 })
 
 test('unreadable or corrupt desktop storage cannot be replaced by an empty fallback', () => {

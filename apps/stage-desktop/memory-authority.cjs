@@ -35,18 +35,14 @@ function readMigration(profile) {
 }
 
 function canStartNoteV2(profile) {
-  try { return fs.readFileSync(path.join(profile, 'memory-authority'), 'utf8') === profileMode }
-  catch (error) {
-    if (error.code !== 'ENOENT') throw error
-    return !readMigration(profile) && ![...legacyFiles, ...unmarkedFiles].some(name => fs.existsSync(path.join(profile, name)))
-  }
+  const modeFile = path.join(profile, 'memory-authority')
+  if (exists(modeFile)) return fs.readFileSync(modeFile, 'utf8') === profileMode
+  return !readMigration(profile) && !['aisling-store.json', ...legacyFiles, ...unmarkedFiles].some(name => exists(path.join(profile, name)))
 }
 
 function assertMemoryAuthority(profile, activate) {
   const modeFile = path.join(profile, 'memory-authority')
-  let existing
-  try { existing = fs.readFileSync(modeFile, 'utf8') }
-  catch (error) { if (error.code !== 'ENOENT') throw error }
+  const existing = exists(modeFile) ? fs.readFileSync(modeFile, 'utf8') : undefined
   const migration = readMigration(profile)
   if (!activate) {
     check(existing === undefined && (migration || !v2Files.some(name => fs.existsSync(path.join(profile, name)))),

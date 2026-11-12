@@ -1,4 +1,4 @@
-import { createPinia, setActivePinia } from 'pinia'
+import { createPinia, setActivePinia, storeToRefs } from 'pinia'
 import { createVisualStimulus, type ChatCompletionRequest } from '@aisling/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createLocalStorageConversationStore } from '../conversation/conversation-store'
@@ -20,6 +20,18 @@ async function fixture() {
 }
 
 describe('Stage history under storage failure', () => {
+  it('exposes page refs when legacy memory is unavailable', async () => {
+    await fixture()
+    const stage = useStageStore()
+    const refs = storeToRefs(stage)
+    expect(refs.activeSessionId.value).toBe(stage.activeSessionId)
+    expect(refs.messages.value).toEqual([])
+    expect(refs.sending.value).toBe(false)
+    expect(stage.formation).toBeUndefined()
+    expect(stage.noteRecallTrace).toBeUndefined()
+    stage.$dispose()
+  })
+
   it.each(['text', 'visual'])('records %s input at append and final output at delivery, preserving short-term order', async kind => {
     const { backend, settings } = await fixture()
     let now = 1000, finish!: (result: { text: string }) => void

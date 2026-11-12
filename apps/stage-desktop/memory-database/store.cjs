@@ -1,6 +1,6 @@
 const { startWorker } = require('./client.cjs')
 const { ProtocolError, isNoteV2, schemaForFile } = require('./protocol.cjs')
-const { validNoteV2Operation, validRuntimeOperation, needsMultipleSources } = require('./note-v1.cjs')
+const { validNoteV2Operation, validRuntimeOperation, validRelationOperation, operationFingerprint, needsMultipleSources } = require('./note-v1.cjs')
 const { sourceKey } = require('./erasure.cjs')
 const { sourceMessageLookup } = require('../memory-evidence.cjs')
 
@@ -159,8 +159,40 @@ function createNoteV2Store(resolveWorker, report, authority) {
     return users.size >= minimum
   }
 
+  async function eligibleHead(id, historical = false) {
+    const note = await request('getNoteV2', [id])
+    if (!note || (historical ? note.status === 'retracted' : note.status !== 'active') || authority.isSubjectConfirmed(note.subject) !== true) return null
+    const revision = await request('getRevision', [id, note.version])
+    const refs = await evidenceFor(id)
+    const lookup = sourceMessageLookup(authority.readData())
+    const linked = new Set(refs.map(sourceKey))
+    return revision?.grounds.evidence.length && revision.grounds.evidence.every(ref => linked.has(sourceKey(ref)))
+      && refs.every(ref => !!lookup(ref)?.content.trim()) && hasRequiredReports(note, revision.grounds.evidence.map(lookup))
+      ? { note, grounds: revision.grounds, cumulativeEvidence: refs } : null
+  }
+
   return {
     ...connection,
+    getEmbedding: id => request('getEmbedding', [id]),
+    getEmbeddingHead: id => serial(() => eligibleHead(id, true)),
+    listEmbeddingHeads(afterId = '') {
+      return serial(async () => {
+        const page = await request('listNoteHeads', [afterId]), notes = []
+        for (const head of page.notes) { const valid = await eligibleHead(head.note.id, true); if (valid) notes.push(valid) }
+        return { notes, nextCursor: page.nextCursor }
+      })
+    },
+    putEmbedding(value) {
+      return serial(async () => {
+        const head = await eligibleHead(value.noteId, true)
+        if (!head || head.note.version !== value.noteVersion) throw new ProtocolError('stale-version', 'Embedding source changed')
+        const expected = require('../note-embedding.cjs').embeddingIdentity(head.note, { modelId: value.modelId })
+        if (value.contentHash !== expected.contentHash || value.projectionVersion !== expected.projectionVersion)
+          throw new ProtocolError('invalid-evidence', 'Embedding projection changed')
+        return request('putEmbedding', [value])
+      })
+    },
+    searchEmbeddings: value => request('searchEmbeddings', [value]),
     getNoteV2: id => request('getNoteV2', [id]),
     listNoteHeads: (afterId = '') => request('listNoteHeads', [afterId]),
     listMemorySources: (kind, after = '') => request('listMemorySources', [kind, after]),
@@ -168,6 +200,62 @@ function createNoteV2Store(resolveWorker, report, authority) {
     getRevision: (id, version) => request('getRevision', [id, version]),
     getOperationReceipt: id => request('getOperationReceipt', [id]),
     getVersionSourceChanges: (id, version, afterId = '') => request('getVersionSourceChanges', [id, version, afterId]),
+    listNoteRelations: (id, afterKey = '') => request('listNoteRelations', [id, afterKey, false]),
+    getRecallHistory(id) {
+      return serial(async () => {
+        const current = await eligibleHead(id)
+        if (!current) return null
+        let noteId = id, version = current.note.version - 1
+        if (version < 1) {
+          const revision = await request('getRevision', [id, 1])
+          if (revision.action !== 'SUPERSEDE') return null
+          const receipt = await request('getOperationReceipt', [revision.operationId])
+          const predecessor = receipt?.affectedNotes.find(note => note.id !== id)
+          if (!predecessor) return null
+          const terminal = await request('getRevision', [predecessor.id, predecessor.version])
+          if (terminal?.successorId !== id) return null
+          noteId = predecessor.id; version = predecessor.version - 1
+        }
+        if (version < 1) return null
+        const revision = await request('getRevision', [noteId, version])
+        if (!revision || revision.snapshot.status === 'retracted' || revision.snapshot.subject !== current.note.subject) return null
+        const refs = await evidenceFor(noteId), lookup = sourceMessageLookup(authority.readData())
+        const linked = new Set(refs.map(sourceKey))
+        return revision.grounds.evidence.length && revision.grounds.evidence.every(ref => linked.has(sourceKey(ref)))
+          && refs.every(ref => !!lookup(ref)?.content.trim()) && hasRequiredReports(revision.snapshot, revision.grounds.evidence.map(lookup))
+          ? revision : null
+      })
+    },
+    listRecallRelations(id, afterKey = '') {
+      return serial(async () => {
+        const page = await request('listNoteRelations', [id, afterKey, true])
+        const relations = []
+        for (const relation of page.relations) {
+          if (relation.status !== 'active') continue
+          const from = await eligibleHead(relation.from), to = await eligibleHead(relation.to)
+          if (from?.note.version === relation.fromVersion && to?.note.version === relation.toVersion
+            && relation.sources.evidence.every(sourceMessageLookup(authority.readData()))) relations.push(relation)
+        }
+        return { relations, nextCursor: page.nextCursor }
+      })
+    },
+    applyRelationOperation(operation) {
+      const input = structuredClone(operation)
+      return serial(async () => {
+        if (!validRelationOperation(input)) throw new ProtocolError('invalid-payload', 'Invalid relation operation')
+        const prior = await request('getOperationReceipt', [input.operationId])
+        if (prior) {
+          if (prior.fingerprint !== operationFingerprint(input))
+            throw new ProtocolError('operation-id-conflict', 'Relation operation ID conflict')
+          return prior
+        }
+        const from = await eligibleHead(input.from), to = await eligibleHead(input.to)
+        if (!from || !to) throw new ProtocolError('invalid-endpoint', 'Relation requires eligible endpoints')
+        if (!input.sources.evidence.every(sourceMessageLookup(authority.readData())))
+          throw new ProtocolError('invalid-evidence', 'Relation source changed')
+        return request('applyRelationOperation', [input])
+      })
+    },
     erasedNoteIds: (id, afterId = '') => request('erasedNoteIds', [id, afterId]),
     eraseSources(scope) {
       const input = structuredClone(scope)

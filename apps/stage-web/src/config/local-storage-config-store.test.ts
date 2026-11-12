@@ -2,6 +2,20 @@ import { expect, it } from 'vitest'
 import { createDefaultPlatformConfig } from '@aisling/core'
 import { createLocalStorageConfigStore } from './local-storage-config-store'
 
+it('restores an explicitly dedicated embedding credential using the existing local configuration',async()=>{
+  let raw=JSON.stringify({...createDefaultPlatformConfig(),memory:{enabled:true,embedding:{credentialSource:'dedicated',apiKey:'synthetic-only',endpoint:'https://dashscope.aliyuncs.com',model:'qwen3.7-text-embedding'}}})
+  const store=createLocalStorageConfigStore({getItem:()=>raw,setItem:(_key,value)=>{raw=value}})
+  const loaded=await store.get();await store.set(loaded);expect((await store.get()).memory.embedding?.apiKey).toBe('synthetic-only')
+})
+
+it('preserves backend embedding endpoint and model without retaining a duplicate credential', async () => {
+  let raw=JSON.stringify({...createDefaultPlatformConfig(),memory:{enabled:true,embedding:{endpoint:'https://dashscope.aliyuncs.com',model:'qwen3.7-text-embedding',apiKey:'must-not-duplicate'}}})
+  const store=createLocalStorageConfigStore({getItem:()=>raw,setItem:(_key,text)=>{raw=text}})
+  const config=await store.get();await store.set(config)
+  expect((await store.get()).memory.embedding).toEqual({endpoint:'https://dashscope.aliyuncs.com',model:'qwen3.7-text-embedding'})
+  expect(raw).not.toContain('must-not-duplicate')
+})
+
 it('defaults missing Memory settings to on and preserves explicit opt-out', async () => {
   for (const memory of [undefined, {}, { enabled: 'true' }, { enabled: false }, { enabled: true }]) {
     let raw = JSON.stringify({ ...createDefaultPlatformConfig(), memory })

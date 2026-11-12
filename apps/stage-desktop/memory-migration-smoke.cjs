@@ -9,7 +9,7 @@ const { startDesktop } = require('./desktop-app.cjs')
 
 const [phase, profile, resources] = process.argv.slice(2)
 const fixtureRoot = path.resolve(__dirname, '../../artifacts/memory-note-only-p4')
-assert(['legacy', 'v2', 'lock', 'fresh'].includes(phase))
+assert(['legacy', 'v2', 'lock', 'fresh', 'blocked', 'unmarked'].includes(phase))
 assert.equal(path.dirname(fs.realpathSync(profile)), fs.realpathSync(fixtureRoot))
 assert.equal(fs.readFileSync(path.join(profile, '.migration-fixture'), 'utf8'), 'aisling-p4-synthetic\n')
 app.setPath('userData', profile)
@@ -17,7 +17,9 @@ app.setPath('sessionData', profile)
 app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-background-networking')
 
-const opts = { show: false, diagnostics: false, stageUrl: 'aisling://stage/settings/memory', noteOnlyForNewProfiles: true, noteV2: { resources } }
+const dev = process.env.AISLING_DEV === '1'
+const stageUrl = dev ? 'http://localhost:5174' : 'aisling://stage'
+const opts = { show: false, diagnostics: false, stageUrl: stageUrl + '/settings/memory', noteOnlyForNewProfiles: true, noteV2: { resources } }
 const finish = () => { console.log('p4-smoke:' + phase); app.quit() }
 const deadline = setTimeout(() => app.exit(2), 45_000)
 ;(async () => {
@@ -33,7 +35,7 @@ const deadline = setTimeout(() => app.exit(2), 45_000)
   const win = await startDesktop(opts)
   const web = win.contentView.children[0].webContents
   const loaded = name => Object.keys(require.cache).some(file => path.basename(file) === name)
-  if (phase !== 'legacy') {
+  if (['v2', 'fresh'].includes(phase)) {
     assert.equal(loaded('memory-migration.cjs'), false)
     assert.equal(loaded('memory-organization.cjs'), false)
     assert.equal(loaded('memory-archive.cjs'), phase === 'v2')
@@ -52,16 +54,19 @@ const deadline = setTimeout(() => app.exit(2), 45_000)
   web.debugger.attach('1.3')
   try {
     web.debugger.on('message', (_event, method, params) => {
-      if (method === 'Network.requestWillBeSent' && params.request.url.includes('/legacy-memory-')) requestedLegacy = true
+      if (method === 'Network.requestWillBeSent' && /\/legacy-memory(?:-|\.ts)/.test(params.request.url)) requestedLegacy = true
     })
     await web.debugger.sendCommand('Network.enable')
     await web.debugger.sendCommand('Network.setCacheDisabled', { cacheDisabled: true })
-    await web.loadURL('aisling://stage/settings/memory?observe-compatibility')
+    await web.loadURL(stageUrl + '/settings/memory?observe-compatibility')
     await openMemory()
   } finally { web.debugger.detach() }
-  assert.equal(requestedLegacy, phase === 'legacy')
+  assert.equal(requestedLegacy, ['legacy', 'blocked', 'unmarked'].includes(phase))
   if (phase === 'legacy') {
-    const competing = await promisify(execFile)(process.execPath, [__filename, 'lock', profile, resources], { windowsHide: true, timeout: 20_000 })
+    // In Vite mode the second process uses the built renderer on the same profile.
+    const competing = await promisify(execFile)(process.execPath, [__filename, 'lock', profile, resources], {
+      windowsHide: true, timeout: 20_000, env: { ...process.env, AISLING_DEV: '' },
+    })
     assert.match(competing.stdout, /p4-smoke:lock/)
     await openMemory()
     win.setSize(720, 560)
@@ -88,7 +93,7 @@ const deadline = setTimeout(() => app.exit(2), 45_000)
     answer = 1
     assert.equal((await js('window.aislingDesktop.memoryMigration.execute()')).phase, 'committed')
     assert.equal(confirmations, 4)
-    assert.equal(restarted, true)
+    assert.equal(restarted, !dev)
     assert.equal(await js("window.aislingDesktop.reflectionStorage.write('{}')"), false)
     await js("window.aislingDesktop.storage.setItem('aisling.language.v1', 'zh-CN')")
   } else if (phase === 'v2') {
@@ -104,9 +109,20 @@ const deadline = setTimeout(() => app.exit(2), 45_000)
     assert.deepEqual((await js('window.aislingDesktop.noteRecall.snapshot()')).notes, [])
     assert.deepEqual(JSON.parse(fs.readFileSync(path.join(profile, 'aisling-reflections.v1.json'), 'utf8')).reflections, [])
     for (const [route, heading] of [['consciousness', 'LLM'], ['speech', 'TTS']]) {
-      await web.loadURL('aisling://stage/settings/' + route)
+      await web.loadURL(stageUrl + '/settings/' + route)
       await waitFor("document.querySelector('.settings-module h2')?.textContent.trim() === " + JSON.stringify(heading), route + ' did not render')
     }
+  } else if (phase === 'blocked' || phase === 'unmarked') {
+    assert(await js('Boolean(window.aislingDesktop.memoryMigration && window.aislingDesktop.reflectionStorage)'))
+    assert.equal(await js('Boolean(window.aislingDesktop.noteFormation || window.aislingDesktop.noteRecall)'), false)
+    const state = await js('window.aislingDesktop.memoryMigration.status()')
+    if (phase === 'blocked') {
+      assert.equal(state.phase, 'migrating')
+      assert.equal(await js("window.aislingDesktop.storage.setItem('aisling.conversations.v1', JSON.stringify({sessions:[]}))"), false)
+      assert.equal(await js("window.aislingDesktop.reflectionStorage.write('{}')"), false)
+    } else assert.equal(state.phase, 'legacy')
+    assert(!fs.existsSync(path.join(profile, 'memory-authority')))
+    assert(!fs.existsSync(path.join(profile, 'memory-note-v2')))
   } else {
     await openMemory()
     assert.equal(await js('Boolean(window.aislingDesktop.memoryMigration)'), false)

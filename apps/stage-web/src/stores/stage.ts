@@ -22,6 +22,7 @@ import { recallForModel, retrieveRecall, type RecallSource } from '../runtime/me
 import type { createLegacyMemory } from '../runtime/legacy-memory'
 import { createNoteFormation } from '../runtime/note-formation'
 import { prepareNoteV2Recall } from '../runtime/note-v2-recall'
+import type { NoteRecallTrace } from '../runtime/note-recall'
 import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
@@ -101,6 +102,7 @@ export const useStageStore = defineStore('stage', () => {
   const sessionMessages = ref<ConversationMessage[]>([...activeSession.messages])
   const sessionsList = ref<ConversationSession[]>(conversationStore.list())
   const memoryRecallEnabled = computed(() => settings.config.memory.enabled)
+  const sending = ref(false)
   const memoryRecallDiagnostic = shallowRef<{ sessionIds: string[]; rankedSessionIds: string[]; packingOmittedSessionIds: string[];
     records: number; sources: RecallSource[] }>()
   const noteRecallDesired = computed(() => settings.loaded && memoryRecallEnabled.value && settings.config.memory.noteRecallEnabled === true)
@@ -115,7 +117,7 @@ export const useStageStore = defineStore('stage', () => {
   const desktop = window.aislingDesktop
   const noteV2Recall = desktop?.noteRecall
   const noteFormation = desktop?.noteFormation && createNoteFormation(desktop.noteFormation, freshSessions,
-    () => formationEnableThinking(settings.config.consciousness))
+    () => formationEnableThinking(settings.config.consciousness), () => sending.value)
   if (noteFormation) {
     watch(() => settings.loaded && settings.config.memory.enabled && settings.config.memory.formationEnabled === true
       ? settings.activeChatProvider : undefined,
@@ -186,7 +188,6 @@ export const useStageStore = defineStore('stage', () => {
   const messages = ref<DisplayMessage[]>(historyToDisplay(activeSession.messages))
   const persistenceError = shallowRef<ConversationPersistenceError>()
   syncPersistenceStatus()
-  const sending = ref(false)
   const searching = ref(false)
   const visionProcessing = ref(false)
 
@@ -573,11 +574,11 @@ export const useStageStore = defineStore('stage', () => {
   return {
     organizationStatus: legacy?.organizationStatus ?? computed(() => ({ ready: false, autoWrite: false, reason: 'disabled', pending: 0 })),
     formationStatus: legacy?.formationStatus ?? computed(() => ({ enabled: false, running: false, calls: 0, lastEvent: 'disabled' })),
-    formation: legacy?.formation,
+    formation: shallowRef(legacy?.formation),
     memoryRecallEnabled,
     memoryRecallDiagnostic,
-    memoryTraceEnabled: legacy?.memoryTraceEnabled,
-    noteRecallTrace: legacy?.noteRecallTrace,
+    memoryTraceEnabled: legacy?.memoryTraceEnabled ?? ref(false),
+    noteRecallTrace: legacy?.noteRecallTrace ?? shallowRef<NoteRecallTrace>(),
     autonomous,
     situationStatus,
     desktopBridgeState,

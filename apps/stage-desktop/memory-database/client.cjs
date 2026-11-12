@@ -1,6 +1,6 @@
 /// <reference lib="es2024.promise" />
 const { spawn } = require('node:child_process')
-const { readFileSync } = require('node:fs')
+const { closeSync, openSync, readFileSync, unlinkSync, existsSync } = require('node:fs')
 const { basename, dirname, isAbsolute, join, relative, resolve } = require('node:path')
 const { setTimeout: delay } = require('node:timers/promises')
 const { VERSION, schemaForFile, MAX_PENDING, ProtocolError, lines, decode, encode, mutates } = require('./protocol.cjs')
@@ -9,6 +9,10 @@ const localWorkerResources = resolve(__dirname, '../../../.local/memory-database
 const resourceFiles = ['worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'package.json', 'package-lock.json']
 
 function assertPreparedWorkerSource(resources) {
+  const pins = [['libssl-3-x64.dll','e028a7f4fc1e4e197dfae99f7df5e14f57fb7e0282d03e903521fc99c0c76d89'],['libcrypto-3-x64.dll','3b65cfd779e238a2947a0aa8911cc67aaef866977af6a69b4d39e7d587ebf262']]
+  if (pins.some(([file])=>existsSync(join(resources,'runtime',file)))) for (const [file,hash] of pins)
+    if (require('node:crypto').createHash('sha256').update(readFileSync(join(resources,'runtime',file))).digest('hex') !== hash)
+      throw new ProtocolError('stale-worker-resources','OpenSSL resource integrity failed')
   for (const file of resourceFiles) {
     const prepared = readFileSync(join(resources, file))
     if (!prepared.equals(readFileSync(join(__dirname, file))))
@@ -16,18 +20,36 @@ function assertPreparedWorkerSource(resources) {
   }
 }
 
+function withPreparedLocalWorker(entry, launch) {
+  if (relative(localWorkerResources, dirname(entry)) !== '') return launch()
+  const lock = localWorkerResources + '.update.lock'
+  let handle
+  try { handle = openSync(lock, 'wx') }
+  catch (error) {
+    if (error.code === 'EEXIST')
+      throw new ProtocolError('worker-resources-locked', 'Local Worker resources are being prepared or another Worker is starting')
+    throw error
+  }
+  try {
+    assertPreparedWorkerSource(localWorkerResources)
+    return launch()
+  } finally {
+    closeSync(handle)
+    unlinkSync(lock)
+  }
+}
+
 /** @param {{node: string, entry: string, file: string, startupMs?: number, readOnly?: boolean}} config */
 function startWorker({ node, entry, file, startupMs = 15000, readOnly = false }) {
   if (!isAbsolute(node) || basename(node).toLowerCase() !== 'node.exe' || !isAbsolute(entry))
     throw new Error('Expected absolute paths to independent node.exe and worker entry')
-  if (relative(localWorkerResources, dirname(entry)) === '') assertPreparedWorkerSource(localWorkerResources)
   const started = performance.now()
   const systemRoot = process.env.SystemRoot || 'C:\\Windows'
-  const child = spawn(node, ['--no-global-search-paths', entry, ...(readOnly ? ['--read-only'] : []), file], {
+  const child = withPreparedLocalWorker(entry, () => spawn(node, ['--no-global-search-paths', entry, ...(readOnly ? ['--read-only'] : []), file], {
     shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     cwd: dirname(entry),
     env: { SystemRoot: systemRoot, Path: join(systemRoot, 'System32') },
-  })
+  }))
   const pending = new Map()
   const ready = Promise.withResolvers()
   const closed = Promise.withResolvers()

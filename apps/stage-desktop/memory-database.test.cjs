@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 const { test } = require('node:test')
 const { spawn } = require('node:child_process')
 const { once } = require('node:events')
-const { copyFileSync, mkdirSync, mkdtempSync, existsSync, writeFileSync } = require('node:fs')
+const { copyFileSync, mkdirSync, mkdtempSync, existsSync, writeFileSync, unlinkSync } = require('node:fs')
 const { join, resolve } = require('node:path')
 const { setTimeout: sleep } = require('node:timers/promises')
 const { createInterface } = require('node:readline')
@@ -30,12 +30,24 @@ function fixture(name, fn) {
 }
 
 test('default development Worker resources must match the checked-out Worker sources', () => {
-  const prepared = folder()
+  const checkout = folder()
+  const source = join(checkout, 'apps', 'stage-desktop', 'memory-database')
+  mkdirSync(source, { recursive: true })
+  for (const file of ['client.cjs', 'worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'package.json', 'package-lock.json'])
+    copyFileSync(join(__dirname, 'memory-database', file), join(source, file))
+  const { startWorker: launch, localWorkerResources: prepared } = require(join(source, 'client.cjs'))
+  mkdirSync(prepared, { recursive: true })
   for (const file of ['worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'package.json', 'package-lock.json'])
-    copyFileSync(join(__dirname, 'memory-database', file), join(prepared, file))
+    copyFileSync(join(source, file), join(prepared, file))
   assert.doesNotThrow(() => assertPreparedWorkerSource(prepared))
+  const config = { node: join(prepared, 'runtime', 'node.exe'), entry: join(prepared, 'worker.cjs'), file: join(checkout, 'note-v2.lbdb') }
+  const lock = prepared + '.update.lock'
+  writeFileSync(lock, '')
+  assert.throws(() => launch(config), code('worker-resources-locked'))
+  unlinkSync(lock)
   writeFileSync(join(prepared, 'erasure.cjs'), '// Older erasure implementation with the same protocol version')
-  assert.throws(() => assertPreparedWorkerSource(prepared), { code: 'stale-worker-resources', message: /erasure\.cjs differs/ })
+  assert.throws(() => launch(config), { code: 'stale-worker-resources', message: /erasure\.cjs differs/ })
+  assert.equal(existsSync(lock), false)
 })
 
 test('P0 refuses the existing profile and unmarked nonempty profiles', () => {

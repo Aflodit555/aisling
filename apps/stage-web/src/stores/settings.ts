@@ -146,7 +146,13 @@ export const useSettingsStore = defineStore('settings', () => {
     await persist()
   }
 
+  async function saveEmbedding(embedding: NonNullable<PlatformConfig['memory']['embedding']>): Promise<void> {
+    config.value = {...config.value,memory:{...config.value.memory,embedding}}
+    await persist()
+  }
+
   return {
+    saveEmbedding,
     activeChatProvider,
     activeSpeechProvider,
     activeTools,

@@ -1,16 +1,20 @@
 # Memory Recall
 
-使用构建版 Stage 的新建和已迁移 Desktop Profile 以 LadybugDB Note v2 为唯一结构化记忆权威。ConversationStore 持有原始消息，Core Context 负责当前会话。Memory 控制跨会话召回，新资料默认开启。Formation 控制额外的后台模型调用，Recall 控制已批准 Note 的注入，两者在新资料默认关闭。旧设置保留原有选择，移除旧 Organization 开关时不会将它转换为新权限。审核页显示原始引文、依据、不确定性和建议动作。正式 v2 的新提议需要原生确认，随后 Main 重新校验证据、主体及目标版本，并通过事务和 Receipt 恢复已授权的写入。
+当前 Embedding 手动配置、Windows HNSW 部署与真实语义验收边界见 [P7.1](memory-p7-1-validation.md)；P7记录保留为实施时的历史状态。
 
-Core 优先为当前会话保留预算，再装入 Raw 与 Note。Note 使用用户角色承载结构化背景数据。工具续轮复用首轮快照，Main 在每次请求前重新确认 Note 快照未作废。来源删除意图、Worker 重启及 Note 写入都会使快照作废。v2 数据库或完整分页不可用时，聊天继续使用 Context 与可用的 Raw。来源删除不依赖 Recall 开关。详见 [P3 工程记录](memory-note-only-p3-transition.md)。
+Vite 和构建版 Stage 的新建及已迁移 Desktop Profile 以 LadybugDB Note v2 为唯一结构化记忆权威。ConversationStore 持有原始消息，Core Context 负责当前会话。Memory 控制跨会话召回，新资料默认开启。Formation 控制额外的后台模型调用和自主整理，Recall 控制有效 Note 的注入，两者在新资料默认关闭。旧设置保留原有选择，移除旧 Organization 开关时不会将它转换为新权限。正式 v2 自动执行来源充分且符合受限授权规则的操作；不确定的提议保留审核。Main 始终复验证据、主体及目标版本，并通过事务和 Receipt 恢复写入。审核页继续显示异常提议的原始引文、依据、不确定性和建议动作。
 
-旧格式资料可在记忆设置运行只读预检。符合条件的资料经原生确认后升级到唯一 v2 权威。旧修订和操作回执留在受删源约束的历史存储，无法验证的资料会明确阻断切换。独立且来源完整的记忆资格阻塞可在原生确认后仅保留为历史，来源完整性和未知历史依赖仍阻断切换。详见 [P5 退役记录](memory-note-only-p5-retirement.md)。
+自主规则的原始基线见 [自主 Organization 实施报告](memory-autonomous-organization.md)，纵向语义演化见 [P6](memory-organization-p6.md)，当前向量检索、横向关联及运行限制见 [P7 Associative Network](memory-associative-network-p7.md)。Network 支持状态变化、过程延续、补充、未解决冲突及对称 ASSOCIATED_WITH；相似度和标签只提供候选，不直接建边。Formation 启用后可异步补建向量并使用既有 Provider 做有界关系判断：LLM 每小时最多8次、间隔至少60秒，每任务最多2次尝试。Note Recall 使用 BM25 / Embedding / Metadata 的 RRF 融合及最多两跳关联扩展；远程 query 向量失败回退本地检索，Core 预算不增加。旧 Profile 兼容路径不采用这些新规则。
+
+Core 优先为当前会话保留预算，再装入 Raw 与 Note。Note 使用用户角色承载结构化背景数据。工具续轮复用首轮快照，Main 在每次请求前重新确认 Note 快照未作废。来源删除意图、Worker 重启及 Note 写入都会使快照作废。v2 数据库或完整分页不可用时，聊天继续使用 Context 与可用的 Raw。来源删除不依赖 Recall 开关。当前关系和历史读取边界见 [P6 Recall](memory-organization-p6.md#5-recall-与实际使用)。
+
+旧格式资料可在记忆设置运行只读预检。符合条件的资料经原生确认后升级到唯一 v2 权威。旧修订和操作回执留在受删源约束的历史存储，无法验证的资料会明确阻断切换。独立且来源完整的记忆资格阻塞可在原生确认后仅保留为历史，来源完整性和未知历史依赖仍阻断切换。迁移与旧路径的整体边界保留在 [Note-only 工程基线](memory-note-only-engineering-baseline.md)。
 
 ## Worker 准备与开发入口
 
-`pnpm start:desktop` 使用构建版 Stage。`pnpm dev:desktop` 使用 Vite 和旧兼容路径，应为两者使用独立的开发资料。已经选择 v2 权威的资料要求构建版 Stage。
+`pnpm dev:desktop` 使用 Vite 和项目内的 `.local/desktop-dev-profile`。`pnpm start:desktop` 使用构建版 Stage 和 Electron 常规 Profile。测试已有隔离资料时，可给 Vite 启动设置 `AISLING_DEV_PROFILE` 为其绝对目录。同一目录在任一模式下都受 Electron 单实例锁约束。详见 [开发与运行时一致性](memory-development-runtime-alignment.md)。
 
-按 [Worker 资源准备](memory-database-p0.md#资源数据隔离与复现) 使用固定版本的 Node 24.12.0 和 LadybugDB 0.22.1。默认目录 `.local/memory-database` 的脚本或依赖清单与当前源码不一致时，Main 拒绝启动该 Worker。刷新时传入 `-OutputDirectory` 准备全新的目录。关闭使用旧资源的 Desktop 后，保留原资源目录作为备份，再将已准备的新目录放到默认位置。此步骤仅涉及项目资源目录。构建 Stage 不会重新准备 Worker。
+首次按 [Worker 资源准备](memory-development-runtime-alignment.md#首次准备-worker) 安装固定版本的 Node 24.12.0 和 LadybugDB 0.22.1。默认目录 `.local/memory-database` 的脚本或依赖清单与当前源码不一致时，Main 拒绝启动该 Worker。关闭 Desktop 后执行 `./scripts/prepare-memory-database.ps1`，脚本会校验并复用已有固定依赖，在旁边暂存后切换，保留旧资源备份。构建 Stage 不会刷新 Worker。
 
 ## 旧资料与共用 Raw Recall
 

@@ -27,7 +27,7 @@ pnpm dev:desktop
 
 scripts/dev-desktop.mjs 在开发模式下启动 Vite（5174），等待就绪后启动 Electron，并在 Electron 退出时清理自己启动的子进程。生产模式下先构建 renderer，再交给 Electron 直接加载。
 
-desktop-app.cjs 优先使用 AISLING_STAGE_URL，否则使用已有的 stage-web/dist，无构建时回退 dev URL。desktop-protocol.cjs 通过标准 secure scheme aisling://stage 提供 built renderer、SPA 路由、Web Search 及 Alibaba 语音转发。
+desktop-app.cjs 选择构建版 `aisling://stage` 或固定环回端口 5174 上的 Vite Stage。开发启动器等待本次 Vite 子进程报告监听后再打开 Electron。desktop-protocol.cjs 通过标准 secure scheme aisling://stage 提供 built renderer、SPA 路由、Web Search 及 Alibaba 语音转发。
 
 ## 采集与边界
 
@@ -39,9 +39,9 @@ desktop-app.cjs 优先使用 AISLING_STAGE_URL，否则使用已有的 stage-web
 
 ## 数据归属
 
-Electron 的 Settings 与 Conversation 由 main 的 desktop-store.cjs 写入 userData 下的 aisling-store.json。renderer 通过 storage.getItem/setItem 使用此后端，dev/built 共用数据。浏览器继续使用 localStorage。
+Electron 的 Settings 与 Conversation 由 main 的 desktop-store.cjs 写入所选 Profile 下的 aisling-store.json。两种启动方式共用存储逻辑。开发默认使用 `.local/desktop-dev-profile`，构建版使用 Electron 常规 Profile。浏览器继续使用 localStorage。
 
-构建版 Stage 的新建或已迁移资料在 `userData/memory-note-v2/note-v2.lbdb` 保存 Note。旧资料继续使用 `userData/aisling-reflections.v1.json` 和旧 v1 库，迁移后仅为受删源约束的历史保留。开发版 Vite Stage 使用旧入口，已选择 v2 权威的资料需用构建版 Stage 启动。存储边界、开关和 Worker 准备见 [Memory](memory.md)。
+新建或已迁移资料在 `userData/memory-note-v2/note-v2.lbdb` 保存 Note。旧资料继续使用 `userData/aisling-reflections.v1.json` 和旧 v1 库，迁移后仅为受删源约束的历史保留。开发与构建使用同一套权威判定、迁移、写入和擦除服务。存储边界、开关和 Worker 准备见 [Memory](memory.md)。
 
 resolvePersistentStorage() 在 Desktop 桥为空时迁移既有 origin 的配置与会话；配置加载还保留历史用户授权和模块迁移。凭据在 Settings 中配置，不能提交实际配置文件或 userData。
 

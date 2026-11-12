@@ -1,12 +1,14 @@
 # Reflection Recall
 
+本文仅描述尚未迁移的旧 Profile 兼容路径；当前 Note v2 行为见 [Memory](memory.md)。
+
 普通用户文字轮可同时读取跨 Session 原始证据与已持久化的 Reflection。Formation 保持完全异步：回复只读已完成产物，不等待队列、模型请求或即将产生的新认识。两个来源都采用本地检索，无额外 Recall Provider 请求。
 
 ## 数据流与校验
 
 Stage 保存输入、刷新 sessionsList 后，分别调用原有 getRecallEvidence 与独立 getReflectionContext，复用同一提交时的会话快照。视觉、自主发言和本地模式命令不调用这两个 Recall 接口。
 
-`reflection-recall.ts` 通过 `formation.inspect()` 复用存储校验，只考虑 completed 批次列出的合法产物。P1.7 起，每轮先读取 Main 的权威状态并检查删除屏障，状态未变时复用词项索引；Formation 的 changed 通知仍使缓存失效。C 产物还须同时满足已提交状态和 Main 持久化资格，待审候选不能注入。旧合法 Reflection 保持兼容。每轮仍从会话快照核验所选产物的来源，缺失、改写、移位、工具中间消息、不支持角色或敏感文本均拒绝。具体边界见 [P1.7 报告](memory-organization-p1-7.md)。
+`reflection-recall.ts` 通过 `formation.inspect()` 复用存储校验，只考虑 completed 批次列出的合法产物。每轮先读取 Main 的权威状态并检查删除屏障，状态未变时复用词项索引；Formation 的 changed 通知仍使缓存失效。C 产物还须同时满足已提交状态和 Main 持久化资格，待审候选不能注入。旧合法 Reflection 保持兼容。每轮仍从会话快照核验所选产物的来源，缺失、改写、移位、工具中间消息、不支持角色或敏感文本均拒绝。
 
 检索复用原始 Recall 的词项切分和用户连续追问锚点；“这些经历有什么共同模式”等指代性概括追问可额外使用最近 12 条内、至多 300 字符的用户话题，不使用角色猜测。BM25 以正文为主，标签只补充缺少的主题词项，每个词项最多补一次；basis、uncertainty 和常见报告套话不提供相关性。索引与 DF 统计随已有只读缓存一起构建，不逐轮重新分词全部 Reflection。
 
@@ -81,4 +83,4 @@ stage.memoryRecallMode
 
 自动回归包括独立检索、来源失效、快照、开关、预算、A/B/C 请求、流式及工具轮，保留 Stage 和 Electron Formation 生产冒烟。有限真实 Provider 结果与不能推导的结论见[研究记录](research/memory-validation.md)；本地一次性回放工具和原始输出不进入发布源码。
 
-2026-10-28 第二链路修改、Mock A/B/C 实际注入数量、待执行的独立真实 Provider 用例及限制见[工程报告](reflection-value.md)。
+历史实验的主要结论与限制统一保留在[研究记录](research/memory-validation.md)。

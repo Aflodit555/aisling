@@ -1,5 +1,7 @@
 # Reflection Formation
 
+本文仅描述尚未迁移的旧 Profile 兼容路径；当前 Note v2 行为见 [Memory](memory.md)。
+
 Formation 从已交付并成功持久化的交互中，异步形成追加式 Reflection。它是可选的后台 LLM 请求，不在普通回复的等待链上。读取产物见 [Reflection Recall](reflection-recall.md)，有限真实模型验证见[研究记录](research/memory-validation.md)。
 
 ## 开关与处理范围
@@ -90,4 +92,4 @@ stage.formation.setDiagnosticsEnabled(false)
 
 `source-changed` 检查来源，`input-limit` 检查敏感／长度边界，`provider-error` 检查请求可用性；`storage-error` 检查文件提交。不得为通过验收而放宽来源或输出校验。
 
-2026-10-28 五批连续失败的原始响应核对、最小修复及仍未通过的单批真实复验见[故障报告](formation-failure-analysis.md)。
+历史失败与后续恢复的主要结论统一保留在[研究记录](research/memory-validation.md)。

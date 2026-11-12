@@ -1,5 +1,7 @@
 # Note-only Memory 工程基线
 
+本文保留 P0–P5 收束时的历史基线；当前自主语义组织见 [P6](memory-organization-p6.md)，日常启动与 Worker 更新见 [运行时一致性](memory-development-runtime-alignment.md)。旧阶段报告已清理，以下提交、测试计数和工作区描述均属于当时记录。
+
 ## Git 基线与范围
 
 收束开始时在 `main`，HEAD 为 `271d19e4a564993c22ed599076cff37cf9095720`。暂存区为空，53 个已跟踪文件有改动，186 个未跟踪文件。原有已跟踪差异增加 1,564 行、移除 652 行。逐项核对了 `git status --porcelain=v1 -uall`、`git diff --stat`、`git diff --numstat`、`git diff --check` 和 `git ls-files --others --exclude-standard`。
@@ -31,7 +33,7 @@
 
 正式 v2 开库位置是 `<userData>/memory-note-v2/note-v2.lbdb`。旧库留在原位置。Worker 由 Main 以独立 Node 24.12.0 x64 启动，LadybugDB 固定 0.22.1。JSON Lines 握手校验协议、进程、版本与 Schema。打包环境使用 `resources/memory-database`。源码启动的默认路径是 `.local/memory-database`，本次发现其中五个脚本都与当前源码不同，协议号并不能发现所有这种变化。共享 `memory-database/client.cjs:startWorker` 现在在该默认路径校验五个脚本和两份依赖清单，发现差异时在 `spawn` 前报告 `stale-worker-resources`。已准备的显式隔离夹具仍可按既有方式注入崩溃点。
 
-`scripts/prepare-memory-database.ps1` 会将校验过的运行时、原生依赖、固定清单和本次 checkout 脚本复制到新目录，要求输出路径尚不存在。本轮没有覆盖现有 `.local`。隔离测试从既有原生资源复制并重新核验运行时和原生插件的固定 SHA-256，再复制当前脚本与清单。未重新执行 MSI 提取或在线安装。安全更新步骤见 [Memory](memory.md)。同步更新了 [README](../README.md)、[Desktop Host](desktop-host.md) 和 [早期 Worker 实验记录](memory-database-p0.md)。
+当时的 `scripts/prepare-memory-database.ps1` 将校验过的运行时、原生依赖、固定清单和 checkout 脚本复制到新目录，要求输出路径尚不存在。本轮没有覆盖现有 `.local`。隔离测试从既有原生资源复制并重新核验运行时和原生插件的固定 SHA-256，再复制当前脚本与清单。未重新执行 MSI 提取或在线安装。后续已支持原位安全刷新，当前步骤见 [运行时一致性](memory-development-runtime-alignment.md)。
 
 ## 验证
 
@@ -54,4 +56,4 @@
 - v2 Recall 读取有候选上限，冷启动或暂时不可用时可以跳过 Note。累计上下文证据可能触发保守的连带擦除，或使超限提议无法批准。两者会影响覆盖率，不能用合成烟测推断长期可用性。
 - 真实模型对事件时间、跨经历归纳、检索增益和长期质量的表现仍待单独验收。此轮仅使用合成资料、Mock 和已有固定原生组件，没有打开实际用户 Profile。
 
-阶段记录：[P0](memory-note-only-p0.md) · [P1](memory-note-only-p1-formation.md) · [P2](memory-note-only-p2-lifecycle.md) · [P3](memory-note-only-p3-transition.md) · [P4](memory-note-only-p4-migration.md) · [P5](memory-note-only-p5-retirement.md)。
+P0–P5 的分阶段报告已由本基线收束；当前行为与使用入口见 [Memory](memory.md)。

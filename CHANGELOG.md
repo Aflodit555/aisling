@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.3.9 — 2026-11-12
+
+Memory's first engineering baseline, collecting P0–P7.1 without a new database
+schema/protocol version or dependency upgrade.
+
+- Use Note-only Memory v2 for new and verified migrated Desktop profiles, with
+  source-checked Evidence, Revision, Receipt, durable erasure and crash recovery.
+- Add opt-in autonomous organization and typed Note Network evolution, conflict,
+  supplementation and lateral ASSOCIATED_WITH navigation.
+- Add optional DashScope embeddings, prepared Windows HNSW / bounded exact
+  fallback, BM25 / metadata / vector RRF fusion and bounded two-hop recall.
+- Align Vite and built Desktop authority, profile isolation and Worker resources;
+  fix Stage startup with absent legacy memory and deterministic UI smoke checks.
+- Consolidate historical documentation and keep private research/profile data
+  outside source publication. Preserve legacy compatibility and migration paths.
+
+Engineering tests do not establish long-term semantic or final-answer benefit.
+P7.1's graph/embedding comparison limitations, damaged persistent-HNSW recovery,
+and installer/signing/redistribution acceptance remain explicit limitations.
+See [release notes](docs/release-v0.3.9.md) and
+[validation](docs/release-v0.3.9-validation.md). No installer or GitHub Release
+page is created by this source baseline.
+
 ## v0.3.7 — 2026-10-27
 
 This release collects the implementation after v0.3.6 without changing the storage version or redesigning character behavior.

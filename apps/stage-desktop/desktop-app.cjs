@@ -363,7 +363,7 @@ function enterDesktopMode() {
   desktopWindow = new BaseWindow({
     ...desktopBounds(), show: false, frame: false, transparent: true,
     backgroundColor: '#00000000', alwaysOnTop: desktopAlwaysOnTop, skipTaskbar: true,
-    resizable: false, hasShadow: false, title: 'Aisling Desktop',
+    resizable: false, hasShadow: false, title: `Aisling Desktop v${app.getVersion()}`,
   })
   const desktop = desktopWindow
   desktop.setContentBounds(desktopBounds())
@@ -484,7 +484,7 @@ async function createWindow(options = {}) {
     minWidth: 720,
     minHeight: 560,
     center: true,
-    title: 'Aisling',
+    title: `Aisling v${app.getVersion()}`,
     icon: ICON_PATH,
     backgroundColor: stageBackground(),
   })

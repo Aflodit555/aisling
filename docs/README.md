@@ -1,8 +1,10 @@
 # 项目文档索引
 
-当前项目版本仍为 v0.3.7；以下按用途区分说明，不把历史实验的测试计数当作当前发布验收。
+当前项目版本为 v0.3.9，定位为 Memory 第一轮工程基线；以下按用途区分说明，不把历史实验的测试计数当作当前发布验收。
 
 ## 当前有效的工程入口
+
+- [v0.3.9 发行说明](release-v0.3.9.md)、[本轮发行验证](release-v0.3.9-validation.md)。
 
 - [Memory](memory.md)：Note v2 权威、用户开关、Recall、旧资料迁移及共用 Raw Recall。
 - [开发与运行时一致性](memory-development-runtime-alignment.md)：Vite / 构建版 Profile、Worker 准备和安全刷新。

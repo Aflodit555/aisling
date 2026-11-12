@@ -1,6 +1,6 @@
 {
   "name": "@aisling/stage-desktop",
-  "version": "0.3.7",
+  "version": "0.3.9",
   "private": true,
   "description": "Windows Electron host for the Aisling Stage.",
   "main": "main.cjs",

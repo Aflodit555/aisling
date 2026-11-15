@@ -53,7 +53,7 @@ export function parseExpression(json: unknown): ExpressionParameter[] {
   return result
 }
 
-const baseName = (file: string): string => file.split('/').pop()!.split('.')[0]
+const baseName = (file: string): string => file.split('/').pop()!.split('.', 1)[0]
 
 export async function createRig(model: Live2DModel, random = Math.random): Promise<Live2DRig> {
   const internal = model.internalModel as Cubism4InternalModel

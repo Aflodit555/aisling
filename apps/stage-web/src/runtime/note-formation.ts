@@ -3,7 +3,7 @@ import type { EvidenceRef } from '../../../stage-desktop/memory-database/store'
 import { formationInput, limits, parseNoteBatch, type NoteFormationContext } from '../../../stage-desktop/note-formation-contract.mjs'
 import speakers from '../../../stage-desktop/memory-subjects.json'
 import type { ConversationSession } from '../conversation/conversation-store'
-import { sourceRef, withRelatedHistory, type FormationEvidence } from './formation-evidence'
+import { sourceRef, withNoteHistory, type FormationEvidence } from './formation-evidence'
 import { safeText } from './memory-recall'
 import { organizationInput, parseSemanticRelations, semanticLimits } from '../../../stage-desktop/note-semantic-contract.mjs'
 import { formationFailure, type FormationFailure } from '../../../stage-desktop/note-formation-errors.mjs'
@@ -61,7 +61,7 @@ export function createNoteFormation(bridge: NoteFormationBridge, getSessions: ()
     try {
       stillCurrent()
       const current = await resolve(job.refs)
-      const evidence = job.kind === 'organization' ? current : await withRelatedHistory(job.sessionId, current, getSessions, sources => {
+      const evidence = job.kind === 'organization' ? current : await withNoteHistory(job.sessionId, current, getSessions, sources => {
         formationInput({ notes: [], speakers, evidence: sources.map(source => ({
           ref: source.ref, message: source.message as NoteFormationContext['evidence'][number]['message'],
           scope: source.scope === 'related-history' ? 'history' : 'current',

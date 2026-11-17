@@ -1026,8 +1026,11 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
           return semanticContext(task)
         }
         const batch = current(batchId, attempt)
+        const first = Math.min(...batch.evidence.map(ref => ref.messageIndex))
+        const nearby = Array.isArray(history) ? history.filter(ref => ref?.sessionId === batch.sessionId) : []
         check(!batch.prepared && Array.isArray(history) && history.length + batch.evidence.length <= limits.sources
-          && history.every(ref => evidenceRef(ref) && ref.sessionId !== batch.sessionId)
+          && history.every(evidenceRef) && nearby.length <= 4
+          && nearby.every((ref, i) => ref.messageIndex === first - nearby.length + i && ref.messageIndex >= 0)
           && new Set(history.map(ref => JSON.stringify([ref.sessionId, ref.messageIndex]))).size === history.length, 'invalid-history')
         readData()
         const pool = await headIndex()
@@ -1040,7 +1043,9 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         }).map(ref => ref.sessionId))
         const validHistory = history.filter(ref => !invalidSessions.has(ref.sessionId))
         const refs = [...batch.evidence, ...validHistory]
-        const ranked = discoverCandidates(currentEvidence.map(e => e.message.content).join('\n'), heads.filter(head => head.grounds.evidence.every(ref => {
+        const reports = refs.map(lookup).filter(message => message?.role === 'user')
+        const query = (reports.length ? reports : currentEvidence.map(e => e.message)).map(message => message.content).join('\n')
+        const ranked = discoverCandidates(query, heads.filter(head => head.grounds.evidence.every(ref => {
           const message = lookup(ref)
           return message && safeText(message.content)
         }))).candidates.map(item => item.head).slice(0,5)
@@ -1062,7 +1067,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
             if (notes.length) notes.pop()
             else {
               const last = refs.at(-1)?.sessionId
-              if (last === batch.sessionId) throw error
+              if (refs.length === batch.evidence.length) throw error
               refs.splice(batch.evidence.length, refs.length, ...refs.slice(batch.evidence.length).filter(ref => ref.sessionId !== last))
             }
           }

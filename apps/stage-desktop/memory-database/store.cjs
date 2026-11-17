@@ -173,6 +173,8 @@ function createNoteV2Store(resolveWorker, report, authority) {
 
   return {
     ...connection,
+    configureMirror: config => request('configureMirror', [config]),
+    mirrorStatus: () => request('mirrorStatus', []),
     getEmbedding: id => request('getEmbedding', [id]),
     getEmbeddingHead: id => serial(() => eligibleHead(id, true)),
     listEmbeddingHeads(afterId = '') {

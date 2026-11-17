@@ -43,6 +43,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
   fs.mkdirSync(directory, { recursive: true })
   check(fs.realpathSync(directory) === directory, 'canonical-note-v2-directory-required')
   let workerEpoch = 0, recallVersion = randomUUID()
+  let mirrorConfig, mirrorEpoch = -1
   const store = createNoteV2Store(async () => {
     const root = fs.realpathSync(resources)
     const node = path.join(root, 'runtime', 'node.exe')
@@ -196,6 +197,10 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       }
       await privacy.recover(workerEpoch)
       privacy.assertReadable()
+      if (mirrorConfig && mirrorEpoch !== workerEpoch) {
+        await store.configureMirror(mirrorConfig).catch(() => report('mirror-config-failed', { code: 'mirror' }))
+        mirrorEpoch = workerEpoch
+      }
     } catch (error) {
       await store.close().catch(closeError => report('worker-close-failed', closeError))
       throw error
@@ -660,6 +665,15 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
 
   return {
     privacy,
+    configureMirror: config => queue(async () => {
+      mirrorConfig = config
+      mirrorEpoch = -1
+      if (!config.enabled && store.status() !== 'ready') return { ...config, running: false, error: '' }
+      await ready()
+      return store.mirrorStatus()
+    }),
+    mirrorStatus: () => queue(() => store.status() === 'ready' ? store.mirrorStatus()
+      : { ...mirrorConfig, running: false, error: mirrorConfig?.enabled ? 'Memory database unavailable.' : '' }),
     syncEmbeddings,
     recover: () => queue(recover),
     organize: () => queue(organize),

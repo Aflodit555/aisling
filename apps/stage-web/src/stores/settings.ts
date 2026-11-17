@@ -178,9 +178,17 @@ export const useSettingsStore = defineStore('settings', () => {
     config.value = next
   }
 
+  async function saveObsidianMirror(value: NonNullable<PlatformConfig['memory']['obsidianMirror']>) {
+    const next = { ...config.value, memory: { ...config.value.memory, obsidianMirror: { enabled: value.enabled, vault: value.vault.trim() } } }
+    await configStore.set(next)
+    config.value = next
+    return window.aislingDesktop?.obsidianMirror?.configure()
+  }
+
   return {
     activationRequested, moduleError, moduleBusy, saveAndEnable,
     saveEmbedding,
+    saveObsidianMirror,
     activeChatProvider,
     activeSpeechProvider,
     activeTools,

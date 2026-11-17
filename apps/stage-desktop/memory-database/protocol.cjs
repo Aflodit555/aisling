@@ -100,6 +100,8 @@ const noteV2Validators = {
 
 const runtimeValidators = {
   ...noteV2Validators,
+  configureMirror: [value => record(value, ['enabled', 'vault']) && typeof value.enabled === 'boolean' && typeof value.vault === 'string' && value.vault.length <= 4096],
+  mirrorStatus: [],
   applyNoteOperation: [validRuntimeOperation],
   applyRelationOperation: [validRelationOperation],
   getEmbedding: [uuid],

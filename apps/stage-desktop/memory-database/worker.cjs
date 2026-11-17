@@ -40,6 +40,29 @@ async function run() {
   const store = openLadybug(api, dbFile, schema, readOnly)
   let closed = false
   let highestId = 0
+  let pending = Promise.resolve()
+  const enqueue = work => {
+    const result = pending.then(work)
+    pending = result.catch(() => {})
+    return result
+  }
+  let stopMirror = async () => {}
+  let mirrorState = { enabled: false, vault: '', running: false, error: '' }
+  async function configureMirror(config) {
+    if (mirrorState.running && config.enabled && config.vault === mirrorState.vault) return mirrorState
+    await stopMirror()
+    mirrorState = { ...config, running: false, error: '' }
+    if (config.enabled) {
+      try {
+        const { validateVault, startObsidianMirror } = require('./obsidian-mirror.cjs')
+        await validateVault(config.vault)
+        mirrorState.running = true
+        stopMirror = startObsidianMirror(() => store.mirrorSnapshot(), enqueue, config.vault,
+          error => { mirrorState.error = error ? 'Obsidian sync failed.' : '' })
+      } catch { mirrorState.error = 'Invalid Obsidian vault.' }
+    }
+    return mirrorState
+  }
 
   try {
     await store.initialize()
@@ -63,18 +86,21 @@ async function run() {
         if (readOnly && mutates(operation)) throw new ProtocolError('read-only', 'Migration source is read-only')
         const start = performance.now()
         let result = null
-        if (operation === 'close') {
-          await store.close()
+        if (operation === 'configureMirror') result = await configureMirror(payload[0])
+        else if (operation === 'mirrorStatus') result = mirrorState
+        else if (operation === 'close') {
+          await stopMirror()
+          await enqueue(() => store.close())
           closed = true
         }
         else if (operation === 'transaction') {
           const [operations] = payload
-          await store.transaction(async () => {
+          await enqueue(() => store.transaction(async () => {
             for (const item of operations) await store[item.operation](...item.payload)
-          })
+          }))
         }
         else {
-          result = await store[operation](...payload) ?? null
+          result = await enqueue(() => store[operation](...payload)) ?? null
         }
         await send({ requestId, ok: true, result, workerMs: performance.now() - start })
         if (closed) return
@@ -86,6 +112,7 @@ async function run() {
   }
   finally {
     process.stdin.destroy()
+    await stopMirror()
     if (!closed) {
       try { await store.close() }
       catch (error) { console.error('cleanup:', error) }

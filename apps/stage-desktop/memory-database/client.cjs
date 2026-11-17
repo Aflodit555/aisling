@@ -6,7 +6,7 @@ const { setTimeout: delay } = require('node:timers/promises')
 const { VERSION, schemaForFile, MAX_PENDING, ProtocolError, lines, decode, encode, mutates } = require('./protocol.cjs')
 
 const localWorkerResources = resolve(__dirname, '../../../.local/memory-database')
-const resourceFiles = ['worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'package.json', 'package-lock.json']
+const resourceFiles = ['worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'obsidian-mirror.cjs', 'package.json', 'package-lock.json']
 
 function assertPreparedWorkerSource(resources) {
   const pins = [['libssl-3-x64.dll','e028a7f4fc1e4e197dfae99f7df5e14f57fb7e0282d03e903521fc99c0c76d89'],['libcrypto-3-x64.dll','3b65cfd779e238a2947a0aa8911cc67aaef866977af6a69b4d39e7d587ebf262']]

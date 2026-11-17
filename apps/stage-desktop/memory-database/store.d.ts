@@ -67,6 +67,8 @@ export interface NoteV2Authority {
 }
 
 export interface NoteV2Store extends Pick<MemoryDatabaseStore, 'open' | 'close' | 'status' | 'erasedNoteIds'> {
+  configureMirror(config: {enabled: boolean; vault: string}): Promise<{enabled: boolean; vault: string; running: boolean; error: string}>
+  mirrorStatus(): ReturnType<NoteV2Store['configureMirror']>
   getEmbedding(id: string): Promise<NoteEmbedding | null>
   getEmbeddingHead(id: string): Promise<Awaited<ReturnType<NoteV2Store['listRecallHeads']>>['notes'][number] | null>
   putEmbedding(value: Omit<NoteEmbedding,'createdAt'>): Promise<{noteId: string; noteVersion: number}>

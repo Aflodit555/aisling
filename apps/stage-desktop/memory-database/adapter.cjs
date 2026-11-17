@@ -31,6 +31,31 @@ function openLadybug(api, file, schema = 'p0', readOnly = false) {
   }
 
   const graph = {
+    async mirrorSnapshot() {
+      const notes = (await query(`MATCH (n:Note) RETURN n.${snapshot} AS data ORDER BY n.id`)).map(row => JSON.parse(row.data))
+      const revisions = new Map((await query('MATCH (r:NoteRevision) WHERE r.key IN $keys RETURN r.data AS data',
+        { keys: notes.map(n => JSON.stringify([n.id, n.version])) })).map(row => {
+        const revision = JSON.parse(row.data)
+        return [revision.noteId, revision.changedAt]
+      }))
+      const sources = await query('MATCH (n:Note)-[:HAS_EVIDENCE]->(e:Evidence) RETURN n.id AS id, e.sessionId AS sessionId, e.messageIndex AS messageIndex, e.digest AS digest')
+      const context = await query('MATCH (n:Note)-[:HAS_CONTEXT]->(e:Evidence) RETURN n.id AS id, e.sessionId AS sessionId, e.messageIndex AS messageIndex, e.digest AS digest')
+      const relations = (await query(`MATCH (a:Note)-[r:NOTE_LINK]->(b:Note)
+        RETURN a.id AS source, b.id AS target, r.key AS key, r.data AS data, r.status AS status, r.createdAt AS createdAt, r.endedAt AS endedAt`))
+        .map(({ data, ...row }) => ({ ...JSON.parse(data), ...row, createdAt: Number(row.createdAt), endedAt: row.endedAt === null ? null : Number(row.endedAt) }))
+      const group = rows => {
+        const grouped = new Map()
+        for (const { id, ...ref } of rows) {
+          if (!grouped.has(id)) grouped.set(id, [])
+          grouped.get(id).push({ ...ref, messageIndex: Number(ref.messageIndex) })
+        }
+        for (const refs of grouped.values()) refs.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+        return grouped
+      }
+      const evidence = group(sources), contexts = group(context)
+      return { notes: notes.map(note => ({ ...note, updatedAt: revisions.get(note.id),
+        sources: evidence.get(note.id) || [], contextEvidence: contexts.get(note.id) || [] })), relations }
+    },
     async initialize() {
       // Persisted vector indexes need their extension loaded before any UPDATE or erasure.
       if (runtime) try {

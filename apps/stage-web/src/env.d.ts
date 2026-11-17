@@ -10,6 +10,11 @@ interface MemoryMigrationStatus {
 interface Window {
   Live2DCubismCore?: unknown
   aislingDesktop?: {
+    obsidianMirror?: {
+      configure(): Promise<{running: boolean; error: string}>
+      status(): Promise<{running: boolean; error: string}>
+      open(): Promise<{error: string}>
+    }
     memoryMigration?: {
       status(): Promise<MemoryMigrationStatus>
       preflight(): Promise<{

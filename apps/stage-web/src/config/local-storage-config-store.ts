@@ -54,6 +54,10 @@ export function createLocalStorageConfigStore(storage: PersistentStorage = windo
             vision: { ...defaults.vision, ...parsed.vision, enabled: parsed.vision?.enabled ?? (parsed.vision?.providerType !== undefined && parsed.vision.providerType !== 'none') },
             webSearch,
             memory: { enabled: memoryEnabled, formationEnabled: memoryEnabled && parsed.memory?.formationEnabled === true,
+              ...(parsed.memory?.obsidianMirror && { obsidianMirror: {
+                enabled: parsed.memory.obsidianMirror.enabled === true,
+                vault: typeof parsed.memory.obsidianMirror.vault === 'string' ? parsed.memory.obsidianMirror.vault : '',
+              } }),
               ...(!noteOnly && { organizationEnabled: memoryEnabled && parsed.memory?.organizationEnabled === true }),
               ...(memoryEnabled && parsed.memory?.noteRecallEnabled === true ? { noteRecallEnabled: true } : {}),
               ...(parsed.memory?.embedding && { embedding: {

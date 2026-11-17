@@ -66,6 +66,7 @@ export interface PlatformConfig {
   webSearch: WebSearchConfig
   /** Memory controls recall; reflection formation requires a separate opt-in. */
   memory: { enabled: boolean; formationEnabled?: boolean; organizationEnabled?: boolean; noteRecallEnabled?: boolean;
+    obsidianMirror?: { enabled: boolean; vault: string };
     embedding?: { endpoint?: string; model?: string; credentialSource?: 'reuse' | 'dedicated'; apiKey?: string } }
 }
 

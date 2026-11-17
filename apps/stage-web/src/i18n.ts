@@ -17,6 +17,14 @@ export function setLanguage(next: Language): void {
 }
 
 export const zh: Record<string, string> = {
+  'Obsidian mirror': 'Obsidian 镜像',
+  'Obsidian vault path': 'Obsidian Vault 路径',
+  'Sync Obsidian': '同步 Obsidian',
+  'Open in Obsidian': '在 Obsidian 中打开',
+  'Invalid Obsidian vault.': 'Vault 路径无效，请填写已存在的绝对路径。',
+  'Obsidian sync failed.': '镜像同步失败，请检查目录写入权限。',
+  'Open this vault in Obsidian first.': '请先在 Obsidian 中打开此 Vault。',
+  'Could not open Obsidian. Check the vault and installation.': '无法打开 Obsidian，请检查安装和 Vault 路径。',
   'Save & Enable': '保存并启用',
   'Choose a provider.': '请先选择服务提供方',
   'Please enter an API key.': '请先填写 API Key',

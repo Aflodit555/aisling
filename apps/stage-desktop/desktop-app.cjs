@@ -1,4 +1,4 @@
-const { app, BaseWindow, WebContentsView, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, screen } = require('electron')
+const { app, BaseWindow, WebContentsView, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, screen, shell } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 const { randomUUID } = require('node:crypto')
@@ -660,6 +660,8 @@ async function startDesktop(options = {}) {
     configureMemoryLifecycle(noteFormation.privacy)
     options.noteV2?.onService?.(noteFormation)
     void noteFormation.recover().catch(error => console.error('[note-v2] recovery pending', error.code ?? error.name))
+    void noteFormation.configureMirror(require('./obsidian-control.cjs').mirrorConfig(readStoredConfig()))
+      .catch(() => console.error('[obsidian-mirror] configuration unavailable'))
   } else {
     assertMemoryAuthority(profile, false)
     const legacyResources = options.noteV2?.resources ?? (app.isPackaged ? resources : process.env.AISLING_MEMORY_DB_P0_RESOURCES || resources)
@@ -733,6 +735,21 @@ async function startDesktop(options = {}) {
       ipcMain.handle('aisling:note-review:list', event => {
         if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note review request')
         return noteFormation.reviews()
+      })
+      ipcMain.handle('aisling:obsidian:configure', async event => {
+        if (!trusted(event) || !noteFormation) throw new Error('Untrusted mirror request')
+        try { return await noteFormation.configureMirror(require('./obsidian-control.cjs').mirrorConfig(readStoredConfig())) }
+        catch { return { running: false, error: 'Memory database unavailable.' } }
+      })
+      ipcMain.handle('aisling:obsidian:status', event => {
+        if (!trusted(event) || !noteFormation) throw new Error('Untrusted mirror request')
+        return noteFormation.mirrorStatus()
+      })
+      ipcMain.handle('aisling:obsidian:open', event => {
+        if (!trusted(event)) throw new Error('Untrusted mirror request')
+        const vault = require('./obsidian-control.cjs').mirrorConfig(readStoredConfig()).vault
+        return require('./obsidian-control.cjs').openObsidian(vault, path.join(app.getPath('appData'), 'obsidian', 'obsidian.json'),
+          uri => shell.openExternal(uri))
       })
       let confirming = false
       ipcMain.handle('aisling:note-review:decide', async (event, key, approved) => {

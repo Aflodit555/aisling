@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('aislingDesktop', {
     exclude: (key, version) => ipcRenderer.invoke('aisling:memory-migration:exclude', key, version),
   } } : {}),
   ...(noteV2 ? {
+    obsidianMirror: {
+      configure: () => ipcRenderer.invoke('aisling:obsidian:configure'),
+      status: () => ipcRenderer.invoke('aisling:obsidian:status'),
+      open: () => ipcRenderer.invoke('aisling:obsidian:open'),
+    },
     noteRecall: {
       snapshot: () => ipcRenderer.invoke('aisling:note-recall:snapshot'),
       current: version => ipcRenderer.invoke('aisling:note-recall:current', version),

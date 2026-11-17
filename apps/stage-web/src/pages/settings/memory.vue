@@ -4,11 +4,13 @@ import { t } from '../../i18n'
 import ModuleToggle from '../../components/settings/ModuleToggle.vue'
 import MemoryMigration from '../../components/settings/MemoryMigration.vue'
 import EmbeddingForm from '../../components/settings/EmbeddingForm.vue'
+import ObsidianMirror from '../../components/settings/ObsidianMirror.vue'
 import LegacyMemoryControls from '../../components/settings/LegacyMemoryControls.vue'
 import { useSettingsStore } from '../../stores/settings'
 
 const settings = useSettingsStore()
 const bridge = window.aislingDesktop?.noteReview
+const mirror = window.aislingDesktop?.obsidianMirror
 const legacy = !!window.aislingDesktop?.memoryOrganization
 const migration = window.aislingDesktop?.memoryMigration
 const migrationFrozen = ref(false)
@@ -76,6 +78,7 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
     <h2 class="page-title">{{ t('Memory') }}</h2>
     <p class="page-sub">{{ t('Memory includes relevant excerpts from earlier conversations.') }}</p>
     <ModuleToggle label="Memory" :enabled="memory.enabled" @change="settings.setMemoryEnabled($event)" />
+    <ObsidianMirror v-if="mirror" />
     <MemoryMigration v-if="migration" :bridge="migration" @frozen="migrationFrozen = $event" />
     <p v-else-if="legacy" class="memory-state" role="status">{{ t('This profile uses the previous memory format.') }}</p>
     <LegacyMemoryControls v-if="legacy && !migrationFrozen" />

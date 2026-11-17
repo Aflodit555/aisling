@@ -33,11 +33,11 @@ test('default development Worker resources must match the checked-out Worker sou
   const checkout = folder()
   const source = join(checkout, 'apps', 'stage-desktop', 'memory-database')
   mkdirSync(source, { recursive: true })
-  for (const file of ['client.cjs', 'worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'package.json', 'package-lock.json'])
+  for (const file of ['client.cjs', 'worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'obsidian-mirror.cjs', 'package.json', 'package-lock.json'])
     copyFileSync(join(__dirname, 'memory-database', file), join(source, file))
   const { startWorker: launch, localWorkerResources: prepared } = require(join(source, 'client.cjs'))
   mkdirSync(prepared, { recursive: true })
-  for (const file of ['worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'package.json', 'package-lock.json'])
+  for (const file of ['worker.cjs', 'adapter.cjs', 'protocol.cjs', 'note-v1.cjs', 'erasure.cjs', 'obsidian-mirror.cjs', 'package.json', 'package-lock.json'])
     copyFileSync(join(source, file), join(prepared, file))
   assert.doesNotThrow(() => assertPreparedWorkerSource(prepared))
   const config = { node: join(prepared, 'runtime', 'node.exe'), entry: join(prepared, 'worker.cjs'), file: join(checkout, 'note-v2.lbdb') }

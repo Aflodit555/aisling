@@ -11,7 +11,7 @@ const settings = useSettingsStore()
     <h2 class="page-title">{{ t('Speech') }}</h2>
     <p class="page-sub">{{ t('Choose Aisling’s voice.') }}</p>
     <h3 class="module-section-title">{{ t('Voice output') }}</h3>
-    <ModuleToggle label="Enable voice output" :enabled="settings.config.speech.enabled" :unavailable="settings.speechReady ? undefined : settings.config.speech.providerType === 'browser' ? 'System speech is unavailable here.' : 'Save a working provider configuration before enabling.'" @change="settings.setModuleEnabled('speech', $event)" />
+    <ModuleToggle label="Enable voice output" :enabled="settings.config.speech.enabled" :disabled="settings.moduleBusy.speech" :status="settings.moduleError.speech" @change="settings.setModuleEnabled('speech', $event)" />
 
     <SpeechForm />
   </div>

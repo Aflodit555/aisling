@@ -28,8 +28,8 @@ const title = computed(() => {
 .app-header { display: flex; align-items: center; flex: none; height: 56px; padding: 0 1.5rem }
 /* Whole-pixel line box: a fractional baseline gets re-snapped when the page fades and the title jumps. */
 h1 { font-size: 1.5rem; font-weight: 700; line-height: 24px }
-nav { display: flex; gap: .25rem; margin-left: auto }
-nav a { display: flex; align-items: center; padding: .5rem 1rem; border-radius: 6px; font-weight: 500; color: var(--muted); transition: background .15s, color .15s, transform .1s }
+nav { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: .25rem; margin-left: auto }
+nav a { display: flex; align-items: center; justify-content: center; padding: .5rem calc(1rem - 1px); border-radius: 6px; font-weight: 500; color: var(--muted); transition: background .15s, color .15s, transform .1s }
 nav a:hover { color: var(--fg); background: var(--hover) }
 nav a:active { transform: scale(.97) }
 nav a.router-link-active { color: var(--fg); background: var(--tonal) }

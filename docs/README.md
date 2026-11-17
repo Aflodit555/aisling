@@ -10,6 +10,7 @@
 - [开发与运行时一致性](memory-development-runtime-alignment.md)：Vite / 构建版 Profile、Worker 准备和安全刷新。
 - [Desktop host](desktop-host.md)、[诊断](desktop-diagnostics.md)：Windows 宿主与资料生命周期。
 - [Context 与持久化](context-phase-one.md)、[模型思考策略](consciousness-thinking.md)。
+- [Settings UI 修缮验证](settings-ui-validation-2026-11-13.md)：40px 公共配置行、首次配置启用与失败状态验证。
 - [本轮仓库审计与产品化整理](repository-audit-2026-11-12.md)：Git 积压、实际整理、当前回归及发布阻碍。
 
 ## 保留的实现与研究记录

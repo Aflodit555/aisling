@@ -3,6 +3,7 @@ const path = require('node:path')
 const fs = require('node:fs')
 const { randomUUID } = require('node:crypto')
 const ICON_PATH = path.join(__dirname, 'assets', 'desktop-mode.png')
+const WINDOWS_ICON_PATH = path.join(__dirname, 'assets', 'desktop-mode.ico')
 const { createDesktopObserver } = require('./desktop-activity.cjs')
 const { createTypeSafeJudge, normalizeConversation, candidateForSnapshot, recentReplyForSnapshot } = require('./desktop-judge.cjs')
 const {
@@ -485,10 +486,12 @@ async function createWindow(options = {}) {
     minHeight: 560,
     center: true,
     title: `Aisling v${app.getVersion()}`,
-    icon: ICON_PATH,
+    icon: process.platform === 'win32' ? WINDOWS_ICON_PATH : ICON_PATH,
     backgroundColor: stageBackground(),
   })
   const window = mainWindow
+  if (process.platform === 'win32')
+    window.setAppDetails({ appId: 'com.aisling.desktop', appIconPath: WINDOWS_ICON_PATH })
   stageView = new WebContentsView({ webPreferences: {
     preload: preloadPath, contextIsolation: true, nodeIntegration: false,
     sandbox: true, backgroundThrottling: false,

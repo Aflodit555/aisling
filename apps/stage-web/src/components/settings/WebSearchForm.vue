@@ -1,25 +1,28 @@
 <script setup lang="ts">
 import { t } from '../../i18n'
 import { useSettingsStore } from '../../stores/settings'
+import { computed, ref, watch } from 'vue'
+import SettingsSelect from './SettingsSelect.vue'
+import { useSaveFlash } from '../../composables/use-save-flash'
 
 const settings = useSettingsStore()
 
-function selectProvider(): void {
-  void settings.saveWebSearch({ providerType: 'duckduckgo' })
+const provider = ref(settings.config.webSearch.providerType)
+const { saved, flashSaved } = useSaveFlash()
+watch(() => settings.config.webSearch.providerType, next => { provider.value = next })
+const dirty = computed(() => provider.value !== settings.config.webSearch.providerType)
+async function save() {
+  if (await settings.saveWebSearch({ providerType: provider.value }, settings.saveAndEnable.webSearch || settings.config.webSearch.enabled)) flashSaved()
 }
 </script>
 
 <template>
-  <div class="form">
+  <form class="form" @submit.prevent="save">
     <div class="field">
       <span class="label">{{ t('Provider') }}</span>
-      <button v-if="settings.config.webSearch.providerType === 'none'" type="button" class="btn provider-choice" @click="selectProvider">{{ t('Use DuckDuckGo Lite') }}</button>
-      <span v-else>DuckDuckGo Lite</span>
-      <span class="hint">{{ t('No API key required.') }}</span>
+      <SettingsSelect :model-value="provider" :options="[{ value: 'duckduckgo', label: 'DuckDuckGo Lite' }]" :label="t('Provider')" :placeholder="t('Select provider')" @update:model-value="provider = 'duckduckgo'" />
     </div>
-  </div>
+    <div class="actions"><button type="submit" class="btn primary" :disabled="settings.moduleBusy.webSearch || (!dirty && !settings.saveAndEnable.webSearch)">{{ t(settings.saveAndEnable.webSearch ? 'Save & Enable' : 'Save') }}</button></div>
+    <p v-if="saved" class="status saved">{{ t('Saved.') }}</p>
+  </form>
 </template>
-
-<style scoped>
-.provider-choice { justify-self: start }
-</style>

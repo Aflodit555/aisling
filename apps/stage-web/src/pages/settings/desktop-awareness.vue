@@ -6,13 +6,25 @@ import { useSettingsStore } from '../../stores/settings'
 import { useStageStore } from '../../stores/stage'
 const settings = useSettingsStore()
 const stage = useStageStore()
+async function toggle(enabled: boolean) {
+  settings.activationRequested.desktopAwareness = enabled
+  settings.moduleError.desktopAwareness = ''
+  settings.moduleBusy.desktopAwareness = true
+  try {
+    await stage.setDesktopAwarenessEnabled(enabled)
+    if (stage.autonomous.enabled === enabled) settings.activationRequested.desktopAwareness = false
+    else settings.moduleError.desktopAwareness = stage.autonomous.error || 'Could not start module.'
+  } catch (error) {
+    settings.moduleError.desktopAwareness = error instanceof Error && error.message === 'Could not save settings.' ? error.message : 'Could not start module.'
+  } finally { settings.moduleBusy.desktopAwareness = false }
+}
 </script>
 
 <template>
   <div class="settings-module">
     <h2 class="page-title">{{ t('Desktop Awareness') }}</h2>
     <p class="page-sub">{{ t('Observe desktop activity and react when appropriate.') }}</p>
-    <ModuleToggle label="Enable desktop awareness" :enabled="settings.config.desktopAwareness.enabled && stage.autonomous.enabled" :unavailable="!stage.desktopAvailable ? 'Desktop Awareness is available in the Electron app only.' : !settings.config.desktopAwareness.jevApiKey.trim() ? 'Configure the API key before enabling.' : !settings.activeChatProvider ? 'Configure Consciousness before enabling.' : undefined" :status="stage.desktopBridgeState === 'connected' ? 'Desktop bridge connected.' : undefined" @change="stage.setDesktopAwarenessEnabled($event)" />
+    <ModuleToggle label="Enable desktop awareness" :enabled="stage.autonomous.enabled" :disabled="settings.moduleBusy.desktopAwareness" :status="settings.moduleError.desktopAwareness" @change="toggle" />
     <DesktopAwarenessForm />
   </div>
 </template>

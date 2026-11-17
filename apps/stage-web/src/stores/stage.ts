@@ -244,6 +244,12 @@ export const useStageStore = defineStore('stage', () => {
     enabled => situation.setEnabled(enabled), { flush: 'sync', immediate: true })
   watch(() => settings.activeChatProvider, () => situation.reset('provider-changed'), { flush: 'sync' })
 
+  function desktopAwarenessIssue(key = settings.config.desktopAwareness.jevApiKey): string {
+    if (!desktopAvailable.value) return 'Desktop Awareness is available in the Electron app only.'
+    if (!key.trim()) return 'Configure the API key before enabling.'
+    return settings.activeChatProvider ? '' : 'Configure Consciousness before enabling.'
+  }
+
   async function setDesktopAwarenessEnabled(enabled: boolean, persist = true): Promise<void> {
     const ticket = ++awarenessRevision
     if (!enabled || !refreshDesktopBridgeStatus())
@@ -254,12 +260,12 @@ export const useStageStore = defineStore('stage', () => {
       autonomous.error = 'Desktop Awareness is available in the Electron app only.'
       return
     }
-    if (enabled && (!settings.config.desktopAwareness.jevApiKey.trim() || !settings.activeChatProvider)) {
+    if (enabled && desktopAwarenessIssue()) {
       autonomousController.setEnabled(false)
       await window.aislingDesktop!.setDesktopAwareness(false)
       if (persist || settings.config.desktopAwareness.enabled)
         await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled: false })
-      autonomous.error = !settings.config.desktopAwareness.jevApiKey.trim() ? 'Configure the API key before enabling.' : 'Configure Consciousness before enabling.'
+      autonomous.error = desktopAwarenessIssue()
       return
     }
     // Start/stop IPC is issued before persistence so OFF cancels collection and
@@ -268,8 +274,14 @@ export const useStageStore = defineStore('stage', () => {
     if (ticket !== awarenessRevision)
       return
     autonomousController.setEnabled(status.enabled)
-    if (persist)
-      await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled: status.enabled })
+    if (persist) {
+      try { await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, enabled: status.enabled }) }
+      catch {
+        autonomousController.setEnabled(false)
+        await window.aislingDesktop!.setDesktopAwareness(false)
+        throw new Error('Could not save settings.')
+      }
+    }
     autonomous.error = status.error ?? ''
   }
 
@@ -584,6 +596,7 @@ export const useStageStore = defineStore('stage', () => {
     desktopBridgeState,
     desktopAvailable,
     refreshDesktopBridgeStatus,
+    desktopAwarenessIssue,
     tickAutonomous: autonomousController.tick,
     noteHumanInteraction: autonomousController.noteHumanInteraction,
     restoreDesktopAwareness: () => setDesktopAwarenessEnabled(settings.config.desktopAwareness.enabled, false),

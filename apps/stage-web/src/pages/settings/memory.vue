@@ -80,21 +80,22 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
     <p v-else-if="legacy" class="memory-state" role="status">{{ t('This profile uses the previous memory format.') }}</p>
     <LegacyMemoryControls v-if="legacy && !migrationFrozen" />
     <template v-if="memory.enabled">
-      <EmbeddingForm v-if="bridge" :configured="state?.embeddingConfigured" />
       <template v-if="bridge">
         <p v-if="!state?.ready" class="memory-state" role="status">{{ t(database) }}</p>
         <ModuleToggle label="Formation" :enabled="memory.formationEnabled === true"
           :disabled="!state?.ready && memory.formationEnabled !== true"
           :unavailable="state?.ready && !settings.activeChatProvider ? 'Configure the LLM first.' : ''"
-          :status="!state?.ready ? '' : state.forming ? 'Running' : state.failed ? 'Processing failed'
-            : 'Organizes memories automatically; up to 8 background model checks per hour.'"
+          :status="!state?.ready ? '' : state.forming ? 'Running' : state.failed ? 'Processing failed' : ''"
           @change="settings.setMemoryFormationEnabled($event)" />
         <ModuleToggle label="Recall" :enabled="memory.noteRecallEnabled === true"
           :disabled="!state?.ready && memory.noteRecallEnabled !== true"
-          status="Uses approved memories when relevant." @change="settings.setNoteRecallEnabled($event)" />
+          @change="settings.setNoteRecallEnabled($event)" />
+
+        <EmbeddingForm />
 
         <section class="review" aria-labelledby="review-title">
           <h3 id="review-title" class="module-section-title">{{ t('Review proposals') }}<span v-if="state"> ({{ state.pending }})</span></h3>
+          <p class="memory-state">{{ t('Only memory changes that need your approval appear here.') }}</p>
           <p v-if="feedback" role="status">{{ t(feedback) }}</p>
           <p v-if="state?.pending === 0" class="memory-state">{{ t('No proposals to review.') }}</p>
           <article v-for="item in state?.items" :key="item.key">
@@ -109,8 +110,8 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
             </details>
             <p v-if="!item.approvable" class="memory-state">{{ t('This proposal cannot be approved because its identity or evidence could not be verified.') }}</p>
             <div class="review-actions">
-              <button type="button" :disabled="busy" @click="decide(item.key, false)">{{ t('Reject') }}</button>
-              <button v-if="item.approvable" type="button" :disabled="busy" @click="decide(item.key, true)">{{ t('Approve') }}</button>
+              <button type="button" class="btn" :disabled="busy" @click="decide(item.key, false)">{{ t('Reject') }}</button>
+              <button v-if="item.approvable" type="button" class="btn primary" :disabled="busy" @click="decide(item.key, true)">{{ t('Approve') }}</button>
             </div>
           </article>
         </section>

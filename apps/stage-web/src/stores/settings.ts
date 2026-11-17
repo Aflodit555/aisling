@@ -10,10 +10,9 @@ import {
   type VisionConfig,
   type VisionProvider,
   type WebSearchConfig,
-  validateAlibabaTtsEndpoint,
 } from '@aisling/core'
 import { defineStore } from 'pinia'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, reactive, ref, shallowRef } from 'vue'
 
 import { createLocalStorageConfigStore } from '../config/local-storage-config-store'
 import { resolvePersistentStorage } from '../storage/desktop-storage'
@@ -22,6 +21,8 @@ import {
   buildSpeechProvider,
   buildVisionProvider,
   buildWebSearchTool,
+  speechConfigurationIssue,
+  visionConfigurationIssue,
 } from '../runtime/provider-factory'
 
 export const useSettingsStore = defineStore('settings', () => {
@@ -37,23 +38,38 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const activeTools = computed(() => (activeWebSearchTool.value ? [activeWebSearchTool.value] : []))
 
-  const speechReady = computed(() => (config.value.speech.providerType === 'browser' && typeof window !== 'undefined' && Boolean(window.speechSynthesis))
-    || (config.value.speech.providerType === 'alibaba' && Boolean(config.value.speech.apiKey.trim() && config.value.speech.model.trim() && config.value.speech.voice.trim()) && !validateAlibabaTtsEndpoint(config.value.speech.endpoint, config.value.speech.transport)))
-  const visionReady = computed(() => config.value.vision.providerType === 'openai-compatible'
-    && Boolean(config.value.vision.baseUrl.trim() && config.value.vision.apiKey.trim() && config.value.vision.model.trim()))
+  const speechReady = computed(() => !speechConfigurationIssue(config.value.speech))
+  const visionReady = computed(() => !visionConfigurationIssue(config.value.vision))
   const webSearchReady = computed(() => config.value.webSearch.providerType === 'duckduckgo')
+  type Module = 'speech' | 'vision' | 'webSearch'
+  const activationRequested = reactive({ speech: false, vision: false, webSearch: false, desktopAwareness: false })
+  const moduleError = reactive({ speech: '', vision: '', webSearch: '', desktopAwareness: '' })
+  const moduleBusy = reactive({ speech: false, vision: false, webSearch: false, desktopAwareness: false })
+  const saveAndEnable = computed(() => ({
+    speech: activationRequested.speech || (!config.value.speech.enabled && !speechReady.value),
+    vision: activationRequested.vision || (!config.value.vision.enabled && !visionReady.value),
+    webSearch: activationRequested.webSearch || (!config.value.webSearch.enabled && !webSearchReady.value),
+  }))
 
 
-  function applyConfig(next: PlatformConfig): void {
+  async function applyConfig(next: PlatformConfig, save = false): Promise<void> {
+    let chat, speech, vision, search
+    try {
+      chat = loaded.value && next.consciousness === config.value.consciousness ? activeChatProvider.value : buildChatProvider(next.consciousness)
+      speech = loaded.value && next.speech === config.value.speech ? activeSpeechProvider.value : buildSpeechProvider(next.speech)
+      vision = loaded.value && next.vision === config.value.vision ? activeVisionProvider.value : buildVisionProvider(next.vision)
+      search = loaded.value && next.webSearch === config.value.webSearch ? activeWebSearchTool.value : buildWebSearchTool(next.webSearch)
+    } catch { throw new Error('Could not start module.') }
+    if (save) await configStore.set(next)
     config.value = next
-    activeChatProvider.value = buildChatProvider(next.consciousness)
-    activeSpeechProvider.value = buildSpeechProvider(next.speech)
-    activeVisionProvider.value = buildVisionProvider(next.vision)
-    activeWebSearchTool.value = buildWebSearchTool(next.webSearch)
+    activeChatProvider.value = chat
+    activeSpeechProvider.value = speech
+    activeVisionProvider.value = vision
+    activeWebSearchTool.value = search
   }
 
   async function load(): Promise<void> {
-    applyConfig(await configStore.get())
+    await applyConfig(await configStore.get())
     if ((config.value.speech.enabled && !speechReady.value)
       || (config.value.vision.enabled && !visionReady.value)
       || (config.value.webSearch.enabled && !webSearchReady.value)) {
@@ -61,7 +77,7 @@ export const useSettingsStore = defineStore('settings', () => {
       config.value.vision.enabled &&= visionReady.value
       config.value.webSearch.enabled &&= webSearchReady.value
       await persist()
-      applyConfig(config.value)
+      await applyConfig(config.value)
     }
     loaded.value = true
   }
@@ -71,14 +87,12 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function saveConsciousness(next: ConsciousnessConfig): Promise<void> {
-    config.value = { ...config.value, consciousness: next }
-    await persist()
-    applyConfig(config.value)
+    await applyConfig({ ...config.value, consciousness: next }, true)
   }
 
   async function saveDesktopAwareness(next: DesktopAwarenessConfig): Promise<void> {
     const current = config.value.desktopAwareness
-    config.value = { ...config.value, desktopAwareness: {
+    const updated = { ...config.value, desktopAwareness: {
       enabled: Boolean(next.enabled),
       cooldownSeconds: Number.isFinite(next.cooldownSeconds)
         ? Math.max(10, Math.min(300, Math.round(next.cooldownSeconds / 5) * 5))
@@ -87,35 +101,47 @@ export const useSettingsStore = defineStore('settings', () => {
       replyHistoryEnabled: next.replyHistoryEnabled === true,
       ...(next.situationEnabled === true ? { situationEnabled: true } : {}),
     } }
-    await persist()
+    try { await configStore.set(updated) }
+    catch { throw new Error('Could not save settings.') }
+    config.value = updated
   }
 
-  async function saveSpeech(next: Omit<SpeechConfig, 'enabled'>): Promise<void> {
-    config.value = { ...config.value, speech: { ...next, enabled: config.value.speech.enabled } }
-    if (!speechReady.value) config.value.speech.enabled = false
-    await persist()
-    applyConfig(config.value)
+  function configurationIssue(module: Module, next = config.value): string {
+    return module === 'speech' ? speechConfigurationIssue(next.speech) : module === 'vision'
+      ? visionConfigurationIssue(next.vision) : next.webSearch.providerType === 'duckduckgo' ? '' : 'Choose a provider.'
   }
 
-  async function saveVision(next: Omit<VisionConfig, 'enabled'>): Promise<void> {
-    config.value = { ...config.value, vision: { ...next, enabled: config.value.vision.enabled } }
-    if (!visionReady.value) config.value.vision.enabled = false
-    await persist()
-    applyConfig(config.value)
+  async function saveModule(module: Module, next: PlatformConfig): Promise<boolean> {
+    if (moduleBusy[module]) return false
+    const issue = configurationIssue(module, next)
+    if (next[module].enabled && issue) { moduleError[module] = issue; return false }
+    moduleBusy[module] = true
+    moduleError[module] = ''
+    try {
+      await applyConfig(next, true)
+      activationRequested[module] = false
+      return true
+    } catch (error) {
+      moduleError[module] = error instanceof Error && error.message === 'Could not start module.' ? error.message : 'Could not save settings.'
+      return false
+    } finally { moduleBusy[module] = false }
   }
 
-  async function saveWebSearch(next: Omit<WebSearchConfig, 'enabled'>): Promise<void> {
-    config.value = { ...config.value, webSearch: { ...next, enabled: config.value.webSearch.enabled } }
-    if (!webSearchReady.value) config.value.webSearch.enabled = false
-    await persist()
-    applyConfig(config.value)
+  function saveSpeech(next: Omit<SpeechConfig, 'enabled'>, enabled = config.value.speech.enabled): Promise<boolean> {
+    return saveModule('speech', { ...config.value, speech: { ...next, enabled } })
   }
 
-  async function setModuleEnabled(module: 'speech' | 'vision' | 'webSearch', enabled: boolean): Promise<void> {
-    if (enabled && !(module === 'speech' ? speechReady.value : module === 'vision' ? visionReady.value : webSearchReady.value)) return
-    config.value = { ...config.value, [module]: { ...config.value[module], enabled } }
-    await persist()
-    applyConfig(config.value)
+  function saveVision(next: Omit<VisionConfig, 'enabled'>, enabled = config.value.vision.enabled): Promise<boolean> {
+    return saveModule('vision', { ...config.value, vision: { ...next, enabled } })
+  }
+
+  function saveWebSearch(next: Omit<WebSearchConfig, 'enabled'>, enabled = config.value.webSearch.enabled): Promise<boolean> {
+    return saveModule('webSearch', { ...config.value, webSearch: { ...next, enabled } })
+  }
+
+  async function setModuleEnabled(module: Module, enabled: boolean): Promise<boolean> {
+    activationRequested[module] = enabled
+    return saveModule(module, { ...config.value, [module]: { ...config.value[module], enabled } })
   }
 
   async function setMemoryEnabled(enabled: boolean): Promise<void> {
@@ -147,11 +173,13 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function saveEmbedding(embedding: NonNullable<PlatformConfig['memory']['embedding']>): Promise<void> {
-    config.value = {...config.value,memory:{...config.value.memory,embedding}}
-    await persist()
+    const next = {...config.value,memory:{...config.value.memory,embedding}}
+    await configStore.set(next)
+    config.value = next
   }
 
   return {
+    activationRequested, moduleError, moduleBusy, saveAndEnable,
     saveEmbedding,
     activeChatProvider,
     activeSpeechProvider,

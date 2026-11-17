@@ -40,3 +40,13 @@ it('uses the desktop storage bridge for Electron', async () => {
   expect(values.get(LANGUAGE_KEY)).toBe('zh-CN')
   expect(setDesktopLanguage).toHaveBeenCalledWith('zh-CN')
 })
+
+it('keeps the current language if saving the new choice fails', async () => {
+  const html = { lang: 'en' }
+  vi.stubGlobal('window', { localStorage: { getItem: () => null, setItem: () => { throw new Error('synthetic storage failure') } } })
+  vi.stubGlobal('document', { documentElement: html })
+  const { setLanguage, language } = await import('./i18n')
+  expect(() => setLanguage('zh-CN')).toThrow('synthetic storage failure')
+  expect(language.value).toBe('en')
+  expect(html.lang).toBe('en')
+})

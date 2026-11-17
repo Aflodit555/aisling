@@ -64,6 +64,30 @@ describe('Stage desktop awareness integration', () => {
     vi.mocked(window.aislingDesktop!.judgeDesktopContext).mockResolvedValue({ context: snapshot, scores: { shouldInterrupt: 0.9 } })
   }
 
+  it('rolls native activation back if saving its enabled state fails', async () => {
+    const { settings, stage } = await prepareStage()
+    await stage.setDesktopAwarenessEnabled(false)
+    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new Error('synthetic storage failure') })
+    await expect(stage.setDesktopAwarenessEnabled(true)).rejects.toThrow('Could not save settings.')
+    expect(stage.autonomous.enabled).toBe(false)
+    expect(settings.config.desktopAwareness.enabled).toBe(false)
+    expect(window.aislingDesktop!.setDesktopAwareness).toHaveBeenLastCalledWith(false)
+  })
+
+  it('reports native refusal as off and saves edits without restarting a running observer', async () => {
+    const { settings, stage } = await prepareStage()
+    const calls = vi.mocked(window.aislingDesktop!.setDesktopAwareness).mock.calls.length
+    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, cooldownSeconds: 60 })
+    expect(window.aislingDesktop!.setDesktopAwareness).toHaveBeenCalledTimes(calls)
+    expect(stage.autonomous.enabled).toBe(true)
+    await stage.setDesktopAwarenessEnabled(false)
+    vi.mocked(window.aislingDesktop!.setDesktopAwareness).mockResolvedValueOnce({ enabled: false, available: false, error: 'Could not start module.' })
+    await stage.setDesktopAwarenessEnabled(true)
+    expect(stage.autonomous.enabled).toBe(false)
+    expect(settings.config.desktopAwareness.enabled).toBe(false)
+    expect(stage.autonomous.error).toBe('Could not start module.')
+  })
+
   it('commits speech and compact basis only after delivery, then supplies both to a user follow-up', async () => {
     const records: DesktopDiagnosticRecord[] = []
     window.aislingDesktop!.desktopDiagnostics = { enabled: true, replyText: false }

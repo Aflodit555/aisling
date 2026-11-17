@@ -9,6 +9,8 @@ import { useStageStore } from '../../stores/stage'
 const settings = useSettingsStore()
 const stage = useStageStore()
 const { saved, flashSaved } = useSaveFlash()
+const enableOnSave = computed(() => settings.activationRequested.desktopAwareness
+  || (!settings.config.desktopAwareness.enabled && !settings.config.desktopAwareness.jevApiKey.trim()))
 
 const key = ref(settings.config.desktopAwareness.jevApiKey)
 const cooldown = ref(settings.config.desktopAwareness.cooldownSeconds)
@@ -27,11 +29,26 @@ watch(() => settings.config.desktopAwareness.cooldownSeconds, (next) => {
 })
 
 async function save(): Promise<void> {
-  await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: key.value.trim(), cooldownSeconds: cooldown.value,
-    replyHistoryEnabled: replyHistory.value, situationEnabled: situationEnabled.value })
-  if (!key.value.trim() && stage.autonomous.enabled)
-    await stage.setDesktopAwarenessEnabled(false)
-  flashSaved()
+  const enable = enableOnSave.value
+  const issue = enable || stage.autonomous.enabled ? stage.desktopAwarenessIssue(key.value) : ''
+  settings.moduleError.desktopAwareness = issue
+  if (issue) return
+  settings.activationRequested.desktopAwareness = enable
+  settings.moduleBusy.desktopAwareness = true
+  let starting = false
+  try {
+    await settings.saveDesktopAwareness({ ...settings.config.desktopAwareness, jevApiKey: key.value.trim(), cooldownSeconds: cooldown.value,
+      replyHistoryEnabled: replyHistory.value, situationEnabled: situationEnabled.value })
+    if (enable) {
+      starting = true
+      await stage.setDesktopAwarenessEnabled(true)
+      if (!stage.autonomous.enabled) { settings.moduleError.desktopAwareness = stage.autonomous.error || 'Could not start module.'; return }
+      settings.activationRequested.desktopAwareness = false
+    }
+    flashSaved()
+  } catch (error) {
+    settings.moduleError.desktopAwareness = starting && !(error instanceof Error && error.message === 'Could not save settings.') ? 'Could not start module.' : 'Could not save settings.'
+  } finally { settings.moduleBusy.desktopAwareness = false }
 }
 
 </script>
@@ -41,33 +58,28 @@ async function save(): Promise<void> {
     <label class="field long-label" style="--i: 0">
       <span class="label">{{ t('TypeSafe / Jev API Key') }}</span>
       <input v-model="key" type="password" placeholder="sk-…" autocomplete="off" />
-      <span class="hint">{{ t('Stored locally. Never committed to git.') }}</span>
     </label>
 
     <details class="advanced-settings">
       <summary>{{ t('Advanced settings') }}</summary>
       <div class="advanced-fields">
-        <p class="hint continuity-hint">{{ t('Response targets are locally deduplicated even when reply context is off. A real content or track change can open a new opportunity.') }}</p>
         <label class="field long-label">
           <span class="label">{{ t('Include recent reply in Jev judgment') }}</span>
           <input v-model="replyHistory" type="checkbox" :aria-label="t('Include recent reply in Jev judgment')" />
-          <span class="hint">{{ t('Lets Jev refer to a recent successful reply to this candidate target (up to 240 characters, with basic credential redaction). Off by default; turning off clears summaries. Normal chat is never included.') }}</span>
         </label>
         <label class="field long-label">
           <span class="label">{{ t('Short-term understanding (preview)') }}</span>
           <input v-model="situationEnabled" type="checkbox" :aria-label="t('Short-term understanding (preview)')" />
-          <span class="hint">{{ t('Off by default. With Desktop Awareness on, sends foreground text and explicit corrections to your Chat model. Replies never wait; turning off clears understanding. Preview usage is limited.') }}</span>
         </label>
         <label class="field long-label" style="--i: 1">
           <span class="label">{{ t('Autonomous reply interval') }}: {{ cooldown }} s</span>
           <input v-model.number="cooldown" type="range" min="10" max="300" step="5" :aria-label="t('Desktop Awareness cooldown')" />
-          <span class="hint">{{ t('Minimum interval between autonomous replies, including across windows. Does not delay replies to your messages.') }}</span>
         </label>
       </div>
     </details>
 
     <div class="actions">
-      <button type="submit" class="btn primary" :disabled="!dirty">{{ t('Save') }}</button>
+      <button type="submit" class="btn primary" :disabled="settings.moduleBusy.desktopAwareness || (!dirty && !enableOnSave)">{{ t(enableOnSave ? 'Save & Enable' : 'Save') }}</button>
     </div>
 
     <p v-if="saved" class="status saved">{{ t('Saved.') }}</p>
@@ -76,9 +88,6 @@ async function save(): Promise<void> {
 
 <style scoped>
 .status { overflow-wrap: anywhere }
-.continuity-hint { margin: .5rem 0 .75rem }
 input[type="range"] { width: 100%; margin: 0 }
-input[type="checkbox"] { width: auto; justify-self: start }
-/* A wrapped label spans the hint row too, so the hint stays tucked under its input. */
-.long-label > .label { grid-row: span 2; align-self: start; padding-top: calc(.4rem + 1px) }
+input[type="checkbox"] { width: auto }
 </style>

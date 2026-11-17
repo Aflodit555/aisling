@@ -5,6 +5,7 @@ import {
   createOpenAICompatibleVisionProvider,
   createDuckDuckGoLiteWebSearchProvider,
   createWebSearchTool,
+  validateAlibabaTtsEndpoint,
   type ChatProvider,
   type ConsciousnessConfig,
   type SpeechConfig,
@@ -74,14 +75,28 @@ export function situationEnableThinking(config: Pick<ConsciousnessConfig, 'provi
   return undefined
 }
 
+export function speechConfigurationIssue(config: SpeechConfig): string {
+  if (config.providerType === 'browser') return window.speechSynthesis ? '' : 'System speech is unavailable here.'
+  if (config.providerType !== 'alibaba') return 'Choose a provider.'
+  if (!config.apiKey.trim()) return 'Please enter an API key.'
+  if (!config.voice.trim()) return 'Please enter a voice.'
+  if (!config.model.trim()) return 'Please enter a model.'
+  return validateAlibabaTtsEndpoint(config.endpoint, config.transport) ? 'Check the endpoint.' : ''
+}
+
+export function visionConfigurationIssue(config: VisionConfig): string {
+  if (config.providerType !== 'openai-compatible') return 'Choose a provider.'
+  if (!config.apiKey.trim()) return 'Please enter an API key.'
+  if (!config.model.trim()) return 'Please enter a model.'
+  return config.baseUrl.trim() ? '' : 'Check the endpoint.'
+}
+
 export function buildSpeechProvider(config: SpeechConfig): SpeechProvider | undefined {
-  if (!config.enabled) return undefined
+  if (!config.enabled || speechConfigurationIssue(config)) return undefined
   if (config.providerType === 'browser')
     return createBrowserSpeechProvider({ voice: config.voice })
 
   if (config.providerType === 'alibaba') {
-    if (!config.apiKey.trim() || !config.model.trim() || !config.voice.trim())
-      return undefined
     return createAlibabaSpeechProvider({
       apiKey: config.apiKey,
       model: config.model,
@@ -95,11 +110,7 @@ export function buildSpeechProvider(config: SpeechConfig): SpeechProvider | unde
 }
 
 export function buildVisionProvider(config: VisionConfig): VisionProvider | undefined {
-  if (!config.enabled) return undefined
-  if (config.providerType !== 'openai-compatible')
-    return undefined
-  if (!config.baseUrl.trim() || !config.apiKey.trim() || !config.model.trim())
-    return undefined
+  if (!config.enabled || visionConfigurationIssue(config)) return undefined
   return createOpenAICompatibleVisionProvider({
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,

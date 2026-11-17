@@ -19,8 +19,7 @@ const dirty = computed(() => JSON.stringify(draft) !== JSON.stringify(manual(set
 
 const isOpenAI = computed(() => draft.providerType === 'openai-compatible')
 async function save(): Promise<void> {
-  await settings.saveVision({ ...draft })
-  flashSaved()
+  if (await settings.saveVision({ ...draft }, settings.saveAndEnable.vision || settings.config.vision.enabled)) flashSaved()
 }
 </script>
 
@@ -40,7 +39,6 @@ async function save(): Promise<void> {
       <label class="field" style="--i: 2">
         <span class="label">{{ t('API Key') }}</span>
         <input v-model="draft.apiKey" type="password" placeholder="sk-…" autocomplete="off" />
-        <span class="hint">{{ t('Stored locally. Never committed to git.') }}</span>
       </label>
 
       <label class="field" style="--i: 3">
@@ -50,7 +48,7 @@ async function save(): Promise<void> {
     </template>
 
     <div class="actions">
-      <button type="submit" class="btn primary" :disabled="!dirty">{{ t('Save') }}</button>
+      <button type="submit" class="btn primary" :disabled="settings.moduleBusy.vision || (!dirty && !settings.saveAndEnable.vision)">{{ t(settings.saveAndEnable.vision ? 'Save & Enable' : 'Save') }}</button>
     </div>
 
     <p v-if="saved" class="status saved">{{ t('Saved.') }}</p>

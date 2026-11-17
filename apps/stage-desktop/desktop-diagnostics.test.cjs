@@ -8,7 +8,7 @@ const judgeModule = require('./desktop-judge.cjs')
 // Exercise the real main/preload code with memory-only filesystem, Electron
 // and HTTP substitutes: no native capture, GUI, files or paid model requests.
 function fixture(enabled = false, replyText = false) {
-  const lines = [], handles = new Map(), listeners = new Map(), requests = []
+  const lines = [], handles = new Map(), listeners = new Map(), requests = [], appDetails = []
   let directories = 0, streams = 0, streamError
   const context = { capturedAt: 1000, targetHwnd: '123', sequence: 1,
     focus: { app: 'chrome', title: 'Private article', text: 'Private screen text' },
@@ -20,7 +20,7 @@ function fixture(enabled = false, replyText = false) {
     app: { whenReady: async () => {}, on: () => {}, getPath:()=>path.resolve('synthetic-user-data'), getVersion:()=>require('./package.json').version },
     Tray: class { setToolTip() {} on() {} },
     nativeImage: { createFromPath: () => image }, nativeTheme: { shouldUseDarkColors: false }, screen: { on: () => {} },
-    BaseWindow: class {},
+    BaseWindow: class { setAppDetails(details) { appDetails.push(details) } },
     WebContentsView: class {
       webContents = contents
       setBackgroundColor() { throw new Error('fixture stops before creating a real window') }
@@ -30,7 +30,7 @@ function fixture(enabled = false, replyText = false) {
   const module = { exports: {} }
   const env = { AISLING_DESKTOP_DIAGNOSTICS: enabled ? '1' : '0', AISLING_DESKTOP_DIAGNOSTICS_REPLY_TEXT: replyText ? '1' : '0' }
   vm.runInNewContext(readFileSync(path.join(__dirname, 'desktop-app.cjs'), 'utf8'), {
-    module, __dirname, process: { env }, URL, AbortController,
+    module, __dirname, process: { env, platform: 'win32' }, URL, AbortController,
     console: { log() {}, warn() {} },
     require: name => {
       if (name === 'electron') return electron
@@ -48,7 +48,7 @@ function fixture(enabled = false, replyText = false) {
       return require(name)
     },
   })
-  return { api: module.exports, lines, handles, listeners, requests, context,
+  return { api: module.exports, lines, handles, listeners, requests, context, appDetails,
     event: { sender: contents, senderFrame: mainFrame }, counters: () => ({ directories, streams }), failStream: () => streamError() }
 }
 
@@ -193,6 +193,8 @@ test('Reflection candidate selection is bounded metadata and never logs source I
 test('main distinguishes an actual Jev call, validates snapshot first, and keeps model input unchanged', async () => {
   const f = fixture(true)
   await assert.rejects(f.api.startDesktop({ stageUrl: 'http://localhost:5174' }), /fixture stops/)
+  assert.equal(f.appDetails[0].appId, 'com.aisling.desktop')
+  assert.equal(f.appDetails[0].appIconPath, path.join(__dirname, 'assets', 'desktop-mode.ico'))
   const handler = f.handles.get('aisling:desktop-awareness:judge')
   const request = { candidate: { id: 'candidate', objectId: 'object', source: 'foreground', change: 'appeared', target: f.context.focus, snapshot: { capturedAt: 1000, targetHwnd: '123', sequence: 1 } } }
   const diagnostic = { sampleId: '11111111-1111-4111-8111-111111111111', judgmentId: '22222222-2222-4222-8222-222222222222' }

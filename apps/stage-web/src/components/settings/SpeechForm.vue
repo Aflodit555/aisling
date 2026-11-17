@@ -5,7 +5,6 @@ import {
   DEFAULT_ALIBABA_TTS_MODEL,
   DEFAULT_ALIBABA_TTS_VOICE,
   DEFAULT_ALIBABA_TTS_WEBSOCKET_URL,
-  validateAlibabaTtsEndpoint,
   type SpeechConfig,
 } from '@aisling/core'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
@@ -27,7 +26,6 @@ const dirty = computed(() => JSON.stringify(draft) !== JSON.stringify(manual(set
 
 const isBrowser = computed(() => draft.providerType === 'browser')
 const isAlibaba = computed(() => draft.providerType === 'alibaba')
-const endpointError = computed(() => (isAlibaba.value ? validateAlibabaTtsEndpoint(draft.endpoint, draft.transport) : undefined))
 const endpointLabel = computed(() => draft.transport === 'websocket' ? 'Realtime WebSocket Endpoint' : 'HTTP API Base URL')
 const endpointPlaceholder = computed(() => draft.transport === 'websocket' ? DEFAULT_ALIBABA_TTS_WEBSOCKET_URL : DEFAULT_ALIBABA_TTS_BASE_URL)
 
@@ -66,10 +64,7 @@ function selectTransport(value: string): void {
 }
 
 async function save(): Promise<void> {
-  if (endpointError.value)
-    return
-  await settings.saveSpeech({ ...draft })
-  flashSaved()
+  if (await settings.saveSpeech({ ...draft }, settings.saveAndEnable.speech || settings.config.speech.enabled)) flashSaved()
 }
 </script>
 
@@ -95,7 +90,7 @@ async function save(): Promise<void> {
     </template>
 
     <details v-if="isAlibaba" class="advanced-settings">
-      <summary>{{ t('Advanced settings') }}<span v-if="endpointError" class="error"> · {{ t('Check the endpoint.') }}</span></summary>
+      <summary>{{ t('Advanced settings') }}</summary>
       <div class="advanced-fields">
       <div class="field" style="--i: 2">
         <span class="label">{{ t('Transport') }}</span>
@@ -105,15 +100,11 @@ async function save(): Promise<void> {
       <label class="field long-label" style="--i: 3">
         <span class="label">{{ t(endpointLabel) }}</span>
         <input v-model="draft.endpoint" type="text" :placeholder="endpointPlaceholder" />
-        <span v-if="draft.transport === 'websocket'" class="hint">{{ t('Example') }} <code>wss://‹workspace›.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference</code></span>
-        <span v-else class="hint">{{ t('Example') }} <code>https://‹workspace›.cn-beijing.maas.aliyuncs.com/api/v1</code></span>
-        <span v-if="endpointError" class="error">{{ t(endpointError) }}</span>
       </label>
 
       <label class="field" style="--i: 4">
         <span class="label">{{ t('API Key') }}</span>
         <input v-model="draft.apiKey" type="password" placeholder="sk-…" autocomplete="off" />
-        <span class="hint">{{ t('Stored locally. Never committed to git.') }}</span>
       </label>
 
       <label class="field" style="--i: 5">
@@ -124,7 +115,7 @@ async function save(): Promise<void> {
     </details>
 
     <div class="actions">
-      <button type="submit" class="btn primary" :disabled="!dirty || Boolean(endpointError)">{{ t('Save') }}</button>
+      <button type="submit" class="btn primary" :disabled="settings.moduleBusy.speech || (!dirty && !settings.saveAndEnable.speech)">{{ t(settings.saveAndEnable.speech ? 'Save & Enable' : 'Save') }}</button>
     </div>
 
     <p v-if="saved" class="status saved-state">{{ t('Saved.') }}</p>
@@ -132,9 +123,5 @@ async function save(): Promise<void> {
 </template>
 
 <style scoped>
-.hint, .error, .status { overflow-wrap: anywhere }
-.error { font-size: .85rem }
-code { font-family: var(--mono) }
-/* A wrapped label spans the hint row too, so the hint stays tucked under its input. */
-.long-label > .label { grid-row: span 2; align-self: start; padding-top: calc(.4rem + 1px) }
+.status { overflow-wrap: anywhere }
 </style>

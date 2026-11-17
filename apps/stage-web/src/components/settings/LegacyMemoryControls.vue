@@ -21,8 +21,8 @@ async function setFormation(enabled: boolean) {
   </p>
   <template v-if="memory.enabled">
     <ModuleToggle label="Formation" :enabled="memory.organizationEnabled || memory.formationEnabled === true"
-      :status="stage.formationStatus.running ? 'Running' : 'Uses your model in the background.'" @change="setFormation($event)" />
+      :status="stage.formationStatus.running ? 'Running' : ''" @change="setFormation($event)" />
     <ModuleToggle label="Recall" :enabled="memory.noteRecallEnabled === true"
-      status="Controls saved notes in this profile." @change="settings.setNoteRecallEnabled($event)" />
+      @change="settings.setNoteRecallEnabled($event)" />
   </template>
 </template>

@@ -9,14 +9,21 @@ const storage = typeof window === 'undefined' ? undefined : resolvePersistentSto
 export const language = ref<Language>(storage?.getItem(LANGUAGE_KEY) === 'zh-CN' ? 'zh-CN' : 'en')
 
 export function setLanguage(next: Language): void {
+  storage?.setItem(LANGUAGE_KEY, next)
   language.value = next
   if (typeof document !== 'undefined')
     document.documentElement.lang = next
-  storage?.setItem(LANGUAGE_KEY, next)
   window.aislingDesktop?.setLanguage?.(next)
 }
 
 export const zh: Record<string, string> = {
+  'Save & Enable': '保存并启用',
+  'Choose a provider.': '请先选择服务提供方',
+  'Please enter an API key.': '请先填写 API Key',
+  'Please enter a model.': '请先填写模型',
+  'Please enter a voice.': '请先填写音色',
+  'Could not save settings.': '配置保存失败',
+  'Could not start module.': '模块启动失败',
   'Embedding Model':'向量模型','API Endpoint':'API 地址','Credential source':'凭据来源','Reuse existing DashScope':'复用已有 DashScope','Dedicated DashScope key':'专用 DashScope 密钥',
   'Dense vectors, 1024 dimensions. Model changes rebuild vectors in the background.':'Dense 向量，1024 维。模型变更后在后台渐进重建向量。',
   'DashScope HTTPS only. Leave blank to reuse the configured region.':'仅支持 DashScope HTTPS 地址。留空复用已有地域配置。',
@@ -64,6 +71,7 @@ export const zh: Record<string, string> = {
   'Controls saved notes in this profile.': '控制当前资料中已保存笔记的召回。',
   'Memory database unavailable.': '记忆数据库暂不可用。',
   'Review proposals': '审核提议', 'No proposals to review.': '暂无待审提议。',
+  'Only memory changes that need your approval appear here.': '这里只显示需要你确认的记忆变更，数字表示待审核数量。',
   'Add memory': '新增记忆', 'Revise memory': '修订记忆', 'Add evidence': '补充证据',
   'Replace memory': '取代记忆', 'Retract memory': '撤回记忆',
   Event: '事件', Fact: '事实', Pattern: '模式', Preference: '偏好', 'Project state': '项目状态', 'Open question': '待确认问题',
@@ -135,8 +143,8 @@ export const zh: Record<string, string> = {
   'Choose DuckDuckGo Lite below before enabling.': '请先在下方选择 DuckDuckGo Lite。',
   'Save a working provider configuration before enabling.': '请先保存可用的服务配置，再开启此能力。',
   'System speech is unavailable here.': '当前环境不支持系统语音。',
-  'Configure the API key before enabling.': '请先配置 API 密钥，再开启桌面感知。',
-  'Configure Consciousness before enabling.': '请先配置 LLM，再开启桌面感知。',
+  'Configure the API key before enabling.': '请先填写 API Key',
+  'Configure Consciousness before enabling.': '请先完成 LLM 配置',
   'Desktop bridge connected.': '桌面连接已就绪。',
   'Something went wrong.': '出了点状况，请稍后重试。',
   'Vision is not configured — set it up in Settings.': '尚未配置视觉能力，请前往设置完成配置。',

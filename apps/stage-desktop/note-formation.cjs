@@ -46,7 +46,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
   embeddingConfig = () => undefined, embeddingRequest = embed,
   report = (_event, _detail) => {} }) {
   assertMemoryAuthority(profile, true)
-  check(!!archive === !!readMigration(profile), 'migration-archive-required')
+  check(!!archive === !!(readMigration(profile) || require('./desktop-profile.cjs').readUnifiedProfile(profile)), 'migration-archive-required')
   check(path.isAbsolute(resources), 'absolute-worker-resources-required')
   const dbFile = databasePath(profile)
   const directory = path.dirname(dbFile)

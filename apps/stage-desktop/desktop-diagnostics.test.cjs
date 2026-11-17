@@ -35,6 +35,7 @@ function fixture(enabled = false, replyText = false) {
     require: name => {
       if (name === 'electron') return electron
       if (name === 'node:fs') return {
+        existsSync: () => false,
         mkdirSync: () => { directories++ },
         createWriteStream: () => { streams++; return { on: (_name, callback) => { streamError = callback }, write: line => lines.push(JSON.parse(line)) } },
       }

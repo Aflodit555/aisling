@@ -2,6 +2,7 @@ const { basename } = require('node:path')
 const { uuid, version, validOperation, validNoteV2Operation, validRuntimeOperation, validRelationOperation } = require('./note-v1.cjs')
 
 const VERSION = 1
+const UNIFIED_PROFILE_FILE = 'memory-profile-unification.v1.json'
 const NOTE_V1_FILE = 'note-v1.lbdb'
 const NOTE_V2_FILE = 'note-v2.test.lbdb'
 const NOTE_V2_RUNTIME_FILE = 'note-v2.lbdb'
@@ -134,4 +135,4 @@ function validateRequest(request, schema = 'p0') {
     throw new ProtocolError('invalid-payload', 'Invalid operation arguments')
 }
 
-module.exports = { VERSION, NOTE_V1_FILE, NOTE_V2_FILE, NOTE_V2_RUNTIME_FILE, isNoteV2, schemaForFile, MAX_FRAME, MAX_PENDING, ProtocolError, lines, decode, encode, mutates, validateRequest }
+module.exports = { VERSION, UNIFIED_PROFILE_FILE, NOTE_V1_FILE, NOTE_V2_FILE, NOTE_V2_RUNTIME_FILE, isNoteV2, schemaForFile, MAX_FRAME, MAX_PENDING, ProtocolError, lines, decode, encode, mutates, validateRequest }

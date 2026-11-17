@@ -297,10 +297,10 @@ function resolveStageTarget(stageUrl = process.env.AISLING_STAGE_URL) {
 
 function configureDevProfile() {
   const explicit = process.env.AISLING_DEV_PROFILE
-  const directory = explicit ?? path.resolve(__dirname, '../../.local/desktop-dev-profile')
-  if (!path.isAbsolute(directory) || (explicit && !fs.statSync(directory, { throwIfNoEntry: false })?.isDirectory()))
+  if (!explicit) return
+  const directory = explicit
+  if (!path.isAbsolute(directory) || !fs.statSync(directory, { throwIfNoEntry: false })?.isDirectory())
     throw new Error('dev-profile-must-be-an-existing-absolute-directory')
-  if (!explicit) fs.mkdirSync(directory, { recursive: true })
   const profile = fs.realpathSync(directory)
   if (path.relative(profile, directory) || fs.lstatSync(directory).isSymbolicLink())
     throw new Error('canonical-memory-profile-required')
@@ -611,16 +611,20 @@ function revokeNoteDocument() {
 /** @param {{ show?: boolean, diagnostics?: boolean, stageUrl?: string,
  * onMemoryDatabase?: (store: import('./memory-database/store').MemoryDatabaseStore | undefined, ready: Promise<void> | undefined) => void,
  * memoryDatabaseDiagnostic?: (event: string, detail: any) => void,
- * noteOnlyForNewProfiles?: boolean,
+ * noteOnlyForNewProfiles?: boolean, requireUnifiedProfile?: boolean,
  * noteV2?: { resources?: string, embeddingConfig?: () => any, embeddingRequest?: typeof import('./note-embedding.cjs').embed,
  * onService?: (service: ReturnType<typeof import('./note-formation.cjs').createNoteFormationService>) => void } }} [options] */
 async function startDesktop(options = {}) {
   const diagnostics = options.diagnostics ?? true
   const target = resolveStageTarget(options.stageUrl)
-  if (options.noteOnlyForNewProfiles && target.mode === 'dev') configureDevProfile()
+  if (options.noteOnlyForNewProfiles) configureDevProfile()
   const { assertMemoryAuthority, canStartNoteV2, readMigration } = require('./memory-authority.cjs')
   if ((options.noteOnlyForNewProfiles || options.noteV2) && !app.requestSingleInstanceLock())
     throw new Error('Memory requires exclusive profile access')
+  const { readUnifiedProfile, retiredFile } = require('./desktop-profile.cjs')
+  if (fs.existsSync(path.join(app.getPath('userData'), retiredFile))) throw new Error('retired-memory-profile')
+  const unified = readUnifiedProfile(app.getPath('userData'))
+  if (options.requireUnifiedProfile && !unified) throw new Error('unified-memory-profile-not-prepared')
   const p0Experiment = !!options.onMemoryDatabase && process.env.AISLING_MEMORY_DB_P0 === '1'
   const useNoteV2 = options.noteOnlyForNewProfiles
     ? !p0Experiment && canStartNoteV2(app.getPath('userData'))
@@ -639,8 +643,9 @@ async function startDesktop(options = {}) {
   if (useNoteV2) {
     const v2Resources = options.noteV2?.resources ?? resources
     const { createNoteFormationService } = require('./note-formation.cjs')
-    const archive = migrationState && require('./memory-archive.cjs').legacyArchive({ profile, resources: v2Resources, readData: readDesktopData,
-      writeData: writeDesktopData, readReflections: readRawReflections, writeReflections: writeRawReflections })
+    const archive = unified ? require('./memory-archive.cjs').unifiedArchive(profile, v2Resources)
+      : migrationState && require('./memory-archive.cjs').legacyArchive({ profile, resources: v2Resources, readData: readDesktopData,
+        writeData: writeDesktopData, readReflections: readRawReflections, writeReflections: writeRawReflections })
     noteFormation = createNoteFormationService({
       autonomous: true,
       profile, resources: v2Resources, archive,
@@ -660,7 +665,14 @@ async function startDesktop(options = {}) {
     })
     configureMemoryLifecycle(noteFormation.privacy)
     options.noteV2?.onService?.(noteFormation)
-    void noteFormation.recover().catch(error => console.error('[note-v2] recovery pending', error.code ?? error.name))
+    if (unified) {
+      try { await noteFormation.recover() }
+      catch (error) {
+        console.error('[note-v2] unified startup blocked', error.code ?? error.name)
+        throw new Error('invalid-unified-memory-profile')
+      }
+    }
+    else void noteFormation.recover().catch(error => console.error('[note-v2] recovery pending', error.code ?? error.name))
     void noteFormation.configureMirror(require('./obsidian-control.cjs').mirrorConfig(readStoredConfig()))
       .catch(() => console.error('[obsidian-mirror] configuration unavailable'))
   } else {

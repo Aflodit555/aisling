@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
-const { lstatSync, realpathSync } = require('node:fs')
+const { lstatSync, realpathSync, existsSync } = require('node:fs')
 const { dirname, join, relative, isAbsolute } = require('node:path')
-const { VERSION, NOTE_V1_FILE, NOTE_V2_FILE, NOTE_V2_RUNTIME_FILE, isNoteV2, schemaForFile, mutates, ProtocolError, lines, decode, encode, validateRequest } = require('./protocol.cjs')
+const { VERSION, UNIFIED_PROFILE_FILE, NOTE_V1_FILE, NOTE_V2_FILE, NOTE_V2_RUNTIME_FILE, isNoteV2, schemaForFile, mutates, ProtocolError, lines, decode, encode, validateRequest } = require('./protocol.cjs')
 const { openLadybug } = require('./adapter.cjs')
 
 const readOnly = process.argv[2] === '--read-only'
@@ -37,7 +37,9 @@ async function run() {
   const api = require(entry)
   const { VERSION: ladybug, STORAGE_VERSION: storage } = api
   assert.equal(ladybug, '0.22.1')
-  const store = openLadybug(api, dbFile, schema, readOnly)
+  const existingOnly = schema === 'note-v2-runtime' && existsSync(join(dirname(dirname(dbFile)), UNIFIED_PROFILE_FILE))
+  assert(!existingOnly || lstatSync(dbFile, { throwIfNoEntry: false })?.size > 0, 'Missing unified Note database')
+  const store = openLadybug(api, dbFile, schema, readOnly, existingOnly)
   let closed = false
   let highestId = 0
   let pending = Promise.resolve()

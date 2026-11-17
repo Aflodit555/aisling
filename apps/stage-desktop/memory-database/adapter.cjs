@@ -1,7 +1,7 @@
 const { ddl: noteDdl, noteOperations, snapshotColumn } = require('./note-v1.cjs')
 const {ddl:erasureDdl,erasureOperations}=require('./erasure.cjs')
 
-function openLadybug(api, file, schema = 'p0', readOnly = false) {
+function openLadybug(api, file, schema = 'p0', readOnly = false, existingOnly = false) {
   const snapshot = snapshotColumn(schema)
   const noteV2 = snapshot !== 'snapshot'
   const runtime = schema === 'note-v2-runtime'
@@ -64,6 +64,9 @@ function openLadybug(api, file, schema = 'p0', readOnly = false) {
       } catch { /* Fresh stores can still use exact vectors without an extension. */ }
       const noteColumns = versioned ? snapshot + ' STRING' : 'content STRING, createdAt INT64'
       const tables = await query('CALL show_tables() RETURN name')
+      if (existingOnly && !['Note', 'Evidence', 'HAS_EVIDENCE', 'HAS_CONTEXT', 'NOTE_LINK', 'NOTE_EMBEDDING',
+        'NoteRevision', 'NoteOperation', 'MemoryTombstone', 'MemoryErasure'].every(name => tables.some(row => row.name === name)))
+        throw new Error('Incomplete unified Note database')
       if (tables.some(row => row.name === 'Note')) {
         const columns = await query("CALL table_info('Note') RETURN name")
         const expected = versioned ? ['id', snapshot] : ['content', 'createdAt', 'id']

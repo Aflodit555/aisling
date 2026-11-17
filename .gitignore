@@ -33,6 +33,8 @@ memory-erasure.v[12].json
 memory-migration.v1.json
 memory-migration-dispositions.v1.json
 note-formation-jobs.v1.json
+memory-profile-unification.v1.json
+memory-profile-retired.v1.json*
 *.jsonl
 *.tsbuildinfo
 artifacts/

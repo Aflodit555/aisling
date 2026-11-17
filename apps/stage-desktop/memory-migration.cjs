@@ -516,4 +516,4 @@ function createMemoryMigration(options) {
   }
 }
 
-module.exports = { createMemoryMigration }
+module.exports = { createMemoryMigration, durable }

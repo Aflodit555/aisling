@@ -587,6 +587,7 @@ export const useStageStore = defineStore('stage', () => {
     organizationStatus: legacy?.organizationStatus ?? computed(() => ({ ready: false, autoWrite: false, reason: 'disabled', pending: 0 })),
     formationStatus: legacy?.formationStatus ?? computed(() => ({ enabled: false, running: false, calls: 0, lastEvent: 'disabled' })),
     formation: shallowRef(legacy?.formation),
+    wakeFormation: () => noteFormation?.wake(),
     memoryRecallEnabled,
     memoryRecallDiagnostic,
     memoryTraceEnabled: legacy?.memoryTraceEnabled ?? ref(false),

@@ -14,6 +14,7 @@ const { discoverCandidates, buildNoteEmbeddingText, projectionVersion } = requir
 const { embed, embeddingIdentity } = require('./note-embedding.cjs')
 const speakers = require('./memory-subjects.json')
 const { databasePath, migratedJournal, readMigration, assertMemoryAuthority } = require('./memory-authority.cjs')
+const { formationFailure, validFormationFailure, automaticFormationRetry } = require('./note-formation-errors.mjs')
 
 
 const id = value => typeof value === 'string' && /^[\w-]{1,128}$/.test(value)
@@ -21,6 +22,15 @@ const evidenceRef = ref => ref && Object.keys(ref).sort().join(',') === 'digest,
   && id(ref.sessionId) && Number.isSafeInteger(ref.messageIndex) && ref.messageIndex >= 0
   && typeof ref.digest === 'string' && /^[a-f0-9]{64}$/.test(ref.digest)
 const knownErrors = new Set(['invalid-json', 'input-limit', 'invalid-proposal', 'provider-error', 'timeout', 'cancelled', 'source-changed'])
+const validHistory = history => Array.isArray(history)
+  && history.every(entry => Number.isSafeInteger(entry.attempt) && entry.attempt >= 1
+    && (entry.startedAt === null || Number.isSafeInteger(entry.startedAt) && entry.startedAt >= 0)
+    && (entry.recordedAt === undefined || Number.isSafeInteger(entry.recordedAt) && entry.recordedAt >= 0)
+    && (entry.endedAt === undefined || Number.isSafeInteger(entry.endedAt) && entry.endedAt >= 0)
+    && ['running', 'failed', 'submitted', 'completed'].includes(entry.outcome)
+    && (entry.failure === undefined || validFormationFailure(entry.failure))
+    && (entry.settlementFailures === undefined || Array.isArray(entry.settlementFailures)
+      && entry.settlementFailures.length <= 128 && entry.settlementFailures.every(validFormationFailure)))
 const confirmed = subject => Object.values(speakers).some(speaker => speaker.subject === subject)
 
 function check(value, code) {
@@ -61,6 +71,16 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     check(Buffer.byteLength(raw) <= 2_000_000, 'formation-job-limit')
     const stored = JSON.parse(raw)
     check(stored.version === 1 && stored.progress && Array.isArray(stored.batches), 'invalid-formation-jobs')
+    check(stored.batches.every(batch => (batch.autoRetries === undefined || batch.autoRetries === 0 || batch.autoRetries === 1)
+      && (batch.retryAt === undefined || Number.isSafeInteger(batch.retryAt) && batch.retryAt >= 0)
+      && (batch.retryAt === undefined || batch.status === 'failed' && batch.autoRetries === 1
+        && validFormationFailure(batch.failure) && automaticFormationRetry(batch.failure))
+      && (batch.failure === undefined || validFormationFailure(batch.failure))
+      && (batch.history === undefined || validHistory(batch.history))), 'invalid-formation-jobs')
+    if (stored.erasedFailures !== undefined) check(Array.isArray(stored.erasedFailures) && stored.erasedFailures.every(batch =>
+      /^erased-[a-f0-9]{64}$/.test(batch.id) && Number.isSafeInteger(batch.attempts) && batch.attempts >= 0
+      && (batch.autoRetries === undefined || batch.autoRetries === 0 || batch.autoRetries === 1)
+      && validHistory(batch.history)), 'invalid-formation-jobs')
     if (stored.organization) check((stored.organization.cursor === '' || uuid(stored.organization.cursor))
       && typeof stored.organization.bootstrapped === 'boolean' && Array.isArray(stored.organization.tasks)
       && stored.organization.tasks.length <= 2304 && stored.organization.tasks.every(task => uuid(task.id)
@@ -128,7 +148,10 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
 
   if (state.batches.some(batch => batch.status === 'running' || batch.status === 'collecting')) update(next => {
     for (const batch of next.batches) {
-      if (batch.status === 'running') { batch.status = 'failed'; batch.error = 'interrupted'; delete batch.prepared }
+      if (batch.status === 'running') {
+        batch.status = 'failed'
+        rememberFailure(batch, formationFailure('interrupted', 'interrupted'))
+      }
       if (batch.status === 'collecting') batch.status = 'pending'
     }
   })
@@ -165,6 +188,13 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
           && (!task.commands || task.commands.every(command => !erased.has(command.from) && !erased.has(command.to)
             && command.sources.evidence.every(lookup))))
       if (keep.length !== state.batches.length || tasks && tasks.length !== state.organization.tasks.length) update(next => {
+        // Erasure removes source/Note IDs, prepared inputs and proposals; retain only anonymous failure metadata.
+        const removed = next.batches.filter(batch => !keep.some(row => row.id === batch.id)
+          && (batch.error || batch.history?.some(entry => entry.failure || entry.settlementFailures?.length)))
+        if (removed.length) next.erasedFailures = [...(next.erasedFailures ?? []), ...removed.map(batch => {
+          if (batch.error && !batch.history?.length) rememberFailure(batch, formationFailure(batch.error))
+          return { id: 'erased-' + hash([batch.id]), attempts: batch.attempts, autoRetries: batch.autoRetries ?? 0, history: batch.history ?? [] }
+        })]
         next.batches = keep
         if (tasks) next.organization.tasks = tasks
         next.embeddingPriority = (next.embeddingPriority ?? []).filter(id => !erased.has(id))
@@ -215,6 +245,73 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
 
   function editBatch(batchId, change) {
     update(next => change(next.batches.find(batch => batch.id === batchId), next))
+  }
+
+  function rememberFailure(batch, failure) {
+    batch.error = failure.code
+    batch.failure = failure
+    batch.history ??= []
+    let entry = batch.history.find(row => row.attempt === batch.attempts)
+    if (!entry && batch.attempts > 0) {
+      entry = { attempt: batch.attempts, startedAt: null, recordedAt: now(), outcome: 'failed' }
+      batch.history.push(entry)
+    }
+    if (entry) Object.assign(entry, { ...(entry.startedAt === null ? { recordedAt: now() } : { endedAt: now() }), outcome: 'failed', failure })
+  }
+
+  function beginAttempt(batch) {
+    check(Number.isSafeInteger(batch.attempts + 1), 'formation-job-limit')
+    batch.status = 'running'; batch.attempts++
+    delete batch.prepared; delete batch.failure; delete batch.error; delete batch.retryAt
+    batch.history ??= []
+    batch.history.push({ attempt: batch.attempts, startedAt: now(), outcome: 'running' })
+  }
+
+  function retryReason(batch) {
+    if (!['failed', 'settling'].includes(batch.status)) return 'not-failed'
+    if (!consent() && !(batch.status === 'settling' && batch.items?.some(item => item.approved) && reviewConsent())) return 'formation-disabled'
+    try {
+      const lookup = sourceMessageLookup(readData())
+      if (!batch.evidence.length || !batch.evidence.every(ref => lookup(ref) && safeText(lookup(ref).content))) return 'source-changed'
+    } catch { return 'source-unavailable' }
+    if (batch.status !== 'settling' && batch.items) return 'saved-operations'
+    if (!Number.isSafeInteger(batch.attempts + 1)) return 'attempt-limit'
+    return ''
+  }
+
+  function formationStatus() {
+    const counts = { collecting: 0, pending: 0, running: 0, retryable: 0, failed: 0, settling: 0, completed: 0,
+      erased: state.erasedFailures?.length ?? 0, applied: 0, rejected: 0, reviewRequired: 0, skipped: 0, outcomeUnknown: 0 }
+    const batches = state.batches.map(batch => {
+      const status = batch.status === 'failed' && batch.retryAt !== undefined ? 'retryable' : batch.status
+      if (Object.hasOwn(counts, status)) counts[status]++
+      const outcomes = { applied: 0, rejected: 0, reviewRequired: 0, skipped: 0, outcomeUnknown: 0 }
+      for (const item of batch.items ?? []) {
+        const key = { applied: 'applied', rejected: 'rejected', review: 'reviewRequired', undecided: 'skipped', 'outcome-unknown': 'outcomeUnknown' }[item.status]
+        if (key) { outcomes[key]++; counts[key]++ }
+      }
+      const failure = batch.failure ?? (batch.error ? formationFailure(batch.error) : undefined)
+      return { id: batch.id, status, attempts: batch.attempts, autoRetries: batch.autoRetries ?? 0,
+        retryAt: batch.retryAt, failure, history: batch.history ?? [], ...outcomes,
+        issues: (batch.items ?? []).filter(item => ['review', 'rejected', 'outcome-unknown'].includes(item.status))
+          .map(item => ({ status: item.status, ...formationFailure(item.status === 'outcome-unknown' ? 'outcome-unknown' : item.reason, item.action === 'INVALID' ? 'parse' : 'settle') })),
+        retryBlocked: retryReason(batch) }
+    })
+    for (const batch of state.erasedFailures ?? []) batches.push({ ...batch, status: 'erased', autoRetries: batch.autoRetries ?? 0,
+      failure: formationFailure('source-changed', 'source'), applied: 0, rejected: 0, reviewRequired: 0, skipped: 0, outcomeUnknown: 0,
+      issues: [], retryBlocked: 'source-changed' })
+    return { counts, batches }
+  }
+
+  function rememberSettlementFailure(batchId, error) {
+    editBatch(batchId, row => {
+      row.failure = formationFailure(error, 'settle'); row.error = row.failure.code
+      row.history ??= []
+      let entry = row.history.find(entry => entry.attempt === row.attempts)
+      if (!entry) { entry = { attempt: row.attempts, startedAt: null, recordedAt: now(), outcome: 'submitted' }; row.history.push(entry) }
+      entry.settlementFailures ??= []
+      if (!entry.settlementFailures.some(failure => failure.code === row.failure.code)) entry.settlementFailures.push(row.failure)
+    })
   }
 
   function registerNotes(next, notes) {
@@ -367,6 +464,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       } catch (error) {
         if (error.code === 'outcome-unknown') {
           finishItem(batch.id, index, 'outcome-unknown', 'worker-reply-lost')
+          rememberSettlementFailure(batch.id, error)
           await store.close().catch(closeError => report('worker-close-failed', closeError))
           return false
         }
@@ -375,7 +473,12 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         finishItem(batch.id, index, 'rejected', error.code ?? 'source-changed')
       }
     }
-    editBatch(batch.id, row => { row.status = 'completed' })
+    editBatch(batch.id, row => {
+      row.status = 'completed'
+      delete row.failure; delete row.error
+      const entry = row.history?.find(entry => entry.attempt === row.attempts)
+      if (entry) Object.assign(entry, { outcome: 'completed', endedAt: now() })
+    })
     return true
   }
 
@@ -409,9 +512,17 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     await ready()
     for (const batch of state.batches.filter(row => row.status === 'settling'
       && (row.items.some(item => item.approved) || autonomous && consent())))
-      if (!await settle(batch)) break
+      if (!await settleRecorded(batch)) break
     if (autonomous && consent()) for (const task of state.organization.tasks.filter(task => task.semantic?.status === 'settling'))
       await settleSemantic(task)
+  }
+
+  async function settleRecorded(batch) {
+    try { return await settle(batch) }
+    catch (error) {
+      rememberSettlementFailure(batch.id, error)
+      throw error
+    }
   }
 
   const semanticTask = jobId => typeof jobId === 'string' && jobId.startsWith('organization-')
@@ -531,7 +642,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         batch.status = 'settling'
         for (const item of batch.items) if (item.status === 'review' && item.reason === 'index-incomplete') item.status = 'proposed'
       })
-      await settle(state.batches.find(batch => batch.id === waiting.id))
+      await settleRecorded(state.batches.find(batch => batch.id === waiting.id))
       return
     }
     const task = state.organization.tasks.find(task => task.status === 'pending')
@@ -759,28 +870,54 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       return snapshotRead
     },
     reviews: () => queue(async () => {
-      await recover()
+      let unavailable
+      try { await recover() } catch (error) { unavailable = formationFailure(error, 'settle') }
       const items = []
       let pending = 0
       for (const batch of state.batches) {
         for (const [index, item] of (batch.items ?? []).entries()) {
           if (item.status !== 'review') continue
           pending++
-          if (items.length >= 20) continue
+          if (unavailable || items.length >= 20) continue
           try { items.push(await reviewItem(batch, item)) }
           catch (error) {
-            if (error.message !== 'source-changed') throw error
+            if (error.message !== 'source-changed') {
+              unavailable = formationFailure(error, 'source'); items.length = 0
+              continue
+            }
             finishItem(batch.id, index, 'rejected', 'source-changed')
             pending--
           }
         }
       }
-      privacy.assertReadable()
-      return { ready: true, pending, items,
+      // A deletion intent may arrive during the awaits above; only metadata can cross a blocked read boundary.
+      try { privacy.assertReadable() } catch (error) { unavailable = formationFailure(error, 'source'); items.length = 0 }
+      const formation = formationStatus()
+      return { ready: !unavailable, pending, items, formation, unavailable,
         embeddingConfigured: !!embeddingConfig(),
         forming: state.batches.some(batch => batch.status === 'running') || state.organization?.tasks.some(task => task.semantic?.status === 'running'),
-        failed: state.batches.at(-1)?.status === 'failed' }
+        failed: formation.counts.failed > 0 || formation.counts.retryable > 0 || formation.batches.some(batch => batch.status === 'settling' && batch.failure) }
     }),
+    retry(batchId, attempt) {
+      return queue(async () => {
+        check(id(batchId) && Number.isSafeInteger(attempt) && attempt >= 0, 'invalid-retry')
+        const batch = state.batches.find(row => row.id === batchId)
+        if (!batch || batch.attempts !== attempt) return 'stale'
+        const blocked = retryReason(batch)
+        if (blocked) return blocked
+        if (batch.status === 'settling') {
+          await ready()
+          await settleRecorded(batch)
+          return state.batches.find(row => row.id === batchId)?.status ?? 'stale'
+        }
+        editBatch(batchId, row => {
+          if (row.error && !row.failure) rememberFailure(row, formationFailure(row.error))
+          row.status = 'pending'
+          delete row.retryAt
+        })
+        return 'queued'
+      })
+    },
     approvalOutcome(key) {
       if (!reviewConsent() || !id(key)) return 'stale'
       const item = state.batches.flatMap(batch => batch.items ?? []).find(row => row.operationId === key)
@@ -796,7 +933,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       if (!item) return 'stale'
       if (item.status === 'applied' || item.status === 'rejected') return item.status
       if (item.status !== 'review') {
-        if (item.approved && approved) await settle(batch)
+        if (item.approved && approved) await settleRecorded(batch)
         return state.batches.find(row => row.id === batch.id)?.items[index].status ?? 'stale'
       }
       if (!approved) {
@@ -809,7 +946,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         row.items[index].status = 'proposed'
         row.items[index].approved = true
       })
-      await settle(state.batches.find(row => row.id === batch.id))
+      await settleRecorded(state.batches.find(row => row.id === batch.id))
       return state.batches.find(row => row.id === batch.id)?.items[index].status ?? 'stale'
     }),
     close() { closing = true; embeddingAbort?.abort(); clearTimeout(organizationTimer); return queue(() => store.close()) },
@@ -821,13 +958,13 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         const sessions = readConversationSessions(data).filter(s => s.id === sessionId)
         check(sessions.length === 1 && indices.at(-1) < sessions[0].messages.length, 'invalid-delivery')
         const cursor = Object.hasOwn(state.progress, sessionId) ? state.progress[sessionId] : 0
-        if (indices[0] < cursor) return
-        const refs = indices.map(messageIndex => ({ sessionId, messageIndex, digest: messageDigest(sessions[0].messages[messageIndex]) }))
+        const fresh = indices.filter(index => index >= cursor)
+        if (!fresh.length) return
+        const refs = fresh.map(messageIndex => ({ sessionId, messageIndex, digest: messageDigest(sessions[0].messages[messageIndex]) }))
         const lookup = sourceMessageLookup(data)
         const evidence = evidenceFor(refs, refs.length, lookup)
         formationInput({ evidence, notes: [], speakers })
         update(next => {
-          Object.defineProperty(next.progress, sessionId, { value: indices.at(-1) + 1, enumerable: true, writable: true, configurable: true })
           let batch = next.batches.find(b => b.sessionId === sessionId && b.status === 'collecting')
           if (batch) {
             try { formationInput({ evidence: [...evidenceFor(batch.evidence, batch.evidence.length, lookup), ...evidence], notes: [], speakers }) }
@@ -839,6 +976,8 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
           }
           batch.evidence.push(...refs)
           if (++batch.units >= limits.units) batch.status = 'pending'
+          // Progress acknowledges durable delivery, not successful Formation; tasks and cursor publish together.
+          Object.defineProperty(next.progress, sessionId, { value: indices.at(-1) + 1, enumerable: true, writable: true, configurable: true })
         })
       })
     },
@@ -853,13 +992,29 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       return queue(async () => {
         check(typeof allowSemantic === 'boolean', 'invalid-organization-allowance')
         if (!consent()) return null
-        await ready()
+        const eligible = row => row.status === 'pending' || row.status === 'failed' && row.retryAt !== undefined && row.retryAt <= now()
+        try { await ready() } catch (error) {
+          const unsettled = state.batches.find(row => row.status === 'settling')
+          if (unsettled) rememberSettlementFailure(unsettled.id, error)
+          else if (!state.batches.some(row => row.status === 'running')) {
+            const waiting = state.batches.find(eligible)
+            if (waiting) editBatch(waiting.id, row => {
+              beginAttempt(row); row.status = 'failed'; rememberFailure(row, formationFailure(error, 'prepare'))
+            })
+          }
+          throw error
+        }
         for (const batch of state.batches.filter(row => row.status === 'settling'))
-          if (!await settle(batch)) return null
+          if (!await settleRecorded(batch)) return null
         if (state.batches.some(row => row.status === 'running')) return null
-        const batch = state.batches.find(row => row.status === 'pending')
+        const batch = state.batches.find(eligible)
         if (!batch) return allowSemantic ? nextSemantic() : null
-        editBatch(batch.id, row => { row.status = 'running'; row.attempts++ })
+        const lookup = sourceMessageLookup(readData())
+        if (!batch.evidence.every(ref => lookup(ref) && safeText(lookup(ref).content))) {
+          editBatch(batch.id, row => { row.status = 'failed'; rememberFailure(row, formationFailure('source-changed', 'source')) })
+          return null
+        }
+        editBatch(batch.id, beginAttempt)
         return { id: batch.id, attempt: batch.attempts + 1, sessionId: batch.sessionId, refs: batch.evidence }
       })
     },
@@ -958,7 +1113,11 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
           return { ...item, fingerprint: operationFingerprint(command), relationCommands: proposedRelations(proposal, item, context) }
         })
         check(consent(), 'stale-formation-attempt')
-        editBatch(batchId, row => { row.status = items.length ? 'settling' : 'completed'; row.items = items })
+        editBatch(batchId, row => {
+          row.status = items.length ? 'settling' : 'completed'; row.items = items
+          const entry = row.history?.find(entry => entry.attempt === attempt)
+          if (entry) Object.assign(entry, { outcome: items.length ? 'submitted' : 'completed', endedAt: now() })
+        })
       })
     },
     fail(batchId, attempt, reason) {
@@ -966,17 +1125,21 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         const task = semanticTask(batchId)
         if (task) {
           if (task.semantic?.status === 'running' && task.semantic.attempts === attempt) editSemantic(task, (work, organization) => {
-            work.status = work.attempts < 2 && reason !== 'source-changed' ? 'pending' : 'failed'
-            work.error = knownErrors.has(reason) ? reason : 'invalid-proposal'
+            const code = typeof reason === 'string' ? reason : reason?.code
+            work.status = work.attempts < 2 && code !== 'source-changed' ? 'pending' : 'failed'
+            work.error = knownErrors.has(code) ? code : 'invalid-proposal'
             if (work.status === 'failed') organization.semanticSeen = [...new Set([...organization.semanticSeen, work.signature])].slice(-4096)
           })
           return
         }
         const batch = state.batches.find(row => row.id === batchId)
         if (batch?.status === 'running' && batch.attempts === attempt) editBatch(batchId, row => {
+          const failure = typeof reason === 'string' ? formationFailure(reason)
+            : formationFailure(reason?.code, reason?.phase)
+          rememberFailure(row, failure)
+          const retry = automaticFormationRetry(failure) && !row.autoRetries
           row.status = 'failed'
-          row.error = knownErrors.has(reason) ? reason : 'invalid-proposal'
-          delete row.prepared
+          if (retry) { row.autoRetries = 1; row.retryAt = now() + 15_000 }
         })
       })
     },

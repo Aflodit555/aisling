@@ -28,11 +28,15 @@ interface Window {
     noteFormation?: import('./runtime/note-formation').NoteFormationBridge
     noteRecall?: import('./runtime/note-v2-recall').NoteV2RecallBridge
     noteReview?: {
-      list(): Promise<{ ready: boolean; pending: number; forming: boolean; failed: boolean; embeddingConfigured?: boolean; items: Array<{
+      list(): Promise<{ ready: boolean; pending: number; forming: boolean; failed: boolean; embeddingConfigured?: boolean;
+        formation?: import('./runtime/note-formation').FormationStatus
+        unavailable?: import('../../stage-desktop/note-formation-errors.mjs').FormationFailure
+        items: Array<{
         key: string; action: string; content: string; kind: string; basis: string; uncertainty?: string;
         reason: string; target?: string; quotes: string[]; approvable: boolean;
       }> }>
       decide(key: string, approved: boolean): Promise<string>
+      retry(id: string, attempt: number): Promise<string>
     }
     memoryOrganization?: import('./runtime/note-organization').OrganizationBridge
     getMode(): Promise<'stage' | 'desktop'>

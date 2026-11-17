@@ -17,6 +17,23 @@ export function setLanguage(next: Language): void {
 }
 
 export const zh: Record<string, string> = {
+  'Source erased': '来源已擦除',
+  'Task history is full; existing records were kept.': '任务历史已达容量上限，已有记录均已保留。',
+  'Formation tasks': '形成任务', 'Collecting': '收集中', 'Queued': '已排队', 'Automatic retry queued': '等待自动重试',
+  'Failed': '失败', 'Confirming saved operations': '确认已保存操作', 'Completed': '处理结束', 'Applied': '已应用',
+  'Rejected': '已拒绝', 'Review required': '待审核', 'Skipped': '已跳过', 'Outcome unknown': '结果待确认',
+  'Task details': '任务明细', 'Retained failures': '保留的失败批次', 'Attempts': '尝试次数',
+  'Retry task': '重试任务', 'Confirm saved result': '确认保存结果', 'Failure history': '失败历史',
+  'Completed means processing ended; check each operation result.': '处理结束不代表全部入库，请查看各项操作结果。',
+  'No retry needed.': '无需重试。', 'Enable Formation to retry.': '请先启用形成，再重试。',
+  'Original source is no longer valid.': '原始来源已失效。', 'Source verification is unavailable.': '暂时无法验证来源。',
+  'Saved operations must be confirmed first.': '需先确认已保存操作。', 'Attempt limit reached.': '已达到尝试次数上限。',
+  'Provider request failed': '模型服务请求失败', 'Response could not be parsed': '响应解析失败',
+  'Response contract invalid': '响应结构不符合合同', 'Semantic validation failed': '语义校验失败',
+  'Source validation failed': '来源校验失败', 'Storage operation failed': '存储操作失败',
+  'Authorization rejected': '授权被拒绝', 'Processing interrupted': '处理中断', 'Unknown failure': '未知失败',
+  'Task queued; Formation will resume it.': '任务已排队，形成服务将继续处理。',
+  'Saved operations confirmed.': '已确认保存结果。', 'Task could not be queued.': '无法将任务加入队列。',
   'Obsidian mirror': 'Obsidian 镜像',
   'Obsidian vault path': 'Obsidian Vault 路径',
   'Sync Obsidian': '同步 Obsidian',

@@ -5,10 +5,14 @@ import ModuleToggle from '../../components/settings/ModuleToggle.vue'
 import MemoryMigration from '../../components/settings/MemoryMigration.vue'
 import EmbeddingForm from '../../components/settings/EmbeddingForm.vue'
 import ObsidianMirror from '../../components/settings/ObsidianMirror.vue'
+import FormationStatus from '../../components/settings/FormationStatus.vue'
 import LegacyMemoryControls from '../../components/settings/LegacyMemoryControls.vue'
 import { useSettingsStore } from '../../stores/settings'
+import { useStageStore } from '../../stores/stage'
+import { formationFailure } from '../../../../stage-desktop/note-formation-errors.mjs'
 
 const settings = useSettingsStore()
+const stage = useStageStore()
 const bridge = window.aislingDesktop?.noteReview
 const mirror = window.aislingDesktop?.obsidianMirror
 const legacy = !!window.aislingDesktop?.memoryOrganization
@@ -45,6 +49,22 @@ async function decide(key: string, approved: boolean) {
       : result === 'outcome-unknown' ? 'Waiting to confirm the saved result.'
         : result === 'cancelled' || result === 'busy' ? '' : 'The proposal could no longer be applied.'
   } catch { feedback.value = 'The proposal could no longer be applied.' }
+  finally { busy.value = false; await refresh() }
+}
+
+async function retry(id: string, attempt: number) {
+  if (!bridge || busy.value) return
+  busy.value = true
+  feedback.value = ''
+  try {
+    const result = await bridge.retry(id, attempt)
+    if (result === 'queued') stage.wakeFormation()
+    feedback.value = result === 'queued' ? 'Task queued; Formation will resume it.'
+      : result === 'completed' ? 'Saved operations confirmed.' : 'Task could not be queued.'
+  } catch (error) {
+    feedback.value = formationFailure(error).code === 'formation-job-limit'
+      ? 'Task history is full; existing records were kept.' : 'Task could not be queued.'
+  }
   finally { busy.value = false; await refresh() }
 }
 
@@ -96,10 +116,12 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
 
         <EmbeddingForm />
 
+        <p v-if="feedback" class="memory-state" role="status">{{ t(feedback) }}</p>
+        <FormationStatus v-if="state?.formation" :state="state.formation" :busy="busy" @retry="retry" />
+
         <section class="review" aria-labelledby="review-title">
           <h3 id="review-title" class="module-section-title">{{ t('Review proposals') }}<span v-if="state"> ({{ state.pending }})</span></h3>
           <p class="memory-state">{{ t('Only memory changes that need your approval appear here.') }}</p>
-          <p v-if="feedback" role="status">{{ t(feedback) }}</p>
           <p v-if="state?.pending === 0" class="memory-state">{{ t('No proposals to review.') }}</p>
           <article v-for="item in state?.items" :key="item.key">
             <h4>{{ t(actions[item.action] ?? 'Memory') }}</h4>

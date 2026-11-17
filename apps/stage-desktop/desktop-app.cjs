@@ -1,6 +1,7 @@
 const { app, BaseWindow, WebContentsView, Menu, Tray, dialog, ipcMain, nativeImage, nativeTheme, screen, shell } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
+const { formationFailure } = require('./note-formation-errors.mjs')
 const { randomUUID } = require('node:crypto')
 const ICON_PATH = path.join(__dirname, 'assets', 'desktop-mode.png')
 const WINDOWS_ICON_PATH = path.join(__dirname, 'assets', 'desktop-mode.ico')
@@ -736,6 +737,11 @@ async function startDesktop(options = {}) {
         if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note review request')
         return noteFormation.reviews()
       })
+      ipcMain.handle('aisling:note-review:retry', async (event, id, attempt) => {
+        if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note retry request')
+        try { return await noteFormation.retry(id, attempt) }
+        catch (error) { throw new Error(formationFailure(error, 'prepare').code) }
+      })
       ipcMain.handle('aisling:obsidian:configure', async event => {
         if (!trusted(event) || !noteFormation) throw new Error('Untrusted mirror request')
         try { return await noteFormation.configureMirror(require('./obsidian-control.cjs').mirrorConfig(readStoredConfig())) }
@@ -781,20 +787,25 @@ async function startDesktop(options = {}) {
         ipcMain.handle('aisling:note-formation:' + method, async (event, ...args) => {
           const service = noteFormation
           if (!trusted(event) || !service) throw new Error('Untrusted Note Formation request')
-          if (method === 'next') {
-            const document = noteDocument
-            const job = await service.next()
-            if (job && (document !== noteDocument || !trusted(event))) {
-              await service.fail(job.id, job.attempt, 'cancelled')
-              return null
+          try {
+            if (method === 'next') {
+              const document = noteDocument
+              const job = await service.next(args[0])
+              if (job && (document !== noteDocument || !trusted(event))) {
+                await service.fail(job.id, job.attempt, 'cancelled')
+                return null
+              }
+              if (job) noteAttempt = job
+              return job
             }
-            if (job) noteAttempt = job
-            return job
+            if (['prepare', 'submit', 'fail'].includes(method)
+              && (!noteAttempt || noteAttempt.id !== args[0] || noteAttempt.attempt !== args[1]))
+              throw new Error('stale-formation-attempt')
+            return await service[method](...args)
+          } catch (error) {
+            // Electron serializes Error.message, not custom error.code; send only the shared stable code.
+            throw new Error(formationFailure(error, method === 'submit' ? 'submit' : method === 'prepare' || method === 'next' ? 'prepare' : 'source').code)
           }
-          if (['prepare', 'submit', 'fail'].includes(method)
-            && (!noteAttempt || noteAttempt.id !== args[0] || noteAttempt.attempt !== args[1]))
-            throw new Error('stale-formation-attempt')
-          return service[method](...args)
         })
       }
     }

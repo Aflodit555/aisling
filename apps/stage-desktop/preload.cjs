@@ -27,11 +27,12 @@ contextBridge.exposeInMainWorld('aislingDesktop', {
     noteReview: {
       list: () => ipcRenderer.invoke('aisling:note-review:list'),
       decide: (key, approved) => ipcRenderer.invoke('aisling:note-review:decide', key, approved),
+      retry: (id, attempt) => ipcRenderer.invoke('aisling:note-review:retry', id, attempt),
     },
     noteFormation: {
       delivered: (sessionId, indices) => ipcRenderer.invoke('aisling:note-formation:delivered', sessionId, indices),
       flush: sessionId => ipcRenderer.invoke('aisling:note-formation:flush', sessionId),
-      next: () => ipcRenderer.invoke('aisling:note-formation:next'),
+      next: (allowSemantic = true) => ipcRenderer.invoke('aisling:note-formation:next', allowSemantic),
       prepare: (id, attempt, history) => ipcRenderer.invoke('aisling:note-formation:prepare', id, attempt, history),
       submit: (id, attempt, raw) => ipcRenderer.invoke('aisling:note-formation:submit', id, attempt, raw),
       fail: (id, attempt, reason) => ipcRenderer.invoke('aisling:note-formation:fail', id, attempt, reason),

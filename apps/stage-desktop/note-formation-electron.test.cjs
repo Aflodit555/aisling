@@ -7,6 +7,22 @@ const { createNoteV2Store } = require('./memory-database/store.cjs')
 const { sourceMessageLookup } = require('./memory-evidence.cjs')
 
 const prepared = process.env.AISLING_MEMORY_DB_P0_TEST_RESOURCES
+
+test('Memory task UI shows every failure, retries through trusted Main, keeps operation counts, and switches languages', {
+  skip: !prepared && 'Prepared Worker required', timeout: 110000,
+}, () => {
+  const root = path.resolve(__dirname, '../../artifacts/memory-note-only-p1')
+  fs.mkdirSync(root, { recursive: true })
+  const profile = fs.realpathSync(fs.mkdtempSync(path.join(root, 'reliability-ui-')))
+  fs.writeFileSync(path.join(profile, '.note-formation-test'), 'aisling-note-formation-p1-fixture\n')
+  const result = spawnSync(require('electron'), [path.join(__dirname, 'note-formation-smoke.cjs'), 'reliability', profile, prepared], {
+    cwd: __dirname, windowsHide: true, encoding: 'utf8', timeout: 85000,
+    env: Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AISLING_|ELECTRON_RUN_AS_NODE$|TYPESAFE_API_KEY$)/i.test(name))),
+  })
+  assert.ifError(result.error)
+  assert.equal(result.status, 0, result.stdout + '\n' + result.stderr)
+  assert.match(result.stdout, /"result":"note-formation-passed"/)
+})
 test('real Stage delivery through isolated Note Formation, Main, Worker and restart', {
   skip: !prepared && 'Set AISLING_MEMORY_DB_P0_TEST_RESOURCES to prepared Worker resources',
   timeout: 220_000,

@@ -9,7 +9,7 @@ const { startDesktop } = require('./desktop-app.cjs')
 const { noteFormationFixture } = require('./note-formation-test-host.cjs')
 
 const [phase, profile, resources] = process.argv.slice(2)
-assert(['default', 'write', 'reopen', 'erase', 'dev', 'autonomous', 'semantic', 'associative'].includes(phase))
+assert(['default', 'write', 'reopen', 'erase', 'dev', 'autonomous', 'semantic', 'associative', 'reliability'].includes(phase))
 let fixtureClock = Date.now()
 if (['semantic','associative'].includes(phase)) Date.now = () => fixtureClock
 assert.equal(fs.readFileSync(path.join(profile, '.note-formation-test'), 'utf8'), 'aisling-note-formation-p1-fixture\n')
@@ -48,6 +48,11 @@ async function until(predicate, description) {
       ...(phase === 'associative' && { embeddingConfig: () => ({modelId:'mock/embedding',model:'mock',apiKey:'synthetic',endpoint:'https://mock.invalid'}),
         embeddingRequest: async (_config,texts,type) => { embeddingCalls.push(type); return texts.map(()=>[1,...Array(1023).fill(0)]) } }) } })
   const web = win.contentView.children[0].webContents
+  if (phase === 'reliability') {
+    // Hidden windows can suspend animation frames; drive only this fixture's route transitions with timers.
+    await web.insertCSS('* { animation-duration: 0s !important; transition-duration: 0s !important; }')
+    await web.executeJavaScript('window.requestAnimationFrame = callback => setTimeout(() => callback(performance.now()), 16); window.cancelAnimationFrame = clearTimeout; void 0')
+  }
   if (dev) web.on('console-message', details => {
     if (details.level === 'error') console.error(details.message)
   })
@@ -214,6 +219,9 @@ async function until(predicate, description) {
       }
       let items = []
       if (mode === 'bad') return { text: 'invalid JSON' }
+      if (mode === 'partial') items = [item(draft(users[0], users[0].content)),
+        item({ ...draft(users[0], users[0].content), sources: [{ label: users[0].label, quote: 'synthetic invalid quote' }] }),
+        { action: 'UNDECIDED', draft: null, target: null, reason: '合成未决定' }]
       if (mode === 'dev') items = [item(draft(users[0], '用户报告已经开始练手碟。'))]
       if (mode === 'drafts') {
         const historical = input.evidence.find(e => e.role === 'user' && e.scope === 'history' && e.content.includes('原本'))
@@ -294,7 +302,64 @@ async function until(predicate, description) {
     }
   }).toString() + ')()')
 
-  if (dev) {
+  if (phase === 'reliability') {
+    await invoke('mode', 'bad')
+    await invoke('send', ['我喜欢蓝色。', '颜色偏好是我的报告。', '这不是外部事实。'])
+    await until(() => jobs()[0]?.status === 'failed', 'first retained failure')
+    await invoke('fresh')
+    await invoke('send', ['我喜欢安静。', '这是另一条原始报告。', '不要混成同一经历。'])
+    await until(() => jobs()[1]?.status === 'failed', 'second retained failure')
+    await invoke('fresh'); await invoke('mode', 'old')
+    await invoke('send', ['这个批次没有形成提议。', '保持原始消息。', '合成流程结束。'])
+    await until(() => jobs()[2]?.status === 'completed', 'later successful batch')
+    const status = await invoke('review')
+    assert.equal(status.formation.counts.failed, 2)
+    assert.equal(status.formation.counts.completed, 1)
+    await invoke('openMemory')
+    await web.executeJavaScript(`new Promise((resolve, reject) => {
+      let attempts=0
+      const timer=setInterval(()=>{
+        const rows=document.querySelectorAll('[data-formation-batch]')
+        if(rows.length===3&&document.querySelector('.task-counts')?.textContent.includes('Failed 2')){clearInterval(timer);document.querySelector('.formation-status > details').open=true;resolve()}
+        else if(++attempts>200){clearInterval(timer);reject(new Error('All Formation batches were not rendered'))}
+      },25)
+    })`)
+    await invoke('mode', 'partial')
+    await web.executeJavaScript(`{const button=document.querySelector('[data-formation-batch="${jobs()[0].id}"] button');button.click();button.click()}`)
+    await until(() => jobs()[0]?.status === 'completed', 'UI retry did not execute through Main')
+    const recovered = (await invoke('review')).formation.batches[0]
+    assert.equal(recovered.attempts, 2)
+    assert.equal(recovered.applied, 1); assert.equal(recovered.rejected, 1); assert.equal(recovered.skipped, 1)
+    assert.equal(recovered.history[0].failure.code, 'invalid-json')
+    assert.equal(jobs().length, 3)
+    await web.executeJavaScript(`new Promise((resolve,reject)=>{let attempts=0;const timer=setInterval(()=>{
+      const text=document.querySelector('[data-formation-batch="${jobs()[0].id}"]')?.textContent
+      if(text?.includes('Applied 1')&&text.includes('Rejected 1')&&text.includes('Skipped 1')){clearInterval(timer);resolve()}
+      else if(++attempts>200){clearInterval(timer);reject(new Error('Actual operation counts were not rendered'))}
+    },25)})`)
+    await assert.rejects(web.executeJavaScript('window.aislingDesktop.noteReview.retry({}, 0)'), /invalid-retry/)
+    await web.executeJavaScript(`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('settings').setMemoryFormationEnabled(false)`)
+    await assert.rejects(web.executeJavaScript('window.aislingDesktop.noteFormation.next("invalid")'), /invalid-organization-allowance/)
+    const first = jobs()[0]
+    assert.equal(await web.executeJavaScript(`window.aislingDesktop.noteReview.retry(${JSON.stringify(first.id)}, ${first.attempts})`), 'not-failed')
+    await web.executeJavaScript(`document.querySelector('#app').__vue_app__.config.globalProperties.$router.push({name:'settings-general'})`)
+    await web.executeJavaScript(`new Promise((resolve,reject)=>{let attempts=0;const timer=setInterval(()=>{
+      const option=[...document.querySelectorAll('.settings-picker button')].find(button=>button.textContent==='简体中文')
+      if(option){option.closest('details').open=true;option.click();clearInterval(timer);resolve()}
+      else if(++attempts>200){clearInterval(timer);reject(new Error('Language picker unavailable'))}
+    },25)})`)
+    await invoke('openMemory')
+    await web.executeJavaScript(`new Promise((resolve,reject)=>{let attempts=0;const timer=setInterval(()=>{
+      const area=document.querySelector('.formation-status');if(area?.textContent.includes('形成任务')&&area.textContent.includes('请先启用形成')){clearInterval(timer);resolve()}
+      else if(++attempts>200){clearInterval(timer);reject(new Error('Chinese task state did not render'))}
+    },25)})`)
+    const other = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true,
+      contextIsolation: true, nodeIntegration: false, additionalArguments: ['--aisling-note-v2'] } })
+    try {
+      await other.webContents.loadURL('aisling://stage/')
+      await assert.rejects(other.webContents.executeJavaScript(`window.aislingDesktop.noteReview.retry(${JSON.stringify(jobs()[1].id)}, 1)`), /Untrusted Note retry/)
+    } finally { other.webContents.close() }
+  } else if (dev) {
     assert.equal(app.getPath('userData'), profile)
     assert.equal(app.getPath('sessionData'), profile)
     assert(!fs.existsSync(path.join(initialProfile, 'memory-authority')))

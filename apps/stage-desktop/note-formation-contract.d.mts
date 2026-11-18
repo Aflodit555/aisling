@@ -22,6 +22,7 @@ export interface OperationProposal {
   related: string[]
 }
 export const limits: { units: number; sources: number; evidenceBytes: number; inputBytes: number; outputChars: number; timeoutMs: number }
+export const formationExamples: Array<Record<string, any>>
 export function formationInput(context: NoteFormationContext): { messages: Array<{ role: 'system' | 'user'; content: string }> }
 export function parseNoteProposals(raw: string, context: NoteFormationContext): OperationProposal[]
 export function parseNoteBatch(raw: string, context: NoteFormationContext): Array<{ wire: any; proposal: OperationProposal | null; error?: string }>

@@ -145,7 +145,7 @@ function reportOrder(head, lookup) {
   const messages = refs.map(lookup)
   if (!refs.length || messages.some(m => !m)) return undefined
   if (refs.every(ref => ref.sessionId === refs[0].sessionId))
-    return { session: refs[0].sessionId, position: Math.max(...refs.map(ref => ref.messageIndex)) }
+    return { session: refs[0].sessionId, start: Math.min(...refs.map(ref => ref.messageIndex)), position: Math.max(...refs.map(ref => ref.messageIndex)) }
 }
 
 /** Only original, literal state reports create edges; tags/similarity never create a relation. */
@@ -161,8 +161,9 @@ export function planNoteRelation(first, second, lookup) {
     order = 'event'
   } else {
     const x = reportOrder(first, lookup), y = reportOrder(second, lookup)
-    if (x && y && x.session === y.session && x.position !== y.position) {
-      if (y.position < x.position) [from, to] = [second, first]
+    if (x && y && x.session === y.session) {
+      if (y.position < x.start) [from, to] = [second, first]
+      else if (!(x.position < y.start)) return null
     } else {
       const times = head => head.grounds.evidence.map(ref => lookup(ref)?.createdAt)
       const xTimes = times(first), yTimes = times(second)

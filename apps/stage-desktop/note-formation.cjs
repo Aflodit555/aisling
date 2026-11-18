@@ -164,6 +164,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
   let embeddingRunning = false, embeddingAbort
   let embeddingGeneration = 0
   const queryVectors = new Map()
+  const queryPending = new Map(), queryAborts = new Set()
   /** @template T @param {() => T | Promise<T>} work @returns {Promise<T>} */
   function queue(work) {
     const result = serial.then(work)
@@ -204,6 +205,8 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     invalidate(reason) {
       embeddingGeneration++
       queryVectors.clear()
+      queryPending.clear()
+      for (const controller of queryAborts) controller.abort()
       embeddingAbort?.abort()
       recallVersion = randomUUID()
       if (reason === 'intent' && !closing && !privacy.isRecovering())
@@ -694,6 +697,70 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     } catch { return [] }
   }
 
+  /** Shared Recall/Formation cache and hourly budget; network work never holds the database queue. */
+  async function queryCandidates(query, seed, current) {
+    const valid = () => !closing && seed.generation === embeddingGeneration && current()
+      && embeddingConfig()?.modelId === seed.config?.modelId && embeddingConfig()?.apiKey === seed.config?.apiKey
+    if (!seed.config || !seed.heads.length || !safeText(query)) return { hits: [], vectorStatus: 'unavailable' }
+    try {
+      const key = hash([seed.config.modelId, query]), cached = queryVectors.get(key)
+      let vector = cached?.expires > now() ? cached.vector : undefined
+      if (!vector) {
+        let pending = queryPending.get(key)
+        if (!pending) {
+          pending = (async () => {
+            const allowed = await queue(() => {
+              if (!valid()) return false
+              const times = (state.queryEmbeddingCalls ?? []).filter(time => time > now() - 3600_000)
+              if (times.length >= 60) return false
+              update(next => { next.queryEmbeddingCalls = [...times, now()] }); return true
+            })
+            if (!allowed) throw new Error('query-budget')
+            const controller = new AbortController(); queryAborts.add(controller)
+            let timer
+            try {
+              const vectors = await Promise.race([
+                embeddingRequest(seed.config, [query], 'query', { timeoutMs: 700, signal: controller.signal }),
+                new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('query-timeout')) }, 700)
+                  controller.signal.addEventListener('abort', () => reject(new Error('query-aborted')), { once: true }) }),
+              ])
+              if (!await queue(valid)) throw new Error('stale-query')
+              queryVectors.set(key, { vector: vectors[0], expires: now() + 300000 })
+              if (queryVectors.size > 32) queryVectors.delete(queryVectors.keys().next().value)
+              return vectors[0]
+            } finally { clearTimeout(timer); queryAborts.delete(controller) }
+          })()
+          queryPending.set(key, pending)
+        }
+        try { vector = await pending } finally { if (queryPending.get(key) === pending) queryPending.delete(key) }
+      }
+      return await queue(async () => {
+        if (!valid()) return { hits: [], vectorStatus: 'unavailable' }
+        const result = await store.searchEmbeddings({ modelId: seed.config.modelId, projectionVersion, embedding: vector })
+        return { vectorStatus: result.complete ? 'incremental' : 'index-incomplete', hits: result.hits.filter(hit => {
+          const head = seed.heads.find(head => head.note.id === hit.noteId)
+          return head && head.note.version === hit.noteVersion && hit.contentHash === embeddingIdentity(head.note, seed.config).contentHash
+        }) }
+      })
+    } catch { return { hits: [], vectorStatus: 'unavailable' } }
+  }
+
+  function formationEvidence(batch, history) {
+    check(!closing, 'formation-closing')
+    const first = Math.min(...batch.evidence.map(ref => ref.messageIndex))
+    const nearby = Array.isArray(history) ? history.filter(ref => ref?.sessionId === batch.sessionId) : []
+    check(!batch.prepared && Array.isArray(history) && history.length + batch.evidence.length <= limits.sources
+      && history.every(evidenceRef) && nearby.length <= 4
+      && nearby.every((ref, i) => ref.messageIndex === first - nearby.length + i && ref.messageIndex >= 0)
+      && new Set(history.map(ref => JSON.stringify([ref.sessionId, ref.messageIndex]))).size === history.length, 'invalid-history')
+    const lookup = sourceMessageLookup(readData()), currentEvidence = evidenceFor(batch.evidence, batch.evidence.length, lookup)
+    const invalid = new Set(history.filter(ref => !lookup(ref) || !safeText(lookup(ref).content)).map(ref => ref.sessionId))
+    const refs = [...batch.evidence, ...history.filter(ref => !invalid.has(ref.sessionId))]
+    const reports = refs.map(lookup).filter(message => message?.role === 'user')
+    const query = (reports.length ? reports : currentEvidence.map(e => e.message)).map(message => message.content).join('\n')
+    return { refs, query, lookup }
+  }
+
   /** The durable cursor/pending batch reuses the Main job file; network work runs outside its queue. */
   async function syncEmbeddings() {
     if (embeddingRunning || closing || !autonomous || !consent() || !embeddingConfig()) return
@@ -798,31 +865,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         return { config, heads, generation: embeddingGeneration }
       })
       if (!seed) return { candidates: [], complete: false, vectorStatus: 'unavailable' }
-      let hits = [], vectorStatus = 'unavailable'
-      if (seed.config) try {
-        const key = hash([seed.config.modelId, query]), cached = queryVectors.get(key)
-        let vector = cached?.expires > now() ? cached.vector : undefined
-        if (!vector) {
-          const allowed = await queue(async () => {
-            if (!recallCurrent(version)) return false
-            const times = (state.queryEmbeddingCalls ?? []).filter(time => time > now() - 3600_000)
-            if (times.length >= 60) return false
-            update(next => { next.queryEmbeddingCalls = [...times, now()] }); return true
-          })
-          if (!allowed) throw new Error('query-budget')
-          ;[vector] = await embeddingRequest(seed.config, [query], 'query', { timeoutMs: 700 })
-          if (closing || seed.generation !== embeddingGeneration || !recallCurrent(version)) throw new Error('stale-query')
-          queryVectors.set(key, { vector, expires: now() + 300000 })
-          if (queryVectors.size > 32) queryVectors.delete(queryVectors.keys().next().value)
-        }
-        hits = await queue(async () => {
-          if (!recallCurrent(version) || embeddingConfig()?.modelId !== seed.config.modelId) return []
-          const result = await store.searchEmbeddings({ modelId: seed.config.modelId, projectionVersion, embedding: vector })
-          vectorStatus = result.complete ? 'incremental' : 'index-incomplete'
-          return result.hits.filter(hit => { const head = seed.heads.find(head => head.note.id === hit.noteId)
-            return head && hit.contentHash === embeddingIdentity(head.note, seed.config).contentHash })
-        })
-      } catch { /* Query embedding is optional and never blocks fallback after its deadline. */ }
+      const { hits, vectorStatus } = await queryCandidates(query, seed, () => recallCurrent(version))
       if (!recallCurrent(version) || closing || seed.generation !== embeddingGeneration) return { candidates: [], complete: false, vectorStatus: 'unavailable' }
       const fused = discoverCandidates(query, seed.heads, hits)
       return { complete: fused.complete, vectorStatus, candidates: fused.candidates.map(item => ({ noteId: item.head.note.id,
@@ -949,7 +992,7 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       await settleRecorded(state.batches.find(row => row.id === batch.id))
       return state.batches.find(row => row.id === batch.id)?.items[index].status ?? 'stale'
     }),
-    close() { closing = true; embeddingAbort?.abort(); clearTimeout(organizationTimer); return queue(() => store.close()) },
+    close() { closing = true; embeddingAbort?.abort(); for (const controller of queryAborts) controller.abort(); clearTimeout(organizationTimer); return queue(() => store.close()) },
     delivered(sessionId, indices) {
       return queue(async () => {
         check(consent() && id(sessionId) && Array.isArray(indices) && indices.length >= 1 && indices.length <= 2
@@ -1018,7 +1061,18 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
         return { id: batch.id, attempt: batch.attempts + 1, sessionId: batch.sessionId, refs: batch.evidence }
       })
     },
-    prepare(batchId, attempt, history) {
+    async prepare(batchId, attempt, history) {
+      const seed = await queue(async () => {
+        if (semanticTask(batchId)) return undefined
+        const batch = current(batchId, attempt), input = formationEvidence(batch, history)
+        const pool = await headIndex()
+        return { ...input, heads: pool.heads, config: embeddingConfig(), generation: embeddingGeneration }
+      })
+      const discovered = seed ? await queryCandidates(seed.query, seed, () => {
+        const batch = state.batches.find(row => row.id === batchId)
+        const lookup = sourceMessageLookup(readData())
+        return consent() && !privacy.pending() && batch?.status === 'running' && batch.attempts === attempt && seed.refs.every(lookup)
+      }) : { hits: [] }
       return queue(async () => {
         const task = semanticTask(batchId)
         if (task) {
@@ -1026,29 +1080,14 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
           return semanticContext(task)
         }
         const batch = current(batchId, attempt)
-        const first = Math.min(...batch.evidence.map(ref => ref.messageIndex))
-        const nearby = Array.isArray(history) ? history.filter(ref => ref?.sessionId === batch.sessionId) : []
-        check(!batch.prepared && Array.isArray(history) && history.length + batch.evidence.length <= limits.sources
-          && history.every(evidenceRef) && nearby.length <= 4
-          && nearby.every((ref, i) => ref.messageIndex === first - nearby.length + i && ref.messageIndex >= 0)
-          && new Set(history.map(ref => JSON.stringify([ref.sessionId, ref.messageIndex]))).size === history.length, 'invalid-history')
-        readData()
+        const { refs, query, lookup } = formationEvidence(batch, history)
         const pool = await headIndex()
         const heads = pool.heads.filter(({ note }) => safeText([note.content, note.subject, note.uncertainty, ...(note.tags ?? [])].join(' ')))
-        const lookup = sourceMessageLookup(readData())
-        const currentEvidence = evidenceFor(batch.evidence, batch.evidence.length, lookup)
-        const invalidSessions = new Set(history.filter(ref => {
-          const message = lookup(ref)
-          return !message || !safeText(message.content)
-        }).map(ref => ref.sessionId))
-        const validHistory = history.filter(ref => !invalidSessions.has(ref.sessionId))
-        const refs = [...batch.evidence, ...validHistory]
-        const reports = refs.map(lookup).filter(message => message?.role === 'user')
-        const query = (reports.length ? reports : currentEvidence.map(e => e.message)).map(message => message.content).join('\n')
+        const hits = seed?.generation === embeddingGeneration && seed.query === query ? discovered.hits : []
         const ranked = discoverCandidates(query, heads.filter(head => head.grounds.evidence.every(ref => {
           const message = lookup(ref)
           return message && safeText(message.content)
-        }))).candidates.map(item => item.head).slice(0,5)
+        })), hits).candidates.map(item => item.head).slice(0,5)
         const notes = ranked.map(head => head.note)
         for (;;) {
           const selected = ranked.slice(0, notes.length)

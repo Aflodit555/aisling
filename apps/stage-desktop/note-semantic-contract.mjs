@@ -80,6 +80,34 @@ function eventRange(note) {
   if (time?.kind === 'date-range') return [Date.parse(time.start), Date.parse(time.end)]
 }
 
+/** A narrow literal replacement proof; topic overlap and a model's proposed direction are insufficient. */
+function relativeStateOrder(first, second, evidence, lookup, scope) {
+  const a = first.note.state, b = second.note.state
+  if (!a || !b || first.note.kind !== second.note.kind || a.scope !== scope || b.scope !== scope || a.value === b.value
+    || a.value.includes(b.value) || b.value.includes(a.value)) return
+  const unsafe = /如果|假如|假设|计划|打算|准备|可能|也许|据说|听说|并未|没有|不曾|不是|并非|是否|更正|撤回|否认|说错|改回|[?？]|\b(?:if|not|plan|might)\b/iu
+  if ([first.note, second.note].some(note => unsafe.test(note.content))) return
+  const shared = new Set(first.grounds.evidence.map(refKey).filter(key => second.grounds.evidence.some(ref => refKey(ref) === key)))
+  const directions = new Set(); let sharedProof = false
+  for (const ref of evidence) {
+    const content = lookup(ref)?.content
+    if (typeof content !== 'string' || unsafe.test(content)) return
+    const clauses = content.split(/[，。；,;\n]/u)
+    const contains = (clause, state, other) => clause.includes(state.scope) && clause.includes(state.value) && !clause.includes(other.value)
+    let earlierA = false, earlierB = false
+    for (const clause of clauses) {
+      if (/^(?:后来|随后|接着)/u.test(clause.trim()) && /改用|改为|换用/u.test(clause)) {
+        if (earlierA && contains(clause, b, a)) { directions.add('forward'); sharedProof ||= shared.has(refKey(ref)) }
+        if (earlierB && contains(clause, a, b)) { directions.add('backward'); sharedProof ||= shared.has(refKey(ref)) }
+      }
+      if (/^(?:之前|先前|起初)/u.test(clause.trim())) {
+        earlierA ||= contains(clause, a, b); earlierB ||= contains(clause, b, a)
+      }
+    }
+  }
+  return sharedProof && directions.size === 1 ? [...directions][0] : undefined
+}
+
 export function semanticRelationPlan(type, scope, first, second, sources, lookup, reason) {
   if (first.note.id === second.note.id || type !== 'ASSOCIATED_WITH' && first.note.subject !== second.note.subject
     || first.note.status !== 'active' || second.note.status !== 'active'
@@ -90,11 +118,16 @@ export function semanticRelationPlan(type, scope, first, second, sources, lookup
   if (evidence.some(ref => lookup(ref)?.role !== 'user')) return null
   if (type === 'STATE_CHANGE' && !first.note.state && !second.note.state
     && !evidence.some(ref => /开始|暂停|恢复|重新|停止|搁下|不再|改为|\b(?:started|paused|resumed|stopped|changed)\b/iu.test(lookup(ref).content))) return null
-  let from = first, to = second, order = 'unknown'
+  let from = first, to = second, order = 'unknown', relative = false
   if (['STATE_CHANGE', 'CONTINUES'].includes(type)) {
     const a = eventRange(first.note), b = eventRange(second.note)
-    if (a && b && (a[1] < b[0] || b[1] < a[0])) {
+    const sequence = type === 'STATE_CHANGE' && relativeStateOrder(first, second, evidence, lookup, scope)
+    if (!a && !b && sequence) {
+      if (sequence === 'backward') [from, to] = [second, first]
+      order = 'event'; relative = true
+    } else if (a && b && (a[1] < b[0] || b[1] < a[0])) {
       if (b[1] < a[0]) [from, to] = [second, first]
+      if (sequence && (sequence === 'forward') !== (from === first)) return null
       order = 'event'
     } else {
       if (a || b) return null
@@ -121,7 +154,7 @@ export function semanticRelationPlan(type, scope, first, second, sources, lookup
   }
   return { type, scope, method: 'semantic', from: from.note.id, to: to.note.id, fromVersion: from.note.version,
     toVersion: to.note.version, basis: 'inferred', order, reason,
-    uncertainty: type === 'ASSOCIATED_WITH' ? '系统发现的联想导航线索，不构成因果或事实支持。' : order === 'event' ? '关系是对直接证据的语义解释；不将解释升级为事实。'
+    uncertainty: type === 'ASSOCIATED_WITH' ? '系统发现的联想导航线索，不构成因果或事实支持。' : relative ? '仅原文明确的相对先后与替换；无绝对事件日期，不据此推定当前有效。' : order === 'event' ? '关系是对直接证据的语义解释；不将解释升级为事实。'
       : order === 'report' ? '仅能确认报告先后，事件顺序及当前有效性仍需核对。' : '关系范围由语义判断提出；时间顺序或冲突尚未解决。',
     sources: { evidence } }
 }

@@ -4,7 +4,7 @@ import { t } from '../../i18n'
 import ModuleToggle from '../../components/settings/ModuleToggle.vue'
 import EmbeddingForm from '../../components/settings/EmbeddingForm.vue'
 import ObsidianMirror from '../../components/settings/ObsidianMirror.vue'
-import FormationStatus from '../../components/settings/FormationStatus.vue'
+import FormationRecovery from '../../components/settings/FormationRecovery.vue'
 import { useSettingsStore } from '../../stores/settings'
 import { useStageStore } from '../../stores/stage'
 import { formationFailure } from '../../../../stage-desktop/note-formation-errors.mjs'
@@ -18,6 +18,7 @@ const state = ref<Status>()
 const busy = ref(false)
 const feedback = ref('')
 const error = ref(false)
+const visibleReviews = ref(2)
 let request = 0
 let checking = false
 
@@ -54,21 +55,23 @@ async function retry(id: string, attempt: number) {
   try {
     const result = await bridge.retry(id, attempt)
     if (result === 'queued') stage.wakeFormation()
-    feedback.value = result === 'queued' ? 'Task queued; Formation will resume it.'
-      : result === 'completed' ? 'Saved operations confirmed.' : 'Task could not be queued.'
+    feedback.value = result === 'queued' ? 'Memory will be processed again.'
+      : result === 'completed' ? 'Saved result checked.' : 'Could not resume memory processing.'
   } catch (error) {
     feedback.value = formationFailure(error).code === 'formation-job-limit'
-      ? 'Task history is full; existing records were kept.' : 'Task could not be queued.'
+      ? 'Memory processing is unavailable; existing records were kept.' : 'Could not resume memory processing.'
   }
   finally { busy.value = false; await refresh() }
 }
 
 const memory = computed(() => settings.config.memory)
-const database = computed(() => state.value?.ready ? 'Ready' : error.value ? 'Memory database unavailable.' : 'Starting')
+const database = computed(() => error.value || state.value?.unavailable ? 'Memory is temporarily unavailable.' : 'Starting')
+const proposals = computed(() => state.value?.items.slice(0, visibleReviews.value) ?? [])
+watch(() => state.value?.pending, pending => { if (!pending) visibleReviews.value = 2 })
 
 watch(() => memory.value.enabled, enabled => {
   if (enabled) void refresh()
-  else { request++; state.value = undefined; error.value = false; feedback.value = '' }
+  else { request++; state.value = undefined; error.value = false; feedback.value = ''; visibleReviews.value = 2 }
 })
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
@@ -100,7 +103,6 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
         <ModuleToggle label="Formation" :enabled="memory.formationEnabled === true"
           :disabled="!state?.ready && memory.formationEnabled !== true"
           :unavailable="state?.ready && !settings.activeChatProvider ? 'Configure the LLM first.' : ''"
-          :status="!state?.ready ? '' : state.forming ? 'Running' : state.failed ? 'Processing failed' : ''"
           @change="settings.setMemoryFormationEnabled($event)" />
         <ModuleToggle label="Recall" :enabled="memory.noteRecallEnabled === true"
           :disabled="!state?.ready && memory.noteRecallEnabled !== true"
@@ -109,28 +111,33 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
         <EmbeddingForm />
 
         <p v-if="feedback" class="memory-state" role="status">{{ t(feedback) }}</p>
-        <FormationStatus v-if="state?.formation" :state="state.formation" :busy="busy" @retry="retry" />
+        <FormationRecovery v-if="state?.formation" :state="state.formation" :busy="busy" @retry="retry" />
 
-        <section class="review" aria-labelledby="review-title">
+        <section v-if="state?.pending" class="review" aria-labelledby="review-title">
           <h3 id="review-title" class="module-section-title">{{ t('Review proposals') }}<span v-if="state"> ({{ state.pending }})</span></h3>
-          <p class="memory-state">{{ t('Only memory changes that need your approval appear here.') }}</p>
-          <p v-if="state?.pending === 0" class="memory-state">{{ t('No proposals to review.') }}</p>
-          <article v-for="item in state?.items" :key="item.key">
-            <h4>{{ t(actions[item.action] ?? 'Memory') }}</h4>
-            <p>{{ item.content }}</p>
-            <p class="memory-state">{{ t(kinds[item.kind] ?? 'Memory') }} · {{ t(bases[item.basis] ?? 'Direct evidence') }}</p>
-            <p v-if="item.uncertainty"><strong>{{ t('Uncertainty') }}</strong> {{ item.uncertainty }}</p>
-            <p v-if="item.target"><strong>{{ t('Existing memory') }}</strong> {{ item.target }}</p>
-            <details>
+          <article v-for="item in proposals" :key="item.key" :data-review-key="item.key">
+            <div class="review-summary">
+              <div class="review-description">
+                <h4>{{ t(actions[item.action] ?? 'Memory') }}</h4>
+                <p class="review-preview">{{ item.content }}</p>
+              </div>
+              <div class="review-actions">
+                <button type="button" class="btn" :disabled="busy" @click="decide(item.key, false)">{{ t('Reject') }}</button>
+                <button v-if="item.approvable" type="button" class="btn primary" :disabled="busy" @click="decide(item.key, true)">{{ t('Approve') }}</button>
+              </div>
+            </div>
+            <details class="review-evidence">
               <summary>{{ t('Original evidence') }}</summary>
+              <p>{{ item.content }}</p>
+              <p class="memory-state">{{ t(kinds[item.kind] ?? 'Memory') }} · {{ t(bases[item.basis] ?? 'Direct evidence') }}</p>
+              <p v-if="item.uncertainty"><strong>{{ t('Uncertainty') }}</strong> {{ item.uncertainty }}</p>
+              <p v-if="item.target"><strong>{{ t('Existing memory') }}</strong> {{ item.target }}</p>
               <blockquote v-for="(quote, i) in item.quotes" :key="i">{{ quote }}</blockquote>
             </details>
             <p v-if="!item.approvable" class="memory-state">{{ t('This proposal cannot be approved because its identity or evidence could not be verified.') }}</p>
-            <div class="review-actions">
-              <button type="button" class="btn" :disabled="busy" @click="decide(item.key, false)">{{ t('Reject') }}</button>
-              <button v-if="item.approvable" type="button" class="btn primary" :disabled="busy" @click="decide(item.key, true)">{{ t('Approve') }}</button>
-            </div>
           </article>
+          <button v-if="proposals.length < state.items.length" type="button" class="btn review-more"
+            @click="visibleReviews += 2">{{ t('Show more proposals') }}</button>
         </section>
       </template>
       <p v-else class="memory-state">{{ t('Desktop database required.') }}</p>
@@ -142,8 +149,17 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
 .memory-state { color: var(--muted); }
 .review { margin-top: 1.5rem; }
 .review article { margin: .75rem 0; padding: .75rem 1rem; border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); overflow-wrap: anywhere; }
-.review h4 { margin: 0; }
+.review h4 { margin: 0; font: inherit; color: var(--muted); font-size: .85rem; }
 .review p { margin: .45rem 0; }
+.review-summary { display: flex; align-items: center; gap: 1rem; }
+.review-description { flex: 1; min-width: 0; }
+.review-preview { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.review-evidence { color: var(--muted); font-size: .85rem; }
+.review-evidence[open] { color: var(--fg); }
+.review-evidence p, .review blockquote { white-space: pre-wrap; }
+.review summary { cursor: pointer; }
 .review blockquote { margin: .5rem 0; padding-inline-start: .75rem; border-inline-start: 2px solid var(--rule); white-space: pre-wrap; }
-.review-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: .5rem; margin-top: .75rem; }
+.review-actions { display: flex; flex-wrap: wrap; justify-content: end; gap: .5rem; }
+.review-actions .btn { min-height: 42px; }
+@media (max-width: 600px) { .review-summary { flex-wrap: wrap; } .review-actions { margin-left: auto; } }
 </style>

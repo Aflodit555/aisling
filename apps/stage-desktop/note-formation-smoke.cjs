@@ -9,7 +9,7 @@ const { startDesktop } = require('./desktop-app.cjs')
 const { noteFormationFixture } = require('./note-formation-test-host.cjs')
 
 const [phase, profile, resources] = process.argv.slice(2)
-assert(['default', 'write', 'reopen', 'erase', 'dev', 'autonomous', 'semantic', 'associative', 'reliability'].includes(phase))
+assert(['default', 'write', 'reopen', 'erase', 'dev', 'autonomous', 'semantic', 'associative', 'reliability', 'productization'].includes(phase))
 let fixtureClock = Date.now()
 if (['semantic','associative'].includes(phase)) Date.now = () => fixtureClock
 assert.equal(fs.readFileSync(path.join(profile, '.note-formation-test'), 'utf8'), 'aisling-note-formation-p1-fixture\n')
@@ -221,6 +221,7 @@ async function until(predicate, description) {
         item({ ...draft(users[0], users[0].content), sources: [{ label: users[0].label, quote: 'synthetic invalid quote' }] }),
         { action: 'UNDECIDED', draft: null, target: null, reason: '合成未决定' }]
       if (mode === 'dev') items = [item(draft(users[0], '用户报告已经开始练手碟。'))]
+      if (mode === 'reviews') items = users.map(e => item(draft(e, e.content.replace('你知道吗？我', '用户表示'), 'preference')))
       if (mode === 'drafts') {
         const historical = input.evidence.find(e => e.role === 'user' && e.scope === 'history' && e.content.includes('原本'))
         if (!historical) throw new Error('missing historical original')
@@ -288,7 +289,16 @@ async function until(predicate, description) {
       async openMemory() {
         const vm = document.querySelector('#app').__vue_app__.config.globalProperties
         await vm.$router.push({ name: 'settings-memory' })
-        await wait(() => document.querySelector('#review-title'), 'Memory page did not mount')
+        await wait(() => ['Memory', '记忆'].includes(document.querySelector('.settings-module > h2')?.textContent.trim()), 'Memory page did not mount')
+      },
+      async language(value) {
+        const router = document.querySelector('#app').__vue_app__.config.globalProperties.$router
+        await router.push({ name: 'settings-general' })
+        const label = value === 'en' ? 'English' : '简体中文'
+        await wait(() => [...document.querySelectorAll('.settings-picker button')].some(b => b.textContent === label), 'Language picker missing')
+        const button = [...document.querySelectorAll('.settings-picker button')].find(b => b.textContent === label)
+        button.closest('details').open = true; button.click()
+        await this.openMemory()
       },
       current(version) { return window.aislingDesktop.noteRecall.current(version) },
       async cancel() {
@@ -300,7 +310,79 @@ async function until(predicate, description) {
     }
   }).toString() + ')()')
 
-  if (phase === 'reliability') {
+  if (phase === 'productization') {
+    const js = expression => web.executeJavaScript(expression)
+    const waitUi = async expression => {
+      for (let i=0;i<240;i++) { if(await js(expression)) return; await delay(25) }
+      throw Error('Memory UI assertion timed out: '+expression)
+    }
+    win.setBounds({ ...win.getBounds(), width: 1400, height: 1200 })
+    const renderings = []
+    const capture = async (name, language, theme) => {
+      await invoke('language', language)
+      await js('document.documentElement.dataset.theme = '+JSON.stringify(theme))
+      await waitUi("[...document.querySelectorAll('.settings-module > .module-toggle')].length === 4")
+      const dimensions = await js(`({ rows:[...document.querySelectorAll('.settings-module > .module-toggle')].map(row=>({
+        height:row.getBoundingClientRect().height, right:row.querySelector('input[type=checkbox]').getBoundingClientRect().right })),
+        background:getComputedStyle(document.body).backgroundColor, recovery:!!document.querySelector('.formation-recovery'),
+        diagnostic:!!document.querySelector('.formation-status, .task-counts'),
+        title:document.querySelector('#review-title')?.textContent, items:document.querySelectorAll('[data-review-key]').length })`)
+      assert(dimensions.rows.every(row=>Math.abs(row.height-42)<.1))
+      assert(dimensions.rows.every(row=>Math.abs(row.right-dimensions.rows[0].right)<1))
+      assert.equal(dimensions.background,theme==='light'?'rgb(244, 236, 216)':'rgb(15, 15, 26)')
+      assert.equal(dimensions.diagnostic,false)
+      renderings.push({name,language,theme,...dimensions})
+      return dimensions
+    }
+    await invoke('openMemory')
+    for(const language of ['en','zh-CN'])for(const theme of ['light','dark']){
+      const state=await capture('empty',language,theme)
+      assert.equal(state.title,undefined);assert.equal(state.items,0);assert.equal(state.recovery,false)
+    }
+    await invoke('language','en');await invoke('mode','reviews')
+    await invoke('send',['你知道吗？我喜欢安静的房间。','你知道吗？我喜欢绿色的杯子。','你知道吗？我喜欢温暖的灯光。'])
+    await until(()=>jobs()[0]?.status==='completed'&&jobs()[0].items.every(item=>item.status==='review'),'three source-backed reviews')
+    await waitUi("document.querySelectorAll('[data-review-key]').length===2")
+    assert.equal((await invoke('review')).pending,3)
+    for(const language of ['en','zh-CN'])for(const theme of ['light','dark']){
+      const state=await capture('reviews',language,theme)
+      assert.equal(state.items,2);assert(state.title.includes('(3)'))
+    }
+    await invoke('language','en')
+    await js("document.querySelector('.review-more').click()")
+    await waitUi("document.querySelectorAll('[data-review-key]').length===3")
+    await js("document.querySelector('.review-evidence summary').click()")
+    assert.equal(await js("document.querySelector('.review-evidence').open"),true)
+    assert.match(await js("document.querySelector('.review-evidence blockquote').textContent"),/你知道吗？我喜欢/)
+    let detail
+    dialog.showMessageBox = async options => { dialogs++;detail=options;return {response:confirmation} }
+    confirmation=0
+    await js("document.querySelector('.review-actions .primary').click()")
+    await until(()=>dialogs===1,'native cancel confirmation')
+    await waitUi("!document.querySelector('.review-actions .primary').disabled")
+    assert.equal((await invoke('review')).pending,3)
+    assert(detail.detail.includes(jobs()[0].items[0].wire.draft.content))
+    confirmation=1
+    await js("document.querySelector('.review-actions .primary').click()")
+    await until(()=>jobs()[0].items[0].status==='applied','UI approved Note saved through Main')
+    await waitUi("document.querySelectorAll('[data-review-key]').length===2")
+    assert.equal((await invoke('snapshot')).notes.length,1);assert.equal(dialogs,2)
+    await js("document.querySelector('.review-actions .btn:not(.primary)').click()")
+    await waitUi("document.querySelectorAll('[data-review-key]').length===1")
+    assert.equal((await invoke('review')).pending,1);assert.equal(dialogs,2)
+    await js("document.querySelector('.review-actions .btn:not(.primary)').click()")
+    await waitUi("!document.querySelector('#review-title')")
+    assert.equal((await invoke('review')).pending,0);assert.equal((await invoke('snapshot')).notes.length,1)
+    const normalReviews=service.reviews
+    service.reviews=async()=>{throw Error('synthetic read outage')}
+    await waitUi("document.querySelector('.memory-state[role=status]')?.textContent==='Memory is temporarily unavailable.'")
+    assert.equal(await js("document.querySelectorAll('[data-review-key]').length"),0)
+    service.reviews=normalReviews
+    await waitUi("![...document.querySelectorAll('.memory-state[role=status]')].some(p=>p.textContent==='Memory is temporarily unavailable.')")
+    fs.writeFileSync(path.join(profile,'ui-proof.json'),JSON.stringify({reviewCounts:[0,1,2,3],defaultVisible:2,expanded:3,
+      approved:1,rejected:2,nativeConfirmations:dialogs,cancellationPreserved:true,sourceVisible:true,currentReadErrorCleared:true,
+      languages:['en','zh-CN'],themes:['light','dark'],renderings,settingsRowHeight:42,aligned:true},null,2))
+  } else if (phase === 'reliability') {
     await invoke('mode', 'bad')
     await invoke('send', ['我喜欢蓝色。', '颜色偏好是我的报告。', '这不是外部事实。'])
     await until(() => jobs()[0]?.status === 'failed', 'first retained failure')
@@ -317,9 +399,9 @@ async function until(predicate, description) {
     await web.executeJavaScript(`new Promise((resolve, reject) => {
       let attempts=0
       const timer=setInterval(()=>{
-        const rows=document.querySelectorAll('[data-formation-batch]')
-        if(rows.length===3&&document.querySelector('.task-counts')?.textContent.includes('Failed 2')){clearInterval(timer);document.querySelector('.formation-status > details').open=true;resolve()}
-        else if(++attempts>200){clearInterval(timer);reject(new Error('All Formation batches were not rendered'))}
+        const area=document.querySelector('.formation-recovery'), rows=document.querySelectorAll('[data-formation-batch]')
+        if(rows.length===2&&area&&!area.open&&!document.querySelector('.task-counts')){clearInterval(timer);area.open=true;resolve()}
+        else if(++attempts>200){clearInterval(timer);reject(new Error('On-demand recovery was not available'))}
       },25)
     })`)
     await invoke('mode', 'partial')
@@ -331,9 +413,9 @@ async function until(predicate, description) {
     assert.equal(recovered.history[0].failure.code, 'invalid-json')
     assert.equal(jobs().length, 3)
     await web.executeJavaScript(`new Promise((resolve,reject)=>{let attempts=0;const timer=setInterval(()=>{
-      const text=document.querySelector('[data-formation-batch="${jobs()[0].id}"]')?.textContent
-      if(text?.includes('Applied 1')&&text.includes('Rejected 1')&&text.includes('Skipped 1')){clearInterval(timer);resolve()}
-      else if(++attempts>200){clearInterval(timer);reject(new Error('Actual operation counts were not rendered'))}
+      const row=document.querySelector('[data-formation-batch="${jobs()[0].id}"]')
+      if(!row&&!document.querySelector('.task-counts')){clearInterval(timer);resolve()}
+      else if(++attempts>200){clearInterval(timer);reject(new Error('Completed recovery did not leave the compact list'))}
     },25)})`)
     await assert.rejects(web.executeJavaScript('window.aislingDesktop.noteReview.retry({}, 0)'), /invalid-retry/)
     await web.executeJavaScript(`document.querySelector('#app').__vue_app__.config.globalProperties.$pinia._s.get('settings').setMemoryFormationEnabled(false)`)
@@ -348,8 +430,8 @@ async function until(predicate, description) {
     },25)})`)
     await invoke('openMemory')
     await web.executeJavaScript(`new Promise((resolve,reject)=>{let attempts=0;const timer=setInterval(()=>{
-      const area=document.querySelector('.formation-status');if(area?.textContent.includes('形成任务')&&area.textContent.includes('请先启用形成')){clearInterval(timer);resolve()}
-      else if(++attempts>200){clearInterval(timer);reject(new Error('Chinese task state did not render'))}
+      const body=document.querySelector('.settings-module');if(body?.textContent.includes('形成')&&!body.textContent.includes('Processing failed')&&!document.querySelector('.formation-recovery')&&!document.querySelector('#review-title')){clearInterval(timer);resolve()}
+      else if(++attempts>200){clearInterval(timer);reject(new Error('Historical failures polluted the disabled Formation UI'))}
     },25)})`)
     const other = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'preload.cjs'), sandbox: true,
       contextIsolation: true, nodeIntegration: false, additionalArguments: ['--aisling-note-v2'] } })
@@ -370,7 +452,10 @@ async function until(predicate, description) {
     assert.deepEqual((await invoke('snapshot')).notes, [])
     assert.equal(await invoke('decide', key, true), 'applied')
     assert.equal(dialogs, 1)
-    assert.equal(await web.executeJavaScript("Boolean(document.querySelector('#review-title'))"), true)
+    await web.executeJavaScript(`new Promise((resolve,reject)=>{let n=0;const timer=setInterval(()=>{
+      if(!document.querySelector('#review-title')){clearInterval(timer);resolve()}
+      else if(++n>200){clearInterval(timer);reject(new Error('Empty review section stayed visible'))}
+    },25)})`)
     await web.executeJavaScript(`(async () => {
       const { createHotContext } = await import('/@vite/client')
       const hot = createHotContext('/__aisling_test_hmr')

@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import type { ConversationSession } from '../conversation/conversation-store'
 import { recallForModel, retrieveRecall, RECALL_LIMITS } from './memory-recall'
 import corpus from './__tests__/fixtures/recall-history.json'
@@ -50,10 +50,16 @@ it('retrieves both PDF and OCR histories across the rename with the existing Top
 })
 
 it('keeps exact Latin subject matches competitive with incidental Chinese character matches', () => {
+  // Test ranking independently of CPU contention, then explicitly check the unchanged scan deadline.
+  const clock = vi.spyOn(performance, 'now').mockReturnValue(0)
   const sessions = [session('topic', ['Beacon Zeta 仍在试验。']),
     ...Array.from({ length: 6 }, (_, i) => session(`noise${i}`, ['最近状态发生变化，你问各自经历了什么。']))]
-  expect(retrieveRecall(sessions, 'new', 'Beacon Zeta 各自经历了什么状态变化？').sessionIds).toContain('topic')
-  expect(retrieveRecall(sessions, 'new', 'wholly unrelated quasar').evidence).toBeUndefined()
+  try {
+    expect(retrieveRecall(sessions, 'new', 'Beacon Zeta 各自经历了什么状态变化？').sessionIds).toContain('topic')
+    expect(retrieveRecall(sessions, 'new', 'wholly unrelated quasar').evidence).toBeUndefined()
+    clock.mockReturnValueOnce(0).mockReturnValue(RECALL_LIMITS.scanMs + 1)
+    expect(retrieveRecall(sessions, 'new', 'Beacon Zeta').evidence).toBeUndefined()
+  } finally { clock.mockRestore() }
 })
 
 it('reports packing loss separately and never separates a correction from its session to fit the budget', () => {

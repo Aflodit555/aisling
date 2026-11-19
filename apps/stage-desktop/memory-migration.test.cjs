@@ -393,7 +393,7 @@ test('real Vite and Electron use the same authority, review, Recall, erasure and
   const stageRequire = createRequire(path.join(stage, 'package.json'))
   const viteEntry = path.join(path.dirname(stageRequire.resolve('vite/package.json')), 'dist/node/index.js')
   const { createServer } = await import(pathToFileURL(viteEntry).href)
-  const server = await createServer({ root: stage, logLevel: 'error', plugins: [{
+  const server = await createServer({ root: stage, logLevel: 'error', server: { host: '127.0.0.1', port: 5174, strictPort: true }, plugins: [{
     name: 'aisling-test-hot-update',
     configureServer(server) {
       server.middlewares.use('/__aisling_test_hmr', async (_request, response) => {
@@ -415,9 +415,8 @@ test('real Vite and Electron use the same authority, review, Recall, erasure and
     await server.listen()
     for (const [phase, profile] of await desktopProfiles()) {
       const result = await launch(electron, [path.join(__dirname, 'memory-migration-smoke.cjs'), phase, profile, resources], {
-        windowsHide: true, timeout: 50_000, env: { ...cleanEnv(), AISLING_DEV: '1', AISLING_DEV_PROFILE: profile },
+        windowsHide: true, timeout: 50_000, env: { ...cleanEnv(), AISLING_DEV: '1', AISLING_STAGE_URL: 'http://127.0.0.1:5174', AISLING_DEV_PROFILE: profile },
       }).catch(error => {
-        if (phase === 'legacy' && error.code === 75) return error
         throw new Error(phase + '\n' + error.stdout + '\n' + error.stderr, { cause: error })
       })
       assert.match(result.stdout, new RegExp('p4-smoke:' + phase), result.stderr)
@@ -428,7 +427,7 @@ test('real Vite and Electron use the same authority, review, Recall, erasure and
     fs.writeFileSync(path.join(profile, '.note-formation-test'), 'aisling-note-formation-p1-fixture\n')
     const result = await launch(electron, [path.join(__dirname, 'note-formation-smoke.cjs'), 'dev', profile], {
       windowsHide: true, timeout: 80_000,
-      env: { ...cleanEnv(), AISLING_STAGE_URL: 'http://localhost:5174/settings/memory', AISLING_DEV_PROFILE: profile },
+      env: { ...cleanEnv(), AISLING_STAGE_URL: 'http://127.0.0.1:5174/settings/memory', AISLING_DEV_PROFILE: profile },
     }).catch(error => { throw new Error(error.stdout + '\n' + error.stderr, { cause: error }) })
     assert.match(result.stdout, /"result":"note-formation-passed"/, result.stderr)
   } finally {

@@ -1,117 +1,67 @@
-# Memory Recall
+# Memory：当前架构与使用
 
-当前 Embedding 手动配置、Windows HNSW 部署与真实语义验收边界见 [P7.1](memory-p7-1-validation.md)；P7记录保留为实施时的历史状态。
+版本仍为 v0.3.9。P0—P4-B 已完成工程收束，尚未发布新版本；工程回归不等于真实模型语义质量验收。
 
-Vite 和构建版 Stage 的新建及已迁移 Desktop Profile 以 LadybugDB Note v2 为唯一结构化记忆权威。ConversationStore 持有原始消息，Core Context 负责当前会话。Memory 控制跨会话召回，新资料默认开启。Formation 控制额外的后台模型调用和自主整理，Recall 控制有效 Note 的注入，两者在新资料默认关闭。旧设置保留原有选择，移除旧 Organization 开关时不会将它转换为新权限。正式 v2 自动执行来源充分且符合受限授权规则的操作；不确定的提议保留审核。Main 始终复验证据、主体及目标版本，并通过事务和 Receipt 恢复写入。审核页继续显示异常提议的原始引文、依据、不确定性和建议动作。
+## 运行链路
 
-自主规则的原始基线见 [自主 Organization 实施报告](memory-autonomous-organization.md)，纵向语义演化见 [P6](memory-organization-p6.md)，当前向量检索、横向关联及运行限制见 [P7 Associative Network](memory-associative-network-p7.md)。Network 支持状态变化、过程延续、补充、未解决冲突及对称 ASSOCIATED_WITH；相似度和标签只提供候选，不直接建边。Formation 启用后可异步补建向量并使用既有 Provider 做有界关系判断：LLM 每小时最多8次、间隔至少60秒，每任务最多2次尝试。Note Recall 使用 BM25 / Embedding / Metadata 的 RRF 融合及最多两跳关联扩展；远程 query 向量失败回退本地检索，Core 预算不增加。旧 Profile 兼容路径不采用这些新规则。
+正式架构是 **Context + Raw Recall + Note v2 Recall**，没有第二套 Reflection Formation/Recall。
 
-Core 优先为当前会话保留预算，再装入 Raw 与 Note。Note 使用用户角色承载结构化背景数据。工具续轮复用首轮快照，Main 在每次请求前重新确认 Note 快照未作废。来源删除意图、Worker 重启及 Note 写入都会使快照作废。v2 数据库或完整分页不可用时，聊天继续使用 Context 与可用的 Raw。来源删除不依赖 Recall 开关。当前关系和历史读取边界见 [P6 Recall](memory-organization-p6.md#5-recall-与实际使用)。
-
-旧格式资料可在记忆设置运行只读预检。符合条件的资料经原生确认后升级到唯一 v2 权威。旧修订和操作回执留在受删源约束的历史存储，无法验证的资料会明确阻断切换。独立且来源完整的记忆资格阻塞可在原生确认后仅保留为历史，来源完整性和未知历史依赖仍阻断切换。迁移与旧路径的整体边界保留在 [Note-only 工程基线](memory-note-only-engineering-baseline.md)。
-
-## Worker 准备与开发入口
-
-`pnpm dev:desktop` 使用 Vite 和项目内的 `.local/desktop-dev-profile`。`pnpm start:desktop` 使用构建版 Stage 和 Electron 常规 Profile。测试已有隔离资料时，可给 Vite 启动设置 `AISLING_DEV_PROFILE` 为其绝对目录。同一目录在任一模式下都受 Electron 单实例锁约束。详见 [开发与运行时一致性](memory-development-runtime-alignment.md)。
-
-首次按 [Worker 资源准备](memory-development-runtime-alignment.md#首次准备-worker) 安装固定版本的 Node 24.12.0 和 LadybugDB 0.22.1。默认目录 `.local/memory-database` 的脚本或依赖清单与当前源码不一致时，Main 拒绝启动该 Worker。关闭 Desktop 后执行 `./scripts/prepare-memory-database.ps1`，脚本会校验并复用已有固定依赖，在旁边暂存后切换，保留旧资源备份。构建 Stage 不会刷新 Worker。
-
-## 旧资料与共用 Raw Recall
-
-以下保留旧权威资料的行为及共用 Raw Recall 的工程细节。未切换的资料继续使用 [Reflection Formation](memory-formation-v0.md) 与 [Reflection Recall](reflection-recall.md) 的已有行为。早期 [Memory 与 Reflection 实验](research/memory-validation.md) 记录的是当时架构的结果。
-
-## 使用与用户控制
-
-旧格式 profile 的 **设置 → 记忆** 使用同一页面和旧权限。Memory 主开关默认开启；已有明确关闭的设置继续保持关闭。Formation 需单独主动启用，可能额外调用 LLM Provider。关闭主开关会同步关闭并保存 Formation 状态，取消／丢弃其在途结果；不删除历史、Reflection 或待处理批次。再次开启主开关不会自动开启 Formation。选择随现有 `aisling.config.v1` 保存；浏览器使用 localStorage，Electron 使用现有文件存储桥接。ConversationStore 保持原存储键，兼容消息的可选 `createdAt` 字段。
-
-主开关同时控制原始 Recall 和已持久化的有效 Reflection Recall；关闭 Formation 子开关仅停止形成新认识，不妨碍读取既有产物。
-
-开启后，相关的本地旧会话片段与历史 Reflection 可能随用户文字消息发送给当前选择的 LLM Provider。没有为回忆额外调用模型。Recall 不参与图像轮、自主发言生成或 P2 更新。关闭对新的文字轮生效，不删除历史或撤回已发送的请求；当前会话中已经出现的内容仍受正常 Context 规则管理。
-
-删除旧会话后，后续检索不再读取它；原始 Recall 没有另建索引或缓存。Reflection 的只读缓存也会逐轮核实来源，来源被删除或修改的认识不注入。检索、读存储失败或无法装入证据时，普通聊天继续按原链路运行。
-
-## 检索和证据
-
-`apps/stage-web/src/runtime/memory-recall.ts` 在每个允许回忆的文字轮读取现有会话，排除当前会话，按历史词项计算相关性。中文使用单字与双字词项，拉丁文字使用完整词项；保留现有评分规则与 Top-5 限制。
-
-“还记得有什么吗”“还有呢”等整句匹配的短追问，可以使用当前会话最近 12 条消息中、长度不超过 300 字符的最近明确用户文本作有限检索锚点。Assistant 回复不提供锚点，明确的新话题直接使用当轮查询。该规则只构造检索词项，不把旧文本改写成新事实或替换实际用户输入。
-
-证据保留原文，不把不同记录拼成新的引文。来源区分用户报告、已存储 Assistant 回复、有观测与交付依据的自主发言。Stage 在实际追加用户输入（包括图像文字）、最终角色回复、自主回复和本地命令确认时记录 epoch 毫秒 `createdAt`；部分流式文本不单独持久化。ConversationStore 校验并保留消息时间，不从文字推算，也不给旧消息补写当前时间。普通短期 Context 仍投影为原来的 Provider 消息格式，不携带这一持久化字段。
-
-原始 Recall 按原有 BM25 相关性和整 Session 规则先选择、装包，再组织展示顺序。每条证据优先标注 `message-created`，旧自主回复可复用已有的 `utterance-delivered`；缺少逐条时间时标注 `session-only`，只在该组首条附上已有的 Session 创建／最后更新时间。完全没有时间时标注 `unknown`。缺少或无效的旧 Session 时间以 0 表示未知；旧单会话迁移不再把迁移时刻当作历史时刻，列表显示破折号。只读恢复不改写存储。
-
-同一 Session 始终保留消息位置和原序，不因时钟读数相同或倒退而重新排序。跨 Session 使用所选消息的时间范围；存在无时间消息时，只在 Session 的创建／更新时间范围完整有效时使用粗略范围，并包含已有逐条时间。只有互不重叠的范围才建立先后约束；同时间、重叠或缺失时间按原相关性顺序稳定取用，不建立额外时间关系。C／E 临时标签在排序前分配，Context 空间竞争时仍按原相关性优先保留整组，之后保持时间展示顺序。所有时间都是记录／会话时间，不能直接当作所述事件发生时间；仅有 `updatedAt` 也不能给旧消息定时。
-
-证据说明要求模型结合时间与更新措辞理解过去状态、当前状态、未来计划、考虑中和已完成行为；同一主题和范围内，后续明确用户更新通常更能反映当前状态，同时保留后来限定及过去经历。新兴趣不抹掉旧兴趣，提及频率不决定当前偏好。过去的角色猜测、承诺、虚构故事或“我做了”的表述，均不能当作用户确认或外部执行事实。时间不足、时钟矛盾或来源冲突时保留不确定性。
-
-## 预算与隐私
-
-- 最多 5 个候选 Session；原有证据限制为 6000 字符且 6000 UTF-8 字节。内部投影和最终模型投影都接受预算检查。
-- 保留整会话的合格证据，放不下时跳过该会话，避免为装入旧错误而截掉同会话中的纠正。
-- 仍使用 Context 的剩余空间，不挤掉既有历史选择；总输入上限为 14336 估算 token，并保留原有输出与安全余量。
-- 扫描仍有 250000 字符、30 ms 的本地保护限制，超限回退；同步读取整存储的成本不在扫描计时内。
-- 不支持的角色、工具中间消息、重复内容、空／占位内容及命中现有敏感文字规则的记录不进入回忆。过滤可能同时损失有用证据，且不能保证识别所有敏感信息。
-- 模型只接收有界原文、角色、临时标签、同会话位置、白名单时间及自主依据。Session 时间每组只携带一次；时间字段也计入现有预算，预算紧时可容纳的正文会略减。存储 Session／消息／Candidate／对象 ID 只保留在本地来源映射中，不作为元数据发给 Provider。
-- 常规诊断只保留已有白名单指标，不保存回忆正文、完整 Prompt 或认证信息。回忆块不会写回 ConversationStore；正常交付的最终回复按原规则保存。
-
-发送相关片段是开启此功能的直接效果，请按所选 Provider 的数据处理方式决定是否开启。原文中本身写出的敏感内容或标识不保证都能被过滤。
-
-## 职责区别与限制
-
-| 模块 | 职责 |
+| 能力 | 当前职责与入口 |
 | --- | --- |
-| Context | 为当前 Session 选择有界近期交互，包括已交付自主发言的精简依据 |
-| Memory | 从其他本地 Session 检索历史原文，供当前文字轮解释 |
-| P2 | 默认关闭的短期桌面情境认识预览，独立更新并只消费已就绪的认识 |
+| Context | Core context.ts / runtime.ts 优先保留当前 Session 的有界交互 |
+| Raw Recall | Web memory-recall.ts 从其他本地 Session 检索原文，不改写历史或另建数据库 |
+| Formation | Stage 成功交付后入队；Renderer 调用当前 Chat Provider；Main note-formation.cjs 负责持久任务、合同、来源与授权 |
+| Organization | 同一 Note 库、证据、版本及任务队列；note-organization-v2.mjs / note-semantic-contract.mjs 判断关系与演变 |
+| BM25 / Embedding | note-candidates.mjs / note-embedding.cjs 融合词面、元数据及可选向量；向量相似不自动授权事实或关系 |
+| Note Recall | note-v2-recall.ts 验证来源、版本与快照后提供 Note；不可用时保留 Context 和可用 Raw |
+| Store / Worker | 单一 LadybugDB，保存 Note、Revision、Evidence、关系、Receipt 与删除屏障；note-v1.cjs 仍承载现役 v2 能力 |
+| Obsidian Mirror | 单向读取库快照生成受管 Markdown，不从 Vault 反向形成记忆 |
 
-词项重叠弱、重命名、泛化问题或短句规则未覆盖的指代可能造成漏召回。短追问锚点能改善部分连续话题，但不能排除所有无关候选；过长、过旧、不安全或图像话题不作锚点。相关会话太大时仍可能因整会话预算被排除。
+## 设置与费用
 
-证据不足不等于事情没有发生；顺序不明、来源矛盾、缺少年份或行为回执时，模型应说明无法确认。本阶段通过证据表达和提示约束这一行为，没有硬编码答案或拒答器，也不能保证模型正确理解或遵守。
+- **Memory** 控制 Raw 和 Note 的跨会话使用；新配置默认开启。关闭会同步关闭 Formation，保留历史、任务与删除责任；再次开启不自动开启 Formation。
+- **Formation** 默认关闭，需单独授权。后台使用当前模型，并可能产生关系判断/文档 Embedding 费用，保留既有预算。关闭不删除历史或关闭已有 Note Recall。
+- **Recall** 默认关闭，仅控制 Note Recall。Memory 开启时的 Raw Recall 不依赖此子开关；可选查询 Embedding 可能额外收费。
+- **Embedding** 使用现有 DashScope Native API，复用或专用凭据；无配置时仍有本地词面候选。模型空间切换与向量补建沿原队列处理。
+- **Obsidian 镜像** 独立保存开关和路径，按原逻辑启停，不依赖 Formation/Recall 开关。42px 路径行支持失焦/Enter 保存与内联错误；仅维护带标记笔记，保护用户文件和其他目录。见 [Mirror 规则](obsidian-memory-mirror.md)。
 
-## 持续回归验证
+设置页不常驻显示内部批次统计或失败历史。Main 判断允许手动恢复时，出现默认折叠的“恢复未完成的记忆”；点击才执行。P1 持久任务、错误分类、有界自动重试、手动重试、Receipt 和完整诊断接口仍在。
 
-Memory 检索、安全与预算、时间／来源表达、短追问、设置恢复、失败回退和用户轮隔离均有自动测试。合成 `recall-history.json` 保留为持续回归材料；原实验的未召回旅行证据被明确记录为已知检索限制，不伪称语义问答通过。
+无待审请求时隐藏审核区；有请求时默认最多两条，可继续展开。每项可查看完整提议、原始证据、已有认识及不确定性，保留批准/拒绝。批准仍经过可信 Main 原生确认、来源与权限验证。Main 单次最多提供 20 项，处理后刷新补入余下请求；前端限制不删除后台请求。
 
-`memory-recall-time.test.ts` 使用本次提出的手碟／画画、未购买／已购买、考虑／计划购买情境；检查两时期的原文、时间、来源以及实际 Provider 请求中的解释约束。另有消息时间持久化、同会话顺序、旧数据、相同／重叠／无效时间、已有自主交付时间和 Context 竞争回归。它们是确定性工程测试，未调用真实模型，不证明模型实际理解已经改善。
+Context 优先获得预算。Raw 最多五个 Session、6000 字符且 6000 UTF-8 字节，按整组保留纠正和原序；Note Recall 最多三项 / 2000 字符，网络扩展沿既有边界。记录时间不是事件时间，缺时和冲突保持不确定性。开启记忆会把相关原文发送给所选 Provider，过滤不保证识别所有敏感内容。
 
-需要验证语义效果时，可用独立测试账号的真实 Provider 做以下少量人工用例（日期为测试设定），分别在 Recall 关闭／开启时提问并保存回答，不把它们加入每轮运行路径：
+## Profile 与启动
 
-| 历史材料 | 新 Session 问题 | 语义验收 |
-| --- | --- | --- |
-| 9 月用户说想练手碟；10 月明确说暂时放下手碟，现在想画画 | 我现在更想练手碟还是画画？之前呢？ | 当前偏向画画，仍保留过去想练手碟；不按提及次数裁定 |
-| 9 月用户说还没购买手碟；10 月说已购买并收到 | 我现在买手碟了吗？ | 依据后续用户报告说已购买，不把早先未购买状态永久化 |
-| 9 月用户考虑购买，角色误称已买；10 月用户明确说只是计划下个月买，目前没买 | 我现在已经买了吗？ | 区分考虑、计划与完成，纠正角色猜测；删除时间后也不臆造日期 |
+`pnpm start` 等同 `pnpm dev:desktop`（Vite + Electron）；`pnpm start:desktop` 构建 Renderer 后启动同一个 Main。三个普通入口均使用 P2 已准备的统一 Profile：Electron 原 userData 加 `-note-v2`，不再自动选择 `.local/desktop-dev-profile`。Windows 本项目默认 `%APPDATA%/@aisling/stage-desktop-note-v2`；改 app name 或换机器后必须重新核实。
 
-没有新增实时 LLM 调用、历史扫描或检索依赖。排序仅处理已进入有界证据包的最多 5 组 Session；原扫描时间／字符保护、Context 上限及短期历史窗口保持原值。未做设备级延迟基准；系统时钟失准、跨 Session 范围重叠、旧资料缺时、弱词项关联和未召回更新仍可能限制判断。
+默认目录必须有完整数据、authority、P2 committed 凭据及正确数据库；缺失/不一致会拒绝启动，不创建空库掩盖丢失。首次安装的通用 Profile 初始化与安装器仍未产品化。旧 Profile 不再通过设置页升级，不得伪造凭据启动。
 
-数值合法并不能验证历史时钟的真实性；以前版本若已把迁移时刻写成 Session 日期，现有数据无法识别其来源或恢复真实消息时间，本次不重写历史。
+`AISLING_DEV_PROFILE` 仅供显式隔离测试，dev/prod 均支持，要求已有绝对、规范且未封存目录；同一根共用单实例锁，不是第二个正式权威。`pnpm dev` 仅启动浏览器开发页面，不提供 Desktop Note 数据库。
 
-本次时间组织修改涉及的文件（工作区此前已有的其他改动保留）：
+Worker 固定 Node 24.12.0 / LadybugDB 0.22.1，默认 `.local/memory-database`。正常关闭使用它的 Desktop 后运行 `./scripts/prepare-memory-database.ps1` 刷新资源；首次安装、锁定二进制及回退见 [Worker 准备](memory-development-runtime-alignment.md#首次准备-worker)。构建 Renderer 不刷新 Worker。
 
-| 文件 | 职责 |
-| --- | --- |
-| `packages/core/src/context.ts`、`index.ts` | 可选消息创建时间及复用的时间校验；保持 Provider 投影规则 |
-| `packages/core/src/runtime.ts` | 原始 Recall 的时间／状态说明，剩余 Context 中按相关性整组裁剪并保持展示顺序 |
-| `apps/stage-web/src/stores/stage.ts` | 在实际追加用户输入、交付回复及本地命令确认时记时 |
-| `apps/stage-web/src/conversation/conversation-store.ts` | 保存／恢复时间字段；缺时旧记录保持未知，不补造读取／迁移时间 |
-| `apps/stage-web/src/runtime/memory-recall.ts` | 时间及来源投影、有界 Session 时间排序，不改变 BM25 评分 |
-| `apps/stage-web/src/components/ConversationBrow.vue` | 未知会话日期显示破折号 |
-| Core 的 `context.test.ts`、`runtime-recall.test.ts` | 短期 Context 隔离、原序和双来源预算中的相关性优先级 |
-| Web 的 `memory-recall-time.test.ts`、`memory-recall.test.ts`、`memory-capabilities.test.ts` | 新的时间／状态情境及已有证据、排序、预算回归 |
-| Web 的 `conversation-store.test.ts`、`stage-persistence.test.ts`、`stage-streaming.test.ts`、`stage-autonomous.test.ts` | 创建时间、旧数据、失败恢复、流式交付及自主回复时间一致性 |
-| `docs/memory.md` | 时间来源、边界、兼容策略及独立真实 Provider 验证材料 |
+## 删除、恢复与工程资料
+
+来源删除使相关 Raw/Note 快照失效，并沿 Evidence、Context、Revision、关系和历史归档执行现有闭包，不依赖 Recall 开关。归档不参与 Recall，仍承担隐私删除责任；离线备份/封存副本也有保留和删除责任。
+
+Git 只保护代码。恢复前正常关闭应用和 Worker，保留现状并核对 SHA 清单；完整复制到隔离副本验证主库/WAL、Raw、配置、任务、authority、删除/迁移状态及归档。复核快照之后的删除请求，不能复活旧来源；不单独替换主库或混搭 WAL。
+
+- [P2 Profile](memory-v0.4.0-p2-profile-unification.md)与 `scripts/unify-memory-profile.*` 保留完整交接、封存和恢复依据。
+- [P4-A](memory-v0.4.0-p4a-reflection-review.md) / [P4-B](memory-v0.4.0-p4b-reflection-retirement.md)保留 40 条处置、冻结清单、备份与 Receipt；演练/发布工具用于审计和恢复，不自动重跑。
+- `scripts/legacy-memory-recovery.cjs` 仅作显式离线旧格式恢复；`memory-history-backfill.cjs` 保留原历史回填的唯一 restore 机制，不作日常入口或重新回填。
+- [旧 Memory 说明归档](history/memory-before-productization.md)保留 Raw 时间/预算推导和旧实现边界。P0—P4-B 报告保留原时点结论，不照搬其旧操作作为当前流程。
+
+## 验证
+
+Core/Web Mock 和串行原生/Electron 回归覆盖开关、审核、P1 恢复、候选/Recall、Profile、Mirror、删除与 Receipt。付费语义测试默认跳过，需另行明确授权；Mock 不证明真实模型收益。
 
 ```powershell
 pnpm test
-node --test apps/stage-desktop/*.test.cjs
+$env:AISLING_MEMORY_DB_P0_TEST_RESOURCES = (Resolve-Path .local/memory-database).Path
+& .local/memory-database/runtime/node.exe --test --test-concurrency=1 'apps/stage-desktop/*.test.cjs' 'scripts/*.test.cjs'
 pnpm typecheck
 pnpm build
-$env:AISLING_MEMORY_SMOKE = '1'
-pnpm --filter @aisling/stage-desktop exec electron prod-smoke.cjs
-Remove-Item Env:AISLING_MEMORY_SMOKE
-$env:AISLING_CONTEXT_SMOKE = '1'
-pnpm --filter @aisling/stage-desktop exec electron prod-smoke.cjs
-Remove-Item Env:AISLING_CONTEXT_SMOKE
 ```
 
-Memory 生产构建冒烟使用隐藏 Electron 窗口、独立临时用户目录与 Mock 回复，检查正式 UI 开关、重启恢复、跨会话证据、连续追问、来源、取消／失败输出、预算与删除。Context 冒烟保留原有基本连续性回归。Mock 成功只证明工程链路，不证明真实模型回答准确率、长期使用体验或原生桌面采集质量。
+本轮实际结果与发布前事项见 [Memory 产品化审计](memory-productization-audit.md)。

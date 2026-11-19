@@ -20,7 +20,8 @@ dialog.showErrorBox = () => {}
 let failed = false
 const timeout = setTimeout(() => app.exit(2), 50000)
 app.on('ready', () => {
-  session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: /^https?:/.test(details.url) && !details.url.startsWith('http://localhost:5174/') }))
+  session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: /^https?:/.test(details.url)
+    && !['http://localhost:5174/', 'http://127.0.0.1:5174/'].some(origin => details.url.startsWith(origin)) }))
 })
 const store = require('./desktop-store.cjs')
 const originalConfig = store.readStoredConfig

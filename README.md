@@ -11,6 +11,9 @@ long-term experience direction takes Neuro-sama as one reference, and studies
 > **Current version:** v0.3.9 · **Status:** Memory engineering baseline. The architecture
 > and public APIs may still change.
 
+P0–P4-B Memory work and the current settings cleanup are unreleased engineering
+changes. The version remains v0.3.9; see the [current Memory guide](docs/memory.md).
+
 See the [v0.3.9 release notes](docs/release-v0.3.9.md) and
 [release validation](docs/release-v0.3.9-validation.md). This baseline does not
 establish long-term semantic benefit or readiness for installer distribution.
@@ -29,11 +32,12 @@ establish long-term semantic benefit or readiness for installer distribution.
 - Memory: optional cross-session recall from local conversation history,
   with bounded evidence, user-topic anchors for short follow-ups, and distinct
   sources for user reports, stored replies and delivered autonomous speech
-- Note-only memory for new Desktop profiles: opt-in autonomous organization,
+- Note v2 memory in a unified Desktop profile: opt-in autonomous organization,
   source-constrained lifecycle operations, typed Note links and local recall backed by original messages
 - Optional DashScope embeddings with local BM25 / metadata / vector RRF fusion,
   bounded two-hop associative recall, and Windows HNSW with an exact-search fallback
-- Previous-format profiles can check, keep eligible blocked records in history, and confirm a verified upgrade in Memory settings
+- Historical Reflection is retired from normal runtime; offline archives and
+  recovery tools remain subject to source deletion
 - Persistence hardening: unsaved history stays in memory with a visible warning;
   Desktop writes replace the stored file only after a temporary write succeeds
 - Desktop Situation Understanding P1/P1.1: explicit foreground/media candidates,
@@ -80,12 +84,10 @@ application rechecks original messages before it exposes a Note for recall.
 Storage and message timestamps describe records, and event time describes the
 reported event. Historical semantic quality on real models still needs validation.
 
-For existing profiles, **Memory → Check previous memories** checks what can be
-upgraded. Confirming an eligible upgrade preserves verified current memories
-and switches to v2 after validation. Historical operations remain subject to
-source deletion. Profiles with unresolved evidence or history keep their old
-authority or show that an interrupted upgrade needs to resume. See the
-[Memory migration and compatibility notes](docs/memory.md).
+Memory settings hide empty reviews and internal task statistics. Proposals retain
+evidence, Approve/Reject and native confirmation; manual failure recovery is
+available on demand. Legacy formats require verified offline recovery, rather
+than a settings-page upgrade. See the [Memory guide](docs/memory.md).
 
 Design and limits:
 [Memory Recall](docs/memory.md),
@@ -104,8 +106,8 @@ pnpm dev:desktop
 `pnpm dev:desktop` is the current default for development and desktop testing:
 it starts the Stage renderer (Vite) on localhost port 5174, waits for that
 process to listen, then starts Electron. Code changes can update the running
-UI. By default it uses `.local/desktop-dev-profile` for both app and browser
-session data.
+UI. Development and production both select the prepared P2 unified profile
+(Electron's original userData plus `-note-v2`) for app and browser session data.
 
 To test the Desktop as a **built application**, closer to how a future
 distributed app would run:
@@ -116,7 +118,7 @@ pnpm start:desktop
 
 This command builds the renderer first, then launches Electron without the Vite
 server. Run it again after changing code. It still requires this source checkout
-and its dependencies. It uses the normal Electron profile. Both Desktop
+and its dependencies. It uses the same prepared unified profile. Both Desktop
 commands apply the same Memory authority rules. To test an existing isolated
 profile with Vite, set `AISLING_DEV_PROFILE` to its absolute directory. Both
 launch modes take the same exclusive lock when pointed at the same profile.
@@ -129,6 +131,10 @@ The source checkout checks
 that the default `.local/memory-database` Worker scripts and manifests match
 the checkout before spawning the Worker. See [Memory](docs/memory.md) for
 safe refresh steps.
+
+Normal Desktop startup requires an intact, prepared unified profile; it refuses
+missing data instead of creating an empty replacement. Fresh-install profile
+setup and installer distribution still need a separate productization step.
 
 **Naming note:** `pnpm start` currently aliases `pnpm dev:desktop`, not
 `pnpm start:desktop`.

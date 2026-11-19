@@ -20,7 +20,6 @@ const STAGE_DESKTOP_DIR = join(ROOT, 'apps', 'stage-desktop')
 
 const DEFAULT_STAGE_URL = 'http://localhost:5174'
 const READY_TIMEOUT_MS = 60_000
-const DEV_RESTART_EXIT = 75
 const PROD = process.argv.includes('--prod')
 
 const stageWebRequire = createRequire(pathToFileURL(join(STAGE_WEB_DIR, 'package.json')))
@@ -122,10 +121,6 @@ function launchElectron(extraEnv = {}) {
   electron.on('exit', (code, signal) => {
     log(`Electron exited (code=${code ?? 'null'} signal=${signal ?? 'null'})`)
     children.splice(children.indexOf(electron), 1)
-    if (!cleanedUp && extraEnv.AISLING_DEV === '1' && code === DEV_RESTART_EXIT) {
-      launchElectron(extraEnv)
-      return
-    }
     cleanup()
     process.exit(code ?? 0)
   })

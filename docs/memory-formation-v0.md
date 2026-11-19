@@ -1,3 +1,5 @@
+> 历史设计与恢复依据：旧 Reflection Formation/Recall 及普通运行兼容入口已在 P4-B 退役。本页不是当前使用说明；请见 [Memory](memory.md) 和 [P4-B](memory-v0.4.0-p4b-reflection-retirement.md)。
+
 # Reflection Formation
 
 本文仅描述尚未迁移的旧 Profile 兼容路径；当前 Note v2 行为见 [Memory](memory.md)。

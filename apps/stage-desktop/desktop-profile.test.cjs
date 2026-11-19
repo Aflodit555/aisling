@@ -170,9 +170,10 @@ test('native graph and P1 history survive; archived Reflection participates in s
   const { createRequire } = require('node:module'), { pathToFileURL } = require('node:url')
   const stage = path.resolve(__dirname, '../stage-web'), loader = createRequire(path.join(stage, 'package.json'))
   const vite = await import(pathToFileURL(path.join(path.dirname(loader.resolve('vite/package.json')), 'dist/node/index.js')).href)
-  const server = await vite.createServer({ root: stage, logLevel: 'error', server: { host: 'localhost', port: 5174, strictPort: true } })
+  // Keep the user's localhost dev server running; Main already trusts this IPv4 loopback origin.
+  const server = await vite.createServer({ root: stage, logLevel: 'error', server: { host: '127.0.0.1', port: 5174, strictPort: true } })
   try {
-    await server.listen(); env.AISLING_STAGE_URL = 'http://localhost:5174'; env.AISLING_DEV = '1'
+    await server.listen(); env.AISLING_STAGE_URL = 'http://127.0.0.1:5174'; env.AISLING_DEV = '1'
     await smoke('concurrent')
   } finally { await server.close(); delete env.AISLING_STAGE_URL; delete env.AISLING_DEV }
   await smoke('read')

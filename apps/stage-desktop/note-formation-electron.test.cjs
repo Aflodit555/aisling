@@ -8,7 +8,24 @@ const { sourceMessageLookup } = require('./memory-evidence.cjs')
 
 const prepared = process.env.AISLING_MEMORY_DB_P0_TEST_RESOURCES
 
-test('Memory task UI shows every failure, retries through trusted Main, keeps operation counts, and switches languages', {
+test('Memory settings hide empty reviews, paginate without loss, keep native approval and render both themes and languages', {
+  skip: !prepared && 'Prepared Worker required', timeout: 110000,
+}, () => {
+  const root = path.resolve(__dirname, '../../artifacts/memory-note-only-p1')
+  fs.mkdirSync(root, { recursive: true })
+  const profile = fs.realpathSync(fs.mkdtempSync(path.join(root, 'productization-ui-')))
+  fs.writeFileSync(path.join(profile, '.note-formation-test'), 'aisling-note-formation-p1-fixture\n')
+  const result = spawnSync(require('electron'), [path.join(__dirname, 'note-formation-smoke.cjs'), 'productization', profile, prepared], {
+    cwd: __dirname, windowsHide: true, encoding: 'utf8', timeout: 95000,
+    env: Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AISLING_|ELECTRON_RUN_AS_NODE$|TYPESAFE_API_KEY$)/i.test(name))),
+  })
+  assert.ifError(result.error)
+  assert.equal(result.status, 0, result.stdout + '\n' + result.stderr)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(profile, 'ui-proof.json'))).renderings.length, 8)
+  console.log('Memory settings DOM/theme proof: ' + path.join(profile, 'ui-proof.json'))
+})
+
+test('Memory keeps manual recovery on demand, preserves diagnostic history and retries through trusted Main', {
   skip: !prepared && 'Prepared Worker required', timeout: 110000,
 }, () => {
   const root = path.resolve(__dirname, '../../artifacts/memory-note-only-p1')

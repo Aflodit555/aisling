@@ -1,3 +1,5 @@
+> 历史设计与恢复依据：旧 Reflection Formation/Recall 及普通运行兼容入口已在 P4-B 退役。本页不是当前使用说明；请见 [Memory](memory.md) 和 [P4-B](memory-v0.4.0-p4b-reflection-retirement.md)。
+
 # Note-only Memory 工程基线
 
 本文保留 P0–P5 收束时的历史基线；当前自主语义组织见 [P6](memory-organization-p6.md)，日常启动与 Worker 更新见 [运行时一致性](memory-development-runtime-alignment.md)。旧阶段报告已清理，以下提交、测试计数和工作区描述均属于当时记录。

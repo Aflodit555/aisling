@@ -1,3 +1,5 @@
+> 历史工程记录：Worker 准备/刷新步骤仍有效；本页后文的默认开发 Profile、旧迁移 UI 和退出码重启流程已被 P2/P4-B 替代。当前入口与 Profile 以 [Memory](memory.md) 为准。
+
 # Memory 开发环境与运行时一致性
 
 ## 基线与问题

@@ -10,7 +10,7 @@ assert.equal(path.dirname(fs.realpathSync(profile)), fs.realpathSync(root))
 assert.equal(fs.readFileSync(path.join(profile, '.migration-fixture'), 'utf8'), 'aisling-p4-synthetic\n')
 app.setPath('userData', profile); app.setPath('sessionData', profile); app.disableHardwareAcceleration()
 app.commandLine.appendSwitch('disable-background-networking')
-const dev = process.env.AISLING_DEV === '1', stageUrl = dev ? 'http://localhost:5174' : 'aisling://stage'
+const dev = process.env.AISLING_DEV === '1', stageUrl = dev ? new URL(process.env.AISLING_STAGE_URL || 'http://localhost:5174').origin : 'aisling://stage'
 const opts = { show: false, diagnostics: false, stageUrl: stageUrl + '/settings/memory', noteOnlyForNewProfiles: true, noteV2: { resources } }
 const deadline = setTimeout(() => app.exit(2), 45_000)
 const finish = () => { clearTimeout(deadline); console.log('p4-smoke:' + phase); app.quit() }

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Unify normal Desktop startup on the prepared P2 profile; retain offline
+  backup/recovery, source deletion and P1 durable failure handling.
+- Retire Reflection Formation/Recall from normal runtime after reviewed history
+  migration; keep Context + Raw Recall + Note v2.
+- Simplify Memory settings: hide task diagnostics and empty reviews, show two
+  proposals at a time, preserve evidence/native approval and on-demand recovery.
+- Correct current usage documentation and mark previous architecture as history.
+
+Version remains v0.3.9. See the [current Memory guide](docs/memory.md) and
+[productization audit](docs/memory-productization-audit.md); this is not a release.
+
 ## v0.3.9 — 2026-11-12
 
 Memory's first engineering baseline, collecting P0–P7.1 without a new database

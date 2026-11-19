@@ -127,8 +127,9 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
     const speed = Math.hypot(eyeVelocity.x, eyeVelocity.y)
     const stoppingSpeed = (Math.sqrt(maxAcceleration ** 2 + 8 * maxAcceleration * distance) - maxAcceleration) / 2
     if (speed > stoppingSpeed) {
-      eyeVelocity.x *= stoppingSpeed / speed
-      eyeVelocity.y *= stoppingSpeed / speed
+      const scale = stoppingSpeed / speed
+      eyeVelocity.x *= scale
+      eyeVelocity.y *= scale
     }
     eye.x += eyeVelocity.x
     eye.y += eyeVelocity.y

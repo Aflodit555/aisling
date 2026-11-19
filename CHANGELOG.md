@@ -1,17 +1,54 @@
 # Changelog
 
-## Unreleased
+## [0.4.0] — 2026-11-19
 
-- Unify normal Desktop startup on the prepared P2 profile; retain offline
-  backup/recovery, source deletion and P1 durable failure handling.
-- Retire Reflection Formation/Recall from normal runtime after reviewed history
-  migration; keep Context + Raw Recall + Note v2.
-- Simplify Memory settings: hide task diagnostics and empty reviews, show two
-  proposals at a time, preserve evidence/native approval and on-demand recovery.
-- Correct current usage documentation and mark previous architecture as history.
+### Memory Architecture
 
-Version remains v0.3.9. See the [current Memory guide](docs/memory.md) and
-[productization audit](docs/memory-productization-audit.md); this is not a release.
+- Unify normal runtime on Context + Raw Recall + Note v2 Recall, with one prepared
+  Profile authority shared by development and built Desktop startup.
+
+### Formation Reliability
+
+- Persist tasks and classified failures; bound automatic retries, retain manual
+  recovery, validate sources and settle uncertain outcomes through Receipt replay.
+- Ground Formation in bounded original context and coordinate existing semantic
+  contracts without treating assistant claims or similarity as authorization.
+
+### Note v2
+
+- Preserve Evidence, Revision, atomic transactions, version checks and Receipt
+  idempotency throughout reviewed history migration and source erasure.
+
+### Recall & Organization
+
+- Coordinate BM25/metadata and optional Embedding candidates with existing
+  Organization and evidence-based event evolution. Preserve Raw fallback and budgets.
+
+### Reflection Retirement
+
+- Retire legacy Reflection Formation/Recall, dedicated UI, IPC and exports after
+  reviewed migration; retain historical archives, privacy deletion and offline recovery.
+
+### Obsidian Mirror
+
+- Add one-way Note v2 Markdown mirroring, managed-file protection, settings path
+  persistence and dynamic synchronization; the database remains authoritative.
+
+### UI & Productization
+
+- Remove persistent task diagnostics and empty review panels; show two proposals
+  initially with evidence and native approval, plus on-demand failure recovery.
+- Retain English/Chinese and Light/Dark alignment and existing settings structure.
+
+### Engineering & Data Safety
+
+- Preserve independent backups and recovery tools; redact unpublished audit history
+  while retaining engineering findings and all stage commits.
+- Integrate upstream Live2D gaze deceleration scale reuse without altering Memory.
+
+Engineering regressions do not establish long-term model, retrieval or semantic
+benefit. Installer/signing, new-machine Profile initialization and paid model
+acceptance remain separate work. See [release verification](docs/release-v0.4.0.md).
 
 ## v0.3.9 — 2026-11-12
 

@@ -1,31 +1,29 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { createAutonomousStimulus, type ChatCompletionRequest } from '@aisling/core'
 import { estimateMessageTokens, INPUT_TOKEN_LIMIT } from '../../../../packages/core/src/context'
 import { createLocalStorageConversationStore } from '../conversation/conversation-store'
-import { loadLegacyMemory, useStageStore } from './stage'
+import { useStageStore } from './stage'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
 import { useEmotionStore } from './emotion'
-import { sourceRef } from '../runtime/reflection-formation'
-import type { OrganizationBridge } from '../runtime/note-organization'
+import { sourceRef } from '../runtime/formation-evidence'
+import type { NoteV2RecallBridge } from '../runtime/note-v2-recall'
+import type { NoteFormationBridge } from '../runtime/note-formation'
 
-beforeAll(loadLegacyMemory)
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-async function fixture({ diagnostics = false, legacy = diagnostics, recallHeads }: {
-  diagnostics?: boolean; legacy?: boolean; recallHeads?: OrganizationBridge['recallHeads'];
+async function fixture({ diagnostics = false, snapshot, formationBridge }: {
+  diagnostics?: boolean; snapshot?: NoteV2RecallBridge['snapshot']; formationBridge?: NoteFormationBridge;
 } = {}) {
   const data = new Map<string, string>()
   const diagnosticRecords: Array<Record<string, unknown>> = []
   vi.stubGlobal('window', { localStorage: { getItem: (k: string) => data.get(k) ?? null,
     setItem: (k: string, v: string) => { data.set(k, v) } }, aislingDesktop: {
-      ...(legacy && { reflectionStorage: { read: () => ({ ok: false }), write: () => false } }),
       ...(diagnostics && { desktopDiagnostics: { enabled: true },
         recordDesktopDiagnostic: (r: Record<string, unknown>) => diagnosticRecords.push(r) }),
-      ...(recallHeads && { memoryOrganization: {
-        recallHeads, setEnabled: async () => ({ ready: false, autoWrite: false, reason: 'disabled' }),
-      } }),
+      ...(snapshot && { noteRecall: { snapshot, current: async () => true } }),
+      ...(formationBridge && { noteFormation: formationBridge }),
     } })
   setActivePinia(createPinia())
   const settings = useSettingsStore(); await settings.load()
@@ -42,82 +40,52 @@ async function fixture({ diagnostics = false, legacy = diagnostics, recallHeads 
   return { stage, store, old, complete, send, data, settings, diagnosticRecords }
 }
 
-it('compares Note Recall off and on at the Provider, keeps raw Recall, and discards stale or unavailable Notes', async () => {
-  const read = vi.fn<NonNullable<OrganizationBridge['recallHeads']>>()
-  const { stage, old, complete, settings, send } = await fixture({ recallHeads: read })
-  const evidence = await sourceRef(old.id, 0, old.messages[0]!)
-  const note = { id: 'semantic-note', version: 1, createdAt: 1, status: 'active', basis: 'direct', subject: 'profile-user',
-    eventTime: null, content: '纸舟工具的票根导出格式是 PDF。' } as const
-  const grounds = { origins: [{ reflectionId: 'fixture-origin' }], evidence: [evidence] }
-  read.mockResolvedValue({ reason: 'ready', excluded: 0, notes: [
-    { note, grounds },
-    { note: { ...note, id: 'speech', content: '用户陈述：' + old.messages[0]!.content }, grounds },
-    { note: { ...note, id: 'stale', content: '纸舟票根 PDF 过期候选' }, grounds: {
-      ...grounds, evidence: [{ ...evidence, digest: 'a'.repeat(64) }],
-    } },
-  ] })
-  stage.memoryTraceEnabled = true
-  await send()
-  const request = () => complete.mock.calls.at(-1)![0].messages.map(message => message.content).join('\n')
-  expect(read).not.toHaveBeenCalled()
-  expect(request()).toContain('[Cross-session recall evidence]')
-  expect(request()).not.toContain('note-understanding')
-  stage.newConversation()
-  await settings.setNoteRecallEnabled(true)
-  await send()
-  expect(request()).toContain('[Cross-session recall evidence]')
-  expect(request()).toContain(note.content)
-  expect(request()).not.toContain('note-speech-event')
-  expect(request()).not.toContain('过期候选')
-  expect(stage.noteRecallTrace?.candidates).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: 'speech', outcome: 'duplicate' }),
-    expect.objectContaining({ id: 'stale', outcome: 'invalid-source' }),
-  ]))
-  read.mockImplementation(() => new Promise(() => {}))
-  await send()
-  expect(stage.noteRecallTrace?.reason).toBe('database-timeout')
-  expect(request()).toContain('[Cross-session recall evidence]')
-  expect(request()).not.toContain('note-understanding')
-  stage.deleteSession(old.id)
-  expect(stage.noteRecallTrace).toBeUndefined()
-  stage.$dispose()
+it('forwards only delivered interactions to current Note Formation and keeps Memory off effective', async () => {
+  const bridge: NoteFormationBridge = { delivered: vi.fn(async () => {}), flush: vi.fn(async () => {}), next: vi.fn(async () => null),
+    prepare: vi.fn(async () => { throw Error('No synthetic work was claimed') }), submit: vi.fn(async () => {}), fail: vi.fn(async () => {}) }
+  const { stage, settings, send, complete } = await fixture({ formationBridge: bridge })
+  complete.mockResolvedValue({ text: 'Synthetic delivered reply.' })
+  try {
+    await send(); expect(bridge.delivered).not.toHaveBeenCalled()
+    await settings.setMemoryFormationEnabled(true); await send()
+    await vi.waitFor(() => expect(bridge.delivered).toHaveBeenCalledWith(stage.activeSessionId, [2, 3]))
+    await settings.setMemoryEnabled(false); vi.mocked(bridge.delivered).mockClear(); await send()
+    expect(bridge.delivered).not.toHaveBeenCalled()
+    await settings.setMemoryEnabled(true); await settings.setMemoryFormationEnabled(true)
+    complete.mockRejectedValueOnce(Error('Synthetic failed response')); await send()
+    expect(bridge.delivered).not.toHaveBeenCalled()
+    expect(bridge.submit).not.toHaveBeenCalled()
+  } finally { stage.$dispose() }
 })
 
-it('preserves both recall sources for a legacy Desktop and respects Memory off', async () => {
-  const { stage, settings, old, complete, send, data, diagnosticRecords } = await fixture({ diagnostics: true })
-  const ref = await sourceRef(old.id, 0, old.messages[0]!)
-  const raw = JSON.stringify({ version: 1, progress: [], batches: [{ id: 'batch', sessionId: old.id,
-    sourceRefs: [ref], units: 1, status: 'completed', attempts: 1, reflectionIds: ['reflection'] }], reflections: [
-    { version: 1, id: 'reflection', content: '用户报告纸舟旅行票根工具支持 PDF 导出。', kind: 'project-state', basis: 'direct',
-      tags: ['纸舟', 'PDF'], sourceRefs: [ref], relatedReflectionIds: [], createdAt: 1 },
-  ] })
-  const read = vi.fn(() => ({ ok: true, value: raw })), write = vi.fn(() => false)
-  vi.stubGlobal('window', { ...window, aislingDesktop: { ...window.aislingDesktop, reflectionStorage: { read, write } } })
-  const savedConfig = data.get('aisling.config.v1')
-  await send()
-  const request = JSON.stringify(complete.mock.calls.at(-1)![0])
-  expect(request.includes('[Cross-session recall evidence]')).toBe(true)
-  expect(request.includes('[Historical Aisling reflections]')).toBe(true)
-  expect(diagnosticRecords.filter(r => r.type === 'context-assembled').at(-1)).toMatchObject({
-    recallIncluded: true, reflectionCount: 1, reflectionReason: 'injected',
-  })
-  expect(stage.memoryRecallDiagnostic).toBeDefined()
-  expect(read).toHaveBeenCalledOnce()
-  expect(write).not.toHaveBeenCalled()
-  expect(stage.formationStatus.enabled).toBe(false)
-  expect(data.get('aisling.config.v1')).toBe(savedConfig)
-  expect(settings.config.memory.formationEnabled).toBe(false)
-  await settings.setMemoryEnabled(false)
-  read.mockClear()
-  await send()
-  expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toMatch(/Cross-session recall evidence|Historical Aisling reflections/)
-  expect(read).not.toHaveBeenCalled()
-  expect(stage.memoryRecallDiagnostic).toBeUndefined()
-  expect(complete).toHaveBeenCalledTimes(2)
-  stage.$dispose()
+it('combines current Note v2 with Raw, rejecting stale sources and preserving Raw on Note timeouts', async () => {
+ const snapshot=vi.fn<NoteV2RecallBridge['snapshot']>()
+ const {stage,old,complete,settings,send}=await fixture({snapshot})
+ const evidence=await sourceRef(old.id,0,old.messages[0]!)
+ const note={id:'semantic-note',version:1,createdAt:1,updatedAt:1,status:'active',kind:'fact',basis:'direct',subject:'profile-user',eventTime:null,content:'纸舟工具的票根导出格式是 PDF。'} as const
+ snapshot.mockResolvedValue({reason:'ready',version:'v1',notes:[{note,grounds:{evidence:[evidence]}},
+  {note:{...note,id:'stale',content:'纸舟票根 PDF 过期候选'},grounds:{evidence:[{...evidence,digest:'a'.repeat(64)}]}}]})
+ const request=()=>JSON.stringify(complete.mock.calls.at(-1)![0])
+ await send();expect(snapshot).not.toHaveBeenCalled();expect(request()).toContain('[Cross-session recall evidence]')
+ stage.newConversation();await settings.setNoteRecallEnabled(true);await send()
+ expect(request()).toContain(note.content);expect(request()).not.toContain('过期候选');expect(request()).toContain('[Cross-session recall evidence]')
+ snapshot.mockImplementation(()=>new Promise(()=>{}));await send()
+ expect(request()).not.toContain(note.content);expect(request()).toContain('[Cross-session recall evidence]')
+ stage.deleteSession(old.id);await send();expect(request()).not.toContain(old.messages[0]!.content!)
+ stage.$dispose()
 })
 
-
+it('ignores an obsolete Reflection bridge and keeps Memory off independent from Formation', async () => {
+ const {stage,settings,complete,send}=await fixture({diagnostics:true})
+ const read=vi.fn(()=>({ok:true,value:'NEVER-INJECT-ARCHIVED-REFLECTION'})),write=vi.fn()
+ vi.stubGlobal('window',{...window,aislingDesktop:{...window.aislingDesktop,reflectionStorage:{read,write}}})
+ await send();expect(JSON.stringify(complete.mock.calls.at(-1)![0])).toContain('[Cross-session recall evidence]')
+ expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toContain('NEVER-INJECT-ARCHIVED-REFLECTION')
+ await settings.setMemoryEnabled(false);await send()
+ expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toContain('[Cross-session recall evidence]')
+ expect(read).not.toHaveBeenCalled();expect(write).not.toHaveBeenCalled();expect(settings.config.memory.formationEnabled).toBe(false)
+ stage.$dispose()
+})
 
 it('disables thinking for the current ordinary-chat route without changing saved settings or the shared provider', async () => {
   for (const diagnostics of [false, true]) {
@@ -134,10 +102,6 @@ it('disables thinking for the current ordinary-chat route without changing saved
 
 it('uses the submission snapshot without another storage read for recall in all three switch combinations', async () => {
   const { stage, settings, complete, send, diagnosticRecords } = await fixture({ diagnostics: true })
-  let reflectionRaw: string | null = null
-  vi.stubGlobal('window', { ...window, aislingDesktop: { ...window.aislingDesktop, reflectionStorage: {
-    read: () => ({ ok: true, value: reflectionRaw }), write: (value: string) => { reflectionRaw = value; return true },
-  } } })
   await settings.setMemoryEnabled(false); await send() // Give the session its title before counting reads.
   const readsAtProvider: number[] = []
   const read = vi.spyOn(window.localStorage, 'getItem')
@@ -145,10 +109,9 @@ it('uses the submission snapshot without another storage read for recall in all 
   for (const [memory, reflection] of [[false, false], [true, false], [true, true]]) {
     await settings.setMemoryEnabled(memory!)
     await settings.setMemoryFormationEnabled(reflection!)
-    if (reflection) await vi.waitFor(() => expect(stage.formationStatus.lastEvent).toBe('ready'))
     read.mockClear(); diagnosticRecords.length = 0
     await send()
-    expect(stage.formationStatus.enabled).toBe(reflection)
+    expect(settings.config.memory.formationEnabled).toBe(reflection)
     expect(JSON.stringify(complete.mock.calls.at(-1)![0]).includes('[Cross-session recall evidence]')).toBe(memory)
     expect(diagnosticRecords.filter(r => r.type === 'context-assembled')).toHaveLength(1)
     expect(diagnosticRecords.find(r => r.type === 'context-assembled')?.recallIncluded).toBe(memory)
@@ -156,7 +119,7 @@ it('uses the submission snapshot without another storage read for recall in all 
   expect(readsAtProvider[1]).toBe(readsAtProvider[0])
   expect(readsAtProvider[2]).toBe(readsAtProvider[0])
   expect(complete).toHaveBeenCalledTimes(4)
-  stage.formation!.dispose()
+  stage.$dispose()
 })
 
 it('does not recall removed sessions when external storage no longer contains the active session', async () => {
@@ -291,217 +254,4 @@ it('anchors an enabled vague follow-up in the real Stage path and keeps disabled
     const block = input.messages.find(m => m.content?.startsWith('[Cross-session recall evidence]'))?.content
     if (block) expect(new TextEncoder().encode(block.slice(block.lastIndexOf('\n') + 1)).length).toBeLessThanOrEqual(6000)
   }
-})
-
-it('forms only delivered interactions asynchronously in an independent store without waiting in chat', async () => {
-  const { stage, settings, complete } = await fixture({ legacy: true })
-  let raw: string | null = null
-  vi.stubGlobal('window', { ...window, aislingDesktop: { reflectionStorage: {
-    read: () => ({ ok: true, value: raw }), write: (value: string) => { raw = value; return true },
-  } } })
-  expect(stage.formationStatus.enabled).toBe(false)
-  expect(raw).toBeNull()
-  let finish!: (result: { text: string }) => void
-  let finishCancelled!: (result: { text: string }) => void
-  let deferAutonomous = false
-  let normalFailure = false
-  complete.mockImplementation(request => {
-    if (request.messages[0]?.content?.startsWith('You form append-only'))
-      return new Promise(resolve => { finish = resolve })
-    if (deferAutonomous) return new Promise(resolve => { finishCancelled = resolve })
-    return normalFailure ? Promise.reject(new Error('failed chat')) : Promise.resolve({ text: '这是实际交付的回应。' })
-  })
-  await settings.setMemoryFormationEnabled(true)
-  await vi.waitFor(() => expect(stage.formationStatus.lastEvent).toBe('ready'))
-  deferAutonomous = true
-  stage.sendStimulus(createAutonomousStimulus({ candidate: { id: 'cancelled', objectId: 'cancelled-object', source: 'foreground',
-    change: 'appeared', snapshot: { capturedAt: 1, targetHwnd: '1', sequence: 1 }, target: { app: 'Mock', title: '纸舟', text: 'Old photograph.' } } }))
-  stage.send('/quiet')
-  finishCancelled({ text: '未交付，不应形成 Reflection。' }); deferAutonomous = false
-  await vi.waitFor(() => expect(stage.sending).toBe(false))
-  expect(stage.formation!.inspect().batches).toEqual([])
-  for (const text of ['纸舟实验版已发布。', '纸舟还有识别问题。', '纸舟识别问题修复了。']) {
-    stage.send(text)
-    await vi.waitFor(() => expect(stage.sending).toBe(false))
-  }
-  await vi.waitFor(() => expect(stage.formationStatus.running).toBe(true))
-  expect(stage.sending).toBe(false)
-  expect(stage.memoryRecallEnabled).toBe(true)
-  expect(stage.formation!.inspect().batches[0]!.sourceRefs).toHaveLength(6)
-  expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toContain(stage.activeSessionId)
-  finish({ text: '{"reflections":[{"content":"用户报告纸舟实验版已发布。","kind":"project-state","basis":"direct","tags":["纸舟"],"sources":["E1"],"related":[]}]}' })
-  await vi.waitFor(() => expect(stage.formation!.inspect().reflections).toHaveLength(1))
-  expect(stage.formation!.inspect().reflections[0]!.sourceRefs[0]!.sessionId).toBe(stage.activeSessionId)
-  normalFailure = true
-  stage.send('这个请求不会得到交付回复。')
-  await vi.waitFor(() => expect(stage.sending).toBe(false))
-  await stage.formation!.flush()
-  expect(stage.formation!.inspect().batches).toHaveLength(1)
-  await settings.setMemoryFormationEnabled(false)
-  stage.formation!.dispose()
-})
-
-it('keeps normal replies working when the independent formation request fails', async () => {
-  const { stage, settings, complete } = await fixture({ legacy: true })
-  let raw: string | null = null
-  vi.stubGlobal('window', { ...window, aislingDesktop: { reflectionStorage: {
-    read: () => ({ ok: true, value: raw }), write: (value: string) => { raw = value; return true },
-  } } })
-  complete.mockImplementation(async request => {
-    if (request.messages[0]?.content?.startsWith('You form append-only')) throw new Error('background provider failed')
-    return { text: '这是普通聊天回复。' }
-  })
-  await settings.setMemoryFormationEnabled(true)
-  await vi.waitFor(() => expect(stage.formationStatus.lastEvent).toBe('ready'))
-  for (const question of ['手碟目标太大没开始。', '缩小成两分钟后练完了。', '画画缩小成一个杯子后完成了。']) {
-    stage.send(question); await vi.waitFor(() => expect(stage.sending).toBe(false))
-  }
-  await vi.waitFor(() => expect(stage.formation!.inspect().batches[0]?.error).toBe('provider-error'))
-  stage.send('这个新问题仍然需要普通回复。')
-  await vi.waitFor(() => expect(stage.sending).toBe(false))
-  expect(stage.messages.filter(m => m.role === 'assistant')).toHaveLength(4)
-  expect(stage.messages.some(m => m.role === 'error')).toBe(false)
-  expect(stage.formation!.inspect().reflections).toEqual([])
-  expect(complete.mock.calls.filter(([request]) => request.messages[0]?.content?.startsWith('You form append-only'))).toHaveLength(1)
-  stage.$dispose()
-})
-
-it('applies the verified Formation thinking policy through Stage without changing ordinary chat or settings', async () => {
-  const { stage, settings, complete, data } = await fixture({ legacy: true })
-  let raw: string | null = null
-  vi.stubGlobal('window', { ...window, aislingDesktop: { reflectionStorage: {
-    read: () => ({ ok: true, value: raw }), write: (value: string) => { raw = value; return true },
-  } } })
-  settings.config.consciousness = { ...settings.config.consciousness, model: 'qwen3.8-flash',
-    baseUrl: 'https://test-workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1' }
-  complete.mockImplementation(async request => ({ text: request.messages[0]?.content?.startsWith('You form append-only')
-    ? '{"reflections":[]}' : '普通回复。' }))
-  try {
-    await settings.setMemoryFormationEnabled(true)
-    await vi.waitFor(() => expect(stage.formationStatus.lastEvent).toBe('ready'))
-    const saved = data.get('aisling.config.v1'), provider = settings.activeChatProvider
-    stage.send('我完成过两分钟手碟节奏练习。')
-    await vi.waitFor(() => expect(stage.sending).toBe(false))
-    await stage.formation!.flush()
-    await vi.waitFor(() => expect(stage.formation!.inspect().batches[0]?.status).toBe('completed'))
-    const calls = complete.mock.calls.map(([request]) => request)
-    expect(calls).toHaveLength(2)
-    expect(calls[0]!.enableThinking).toBeUndefined()
-    expect(calls[1]).toMatchObject({ enableThinking: false, maxOutputTokens: 1500, temperature: 0.2 })
-    expect(settings.activeChatProvider).toBe(provider)
-    expect(data.get('aisling.config.v1')).toBe(saved)
-  } finally { stage.$dispose() }
-})
-
-it('stops both Memory paths and discards in-flight Formation without deleting saved reflections or pending work', async () => {
-  const { stage, settings, complete } = await fixture({ legacy: true })
-  let raw: string | null = null
-  vi.stubGlobal('window', { ...window, aislingDesktop: { reflectionStorage: {
-    read: () => ({ ok: true, value: raw }), write: (value: string) => { raw = value; return true },
-  } } })
-  let finish!: (result: { text: string }) => void
-  let signal: AbortSignal | undefined
-  let formationCalls = 0
-  complete.mockImplementation(request => {
-    if (request.messages[0]?.content?.startsWith('You form append-only')) {
-      formationCalls++; signal = request.signal
-      return new Promise(resolve => { finish = resolve })
-    }
-    return Promise.resolve({ text: '这是实际交付的回应。' })
-  })
-  await settings.setMemoryFormationEnabled(true)
-  await vi.waitFor(() => expect(stage.formationStatus.lastEvent).toBe('ready'))
-  const output = { text: '{"reflections":[{"content":"用户报告纸舟实验版已发布。","kind":"project-state","basis":"direct","tags":["纸舟"],"sources":["E1"],"related":[]}]}' }
-  for (let n = 0; n < 2; n++) {
-    stage.send('纸舟实验版已发布。')
-    await vi.waitFor(() => expect(stage.sending).toBe(false))
-    await stage.formation!.flush()
-    await vi.waitFor(() => expect(formationCalls).toBe(n + 1))
-    if (n === 0) {
-      finish(output)
-      await vi.waitFor(() => expect(stage.formation!.inspect().reflections).toHaveLength(1))
-    }
-  }
-  const saved = stage.formation!.inspect()
-  await settings.setMemoryEnabled(false)
-  expect(stage.memoryRecallEnabled).toBe(false)
-  expect(stage.formationStatus.enabled).toBe(false)
-  expect(signal?.aborted).toBe(true)
-  finish(output)
-  await vi.waitFor(() => expect(stage.formationStatus.running).toBe(false))
-  expect(stage.formation!.inspect()).toEqual(saved)
-  expect(settings.config.memory).toEqual({ enabled: false, formationEnabled: false })
-  await settings.setMemoryEnabled(true)
-  expect(stage.formationStatus.enabled).toBe(false)
-  settings.config.memory.formationEnabled = true
-  await settings.setMemoryEnabled(false)
-  // Even a stale developer flag cannot bypass the runtime's master gate.
-  settings.config.memory.formationEnabled = true
-  await stage.formation!.flush()
-  expect(stage.formationStatus.enabled).toBe(false)
-  expect(formationCalls).toBe(2)
-  stage.formation!.dispose()
-})
-
-it('reads newly committed Reflection on later text turns with Formation off, never changing an in-flight turn', async () => {
-  const { stage, settings, complete, diagnosticRecords } = await fixture({ diagnostics: true })
-  let raw: string | null = null
-  vi.stubGlobal('window', { ...window, aislingDesktop: { ...window.aislingDesktop, reflectionStorage: {
-    read: () => ({ ok: true, value: raw }), write: (value: string) => { raw = value; return true },
-  } } })
-  let finishFormation!: (result: { text: string }) => void
-  let finishChat: ((result: { text: string }) => void) | undefined
-  let holdChat = false, formationCalls = 0
-  complete.mockImplementation(input => {
-    if (input.messages[0]?.content?.startsWith('You form append-only')) {
-      formationCalls++
-      return new Promise(resolve => { finishFormation = resolve })
-    }
-    if (holdChat) return new Promise(resolve => { finishChat = resolve })
-    return Promise.resolve({ text: '收到当前更新。' })
-  })
-  await settings.setMemoryFormationEnabled(true)
-  await vi.waitFor(() => expect(stage.formationStatus.lastEvent).toBe('ready'))
-  stage.send('纸舟旅行票根工具支持 PDF 导出。')
-  await vi.waitFor(() => expect(stage.sending).toBe(false))
-  const sourceId = stage.activeSessionId
-  await stage.formation!.flush()
-  await vi.waitFor(() => expect(formationCalls).toBe(1))
-  stage.newConversation(); holdChat = true
-  stage.send('纸舟旅行票根工具 PDF 导出如何？')
-  await vi.waitFor(() => expect(finishChat).toBeTypeOf('function'))
-  const inFlight = complete.mock.calls.at(-1)![0]
-  expect(JSON.stringify(inFlight)).not.toContain('[Historical Aisling reflections]')
-  finishFormation({ text: JSON.stringify({ reflections: [{ content: '用户报告纸舟旅行票根工具支持 PDF 导出。',
-    kind: 'project-state', basis: 'direct', tags: ['纸舟', 'PDF'], sources: ['E1'], related: [] }] }) })
-  await vi.waitFor(() => expect(stage.formation!.inspect().reflections).toHaveLength(1))
-  expect(JSON.stringify(inFlight)).not.toContain('[Historical Aisling reflections]')
-  holdChat = false; finishChat!({ text: '当前轮保持原快照。' })
-  await vi.waitFor(() => expect(stage.sending).toBe(false))
-  await settings.setMemoryFormationEnabled(false)
-  const saved = raw
-  stage.send('纸舟旅行票根工具 PDF 导出现在已经取消。')
-  await vi.waitFor(() => expect(stage.sending).toBe(false))
-  const request = complete.mock.calls.at(-1)![0]
-  expect(JSON.stringify(request)).toContain('[Historical Aisling reflections]')
-  expect(JSON.stringify(request)).toContain('[Cross-session recall evidence]')
-  expect(request.messages.at(-1)!.content).toContain('现在已经取消')
-  expect(JSON.stringify(request)).not.toContain(sourceId)
-  expect(diagnosticRecords.filter(r => r.type === 'context-assembled').at(-1)).toMatchObject({ reflectionCount: 1,
-    reflectionChars: expect.any(Number), reflectionTokens: expect.any(Number), reflectionRetrievalMs: expect.any(Number), reflectionReason: 'injected' })
-  expect(raw).toBe(saved)
-  await settings.setMemoryEnabled(false)
-  stage.send('纸舟旅行票根工具 PDF 导出如何？')
-  await vi.waitFor(() => expect(stage.sending).toBe(false))
-  expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toMatch(/Historical Aisling reflections|Cross-session recall evidence/)
-  await settings.setMemoryEnabled(true)
-  stage.deleteSession(sourceId)
-  stage.send('纸舟旅行票根工具 PDF 导出如何？')
-  await vi.waitFor(() => expect(stage.sending).toBe(false))
-  expect(JSON.stringify(complete.mock.calls.at(-1)![0])).not.toContain('[Historical Aisling reflections]')
-  expect(diagnosticRecords.filter(r => r.type === 'context-assembled').at(-1)?.reflectionReason).toBe('invalid-source')
-  expect(raw).toBe(saved)
-  expect(formationCalls).toBe(1)
-  expect(complete).toHaveBeenCalledTimes(6)
-  stage.formation!.dispose()
 })

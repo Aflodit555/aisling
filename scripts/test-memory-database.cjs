@@ -86,8 +86,7 @@ async function killParent() {
   await killParent()
   assert.notEqual(stage('reopen').workerPid, first.workerPid)
   for (const file of sentinels) assert.equal(readFileSync(join(legacy, file), 'utf8'), 'fake legacy data; must remain untouched')
-  for (const [flag, evidence] of [['AISLING_MEMORY_SMOKE', /"memorySmoke":"passed"/],
-    ['AISLING_FORMATION_SMOKE', /"formationSmoke":"passed"/]]) {
+  for (const [flag, evidence] of [['AISLING_MEMORY_SMOKE', /"memorySmoke":"passed"/]]) {
     const failure = join(run, flag + '-profile')
     mkdirSync(failure)
     const fail = spawnSync(electron, ['prod-smoke.cjs'], { ...config('failure'), encoding: 'utf8', timeout: 55000,

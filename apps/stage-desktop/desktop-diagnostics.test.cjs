@@ -17,7 +17,7 @@ function fixture(enabled = false, replyText = false) {
   const contents = { mainFrame,isDestroyed:()=>false,send(){} }
   const image = { resize: () => image }
   const electron = {
-    app: { whenReady: async () => {}, on: () => {}, getPath:()=>path.resolve('synthetic-user-data'), getVersion:()=>require('./package.json').version },
+    app: { whenReady: async () => {}, on: () => {}, requestSingleInstanceLock: () => true, getPath:()=>path.resolve('synthetic-user-data'), getVersion:()=>require('./package.json').version },
     Tray: class { setToolTip() {} on() {} },
     nativeImage: { createFromPath: () => image }, nativeTheme: { shouldUseDarkColors: false }, screen: { on: () => {} },
     BaseWindow: class { setAppDetails(details) { appDetails.push(details) } },
@@ -41,7 +41,9 @@ function fixture(enabled = false, replyText = false) {
       }
       if (name === './desktop-activity.cjs') return { createDesktopObserver: () => ({ status: () => ({ enabled: true, context }) }) }
       if (name === './desktop-protocol.cjs') return { registerStageScheme() {}, registerStageProtocol() {} }
-      if (name === './desktop-store.cjs') return { registerStorageIpc() {},configureMemoryLifecycle(){},readDesktopData:()=>({}),writeDesktopData(){},writeRawReflections(){},readRawReflections:()=>({version:1,reflections:[],batches:[],progress:[]}),readStoredConfig: () => ({ desktopAwareness: { jevApiKey: 'private-key' } }) }
+      if (name === './desktop-store.cjs') return { registerStorageIpc() {},configureMemoryLifecycle(){},readDesktopData:()=>({}),writeDesktopData(){},readStoredConfig: () => ({ desktopAwareness: { jevApiKey: 'private-key' } }) }
+      if (name === './memory-authority.cjs') return { canStartNoteV2: () => true, readMigration: () => undefined }
+      if (name === './note-formation.cjs') return { createNoteFormationService: () => ({ privacy: {}, recover: async () => {}, configureMirror: async () => {}, close: async () => {} }) }
       if (name === './desktop-judge.cjs') return { ...judgeModule, createTypeSafeJudge: () => judgeModule.createTypeSafeJudge({ fetchImpl: async (_url, options) => {
         requests.push(JSON.parse(options.body))
         return new Response(JSON.stringify({ answers: { should_interrupt: { type: 'noul', noul: 0.9 } } }))
@@ -163,9 +165,9 @@ test('Context selection survives the real sink without leaking basis or text', (
   assert.equal(on.lines[1].selectedMessages, 90); assert.equal(on.lines[1].omittedMessages, 200)
   assert.equal(on.lines[1].basisCount, 2)
   assert.equal(on.lines[1].reason, 'session-window')
-  assert.equal(on.lines[1].reflectionCount, 2); assert.equal(on.lines[1].reflectionChars, 1000)
-  assert.equal(on.lines[1].reflectionTokens, 2000); assert.equal(on.lines[1].reflectionRetrievalMs, 1.5)
-  assert.equal(on.lines[1].reflectionReason, 'injected')
+  assert.equal(on.lines[1].reflectionCount, undefined); assert.equal(on.lines[1].reflectionChars, undefined)
+  assert.equal(on.lines[1].reflectionTokens, undefined); assert.equal(on.lines[1].reflectionRetrievalMs, undefined)
+  assert.equal(on.lines[1].reflectionReason, undefined)
   on.api.writeDesktopDiagnostic({ ...record, basisCount: -1, reflectionCount: -1, reflectionRetrievalMs: Infinity, reflectionReason: 'Private error' })
   assert.equal(on.lines[2].basisCount, undefined)
   assert.equal(on.lines[2].reflectionCount, undefined); assert.equal(on.lines[2].reflectionRetrievalMs, undefined)
@@ -173,7 +175,7 @@ test('Context selection survives the real sink without leaking basis or text', (
   assert.equal(JSON.stringify(on.lines).includes('Private'), false)
 })
 
-test('Reflection candidate selection is bounded metadata and never logs source IDs or content', () => {
+test('retired diagnostics cannot leak obsolete candidate data, source IDs or content', () => {
   const f = fixture(true)
   f.api.writeDesktopDiagnostic({ type: 'context-assembled', reflectionSelection: [
     { label: 'R1', kind: 'pattern', score: 1.2, matched: 4, eligible: true, reason: 'selected', order: 1,
@@ -183,8 +185,7 @@ test('Reflection candidate selection is bounded metadata and never logs source I
     { label: 'private-label', kind: 'event', score: 2, matched: 4, eligible: false, reason: 'relevance' },
     { label: 'R4', kind: 'pattern', score: Infinity, matched: 4, eligible: true, reason: 'selected' },
   ] })
-  assert.equal(f.lines[1].reflectionSelection.length, 3)
-  assert.equal(f.lines[1].reflectionSelection[0].order, 1)
+  assert.equal(f.lines[1].reflectionSelection, undefined)
   assert.doesNotMatch(JSON.stringify(f.lines), /private|sourceRefs|content|reflectionId/)
   const off = fixture(false)
   off.api.writeDesktopDiagnostic({ type: 'context-assembled', reflectionSelection: f.lines[1].reflectionSelection })

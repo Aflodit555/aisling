@@ -6,12 +6,6 @@ const noteV2 = process.argv.includes('--aisling-note-v2')
 // bridge (get/set only) so the renderer can keep its existing persistence while
 // Electron owns a single stable data file in userData.
 contextBridge.exposeInMainWorld('aislingDesktop', {
-  ...(process.argv.includes('--aisling-memory-migration') ? { memoryMigration: {
-    status: () => ipcRenderer.invoke('aisling:memory-migration:status'),
-    preflight: () => ipcRenderer.invoke('aisling:memory-migration:preflight'),
-    execute: () => ipcRenderer.invoke('aisling:memory-migration:execute'),
-    exclude: (key, version) => ipcRenderer.invoke('aisling:memory-migration:exclude', key, version),
-  } } : {}),
   ...(noteV2 ? {
     obsidianMirror: {
       configure: () => ipcRenderer.invoke('aisling:obsidian:configure'),
@@ -37,13 +31,7 @@ contextBridge.exposeInMainWorld('aislingDesktop', {
       submit: (id, attempt, raw) => ipcRenderer.invoke('aisling:note-formation:submit', id, attempt, raw),
       fail: (id, attempt, reason) => ipcRenderer.invoke('aisling:note-formation:fail', id, attempt, reason),
     },
-  } : { memoryOrganization: {
-    recallHeads: () => ipcRenderer.invoke('aisling:memory:recall-heads'),
-    onStatus: callback => {const listener=(_event,state)=>callback(state);ipcRenderer.on('aisling:organization:status',listener);return()=>ipcRenderer.removeListener('aisling:organization:status',listener)},
-    setEnabled: enabled => ipcRenderer.invoke('aisling:organization:enabled',enabled),
-    candidates: () => ipcRenderer.invoke('aisling:organization:candidates'),
-    settle: (batchId,index) => ipcRenderer.invoke('aisling:organization:settle',batchId,index),
-  } }),
+  } : {}),
   getMode: () => ipcRenderer.invoke('aisling:mode:get'),
   setLanguage: language => ipcRenderer.send('aisling:language:set', language),
   openDesktopMenu: () => ipcRenderer.send('aisling:desktop-menu'),
@@ -76,10 +64,6 @@ contextBridge.exposeInMainWorld('aislingDesktop', {
       ipcRenderer.send('aisling:desktop-awareness:diagnostic', record)
   },
   judgeEmotion: conversation => ipcRenderer.invoke('aisling:emotion:judge', conversation),
-  ...(!noteV2 ? { reflectionStorage: {
-    read: () => ipcRenderer.sendSync('aisling:reflections:read'),
-    write: value => ipcRenderer.sendSync('aisling:reflections:write', value),
-  } } : {}),
   storage: {
     getItem: key => {const value=ipcRenderer.sendSync('aisling:storage:get',key);if(value?.storageError)throw new Error('Memory storage unavailable');return value},
     setItem: (key, value) => ipcRenderer.sendSync('aisling:storage:set', key, value),

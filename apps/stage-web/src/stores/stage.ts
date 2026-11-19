@@ -19,18 +19,13 @@ import { resolvePersistentStorage } from '../storage/desktop-storage'
 import { createSituationWorkingState, isSituationCorrection, providerSituationExecutor } from '../runtime/situation-working-state'
 import { userTextEnableThinking, situationEnableThinking, formationEnableThinking } from '../runtime/provider-factory'
 import { recallForModel, retrieveRecall, type RecallSource } from '../runtime/memory-recall'
-import type { createLegacyMemory } from '../runtime/legacy-memory'
 import { createNoteFormation } from '../runtime/note-formation'
 import { prepareNoteV2Recall } from '../runtime/note-v2-recall'
-import type { NoteRecallTrace } from '../runtime/note-recall'
 import { useEmotionStore } from './emotion'
 import { useSettingsStore } from './settings'
 import { useSpeechStore } from './speech'
 
-let legacyFactory: typeof createLegacyMemory | undefined
-export async function loadLegacyMemory() {
-  legacyFactory ??= (await import('../runtime/legacy-memory')).createLegacyMemory
-}
+
 
 /** A message the Stage renders in the interaction dock. */
 export interface DisplayMessage {
@@ -124,11 +119,7 @@ export const useStageStore = defineStore('stage', () => {
       provider => noteFormation.setProvider(provider), { immediate: true, flush: 'sync' })
     onScopeDispose(() => noteFormation.setProvider(undefined))
   }
-  const legacy = !noteFormation && !noteV2Recall && (desktop?.memoryOrganization || desktop?.reflectionStorage)
-    ? legacyFactory?.({ settings, freshSessions, sessions: () => toRaw(sessionsList.value), activeId: () => activeSessionId.value,
-        storageFailed: () => !!conversationStore.getPersistenceError(), onUsed: markNoteUsed })
-    : undefined
-  const clearNoteRecall = () => { noteEpoch++; legacy?.invalidate() }
+  const clearNoteRecall = () => { noteEpoch++ }
   watch(noteRecallDesired, clearNoteRecall, { flush: 'sync' })
   watch(memoryRecallEnabled, () => { memoryRecallDiagnostic.value = undefined }, { flush: 'sync' })
   onScopeDispose(clearNoteRecall)
@@ -168,7 +159,6 @@ export const useStageStore = defineStore('stage', () => {
         () => noteRecallDesired.value && noteEpoch === epoch && activeSessionId.value === sessionId,
         markNoteUsed)
     }),
-    getHistoryAddon: legacy?.getHistoryAddon,
     getSituationContext: (stimulus, turnId) => situation.contextFor(stimulus, diagnostic && turnId
       ? selection => { turnDiagnostics.set(turnId, { ...selection }) } : undefined),
     diagnostic: diagnostic ? record => {
@@ -455,7 +445,6 @@ export const useStageStore = defineStore('stage', () => {
             ...(noteDerived ? [] : [sessionMessages.value.length - 1])]
           if (indices.length) {
             if (noteFormation) noteFormation.delivered(formationSessionId, indices)
-            else void legacy?.formation.delivered(formationSessionId, indices)
           }
         }
         diagnosticDelivered = true; diagnosticOutcome = 'delivered'
@@ -535,8 +524,6 @@ export const useStageStore = defineStore('stage', () => {
     if (!session)
       return
     if (noteFormation) noteFormation.flush(activeSessionId.value)
-    else void legacy?.formation.flush(activeSessionId.value)
-    legacy?.interruptOrganization()
     activeSessionId.value = id
     situation.reset()
     conversationStore.setActiveId(id)
@@ -552,8 +539,6 @@ export const useStageStore = defineStore('stage', () => {
     if (sending.value || visionProcessing.value)
       return
     if (noteFormation) noteFormation.flush(activeSessionId.value)
-    else void legacy?.formation.flush(activeSessionId.value)
-    legacy?.interruptOrganization()
     const session = conversationStore.create()
     activeSessionId.value = session.id
     situation.reset()
@@ -571,7 +556,6 @@ export const useStageStore = defineStore('stage', () => {
     const wasActive = id === activeSessionId.value
     clearNoteRecall()
     conversationStore.delete(id)
-    legacy?.interruptOrganization()
     sessionsList.value = conversationStore.list()
     if (wasActive) {
       const remaining = sessionsList.value
@@ -584,14 +568,9 @@ export const useStageStore = defineStore('stage', () => {
   }
 
   return {
-    organizationStatus: legacy?.organizationStatus ?? computed(() => ({ ready: false, autoWrite: false, reason: 'disabled', pending: 0 })),
-    formationStatus: legacy?.formationStatus ?? computed(() => ({ enabled: false, running: false, calls: 0, lastEvent: 'disabled' })),
-    formation: shallowRef(legacy?.formation),
     wakeFormation: () => noteFormation?.wake(),
     memoryRecallEnabled,
     memoryRecallDiagnostic,
-    memoryTraceEnabled: legacy?.memoryTraceEnabled ?? ref(false),
-    noteRecallTrace: legacy?.noteRecallTrace ?? shallowRef<NoteRecallTrace>(),
     autonomous,
     situationStatus,
     desktopBridgeState,

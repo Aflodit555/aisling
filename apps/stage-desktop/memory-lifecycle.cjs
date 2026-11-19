@@ -85,15 +85,6 @@ function createMemoryLifecycle({profile,store,readData,writeData,readReflections
   const removed=[...new Set(steps.flatMap(step=>step.sessionIds))].filter(id=>!sessions.has(hash(id)))
   if(evidence.length||removed.length)record(evidence,removed,sanitizedData(readData()))
  }
- function beforeReflectionsChange(old,next){
-  if(noteV2)throw new Error('reflection-writes-disabled')
-  assertReadable()
-  const fields=r=>JSON.stringify([r.version,r.id,r.content,r.kind,r.basis,r.tags,r.sourceRefs,r.relatedReflectionIds,r.createdAt,r.uncertainty])
-  const gone=old.reflections.filter(r=>!next.reflections.some(n=>n.id===r.id&&fields(n)===fields(r))).map(r=>r.id)
-  const batches=old.batches.filter(b=>!next.batches.some(n=>n.id===b.id)).map(b=>b.id)
-  for(const b of old.batches)if(batches.includes(b.id))gone.push(...b.reflectionIds)
-  if(gone.length||batches.length)record([],[],readData(),gone,batches)
- }
  function beforeConversationChange(oldData,newData){
   const next=sessions(newData),gone=[],refs=[]
   if(noteV2&&new Set(next.map(s=>s.id)).size!==next.length)throw new Error('ambiguous-conversation-session')
@@ -116,13 +107,6 @@ function createMemoryLifecycle({profile,store,readData,writeData,readReflections
   return next
  }
  function assertReadable(){if(read().pending.length)throw new Error('erasure-pending')}
- function guardedReflections(){if(noteV2)throw new Error('reflection-reads-disabled');assertReadable();const data=sanitizedData(readData()),j=read(),p=pruneReflections(readReflections(),data,j.blocked);if(p.originIds.length||p.batchIds.length){record([],[],data);throw new Error('erasure-pending')}
-  const cIds=new Set(p.state.batches.filter(b=>b.organization).flatMap(b=>b.reflectionIds))
-  for(const r of p.state.reflections)if(cIds.has(r.id))r.recallEligible=(j.qualified??[]).includes(hash(r.id))
-  return p.state
- }
- function qualify(ids){if(noteV2)throw new Error('reflection-writes-disabled');const j=read();if(j.pending.length)throw new Error('erasure-pending');j.qualified??=[];for(const id of ids)if(!j.qualified.includes(hash(id)))j.qualified.push(hash(id));save(j)}
- function validateWrite(state){if(noteV2)throw new Error('reflection-writes-disabled');assertReadable();const j=read(),p=pruneReflections(state,sanitizedData(readData()),j.blocked);if(p.originIds.length||p.batchIds.length)throw new Error('erased-generation')}
  async function synchronizeBarriers(){const j=read(),keys=[...j.blocked.sources.map(h=>'evidence:'+h),...j.blocked.sessions.map(h=>'session:'+h),...(!noteV2?j.blocked.origins.map(h=>'origin:'+h):[])];for(let i=0;i<keys.length;i+=32)await store.installErasureBarriers(keys.slice(i,i+32))}
  async function recover(workerEpoch=0){
   if(running)return running
@@ -180,6 +164,6 @@ function createMemoryLifecycle({profile,store,readData,writeData,readReflections
   return running
  }
  return {beforeConversationChange,sanitizedData,assertReadable,recover,synchronizeBarriers,isRecovering:()=>!!running,pending:()=>read().pending.length>0,readJournal:read,
-  ...(!noteV2&&{beforeReflectionsChange,recordArchiveErasure,guardedReflections,validateWrite,qualify})}
+  ...(!noteV2&&{recordArchiveErasure})}
 }
 module.exports={createMemoryLifecycle,pruneReflections,current}

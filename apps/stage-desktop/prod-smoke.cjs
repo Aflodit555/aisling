@@ -172,87 +172,6 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
     return
   }
 
-  if (process.env.AISLING_FORMATION_SMOKE === '1') {
-    const report = await contents.executeJavaScript(String.raw`(async () => {
-      const pinia = document.querySelector('#app').__vue_app__.config.globalProperties.$pinia
-      const stage = pinia._s.get('stage'), settings = pinia._s.get('settings')
-      async function until(test, phase) {
-        for (let n = 0; n < 300; n++) { if (test()) return; await new Promise(resolve => setTimeout(resolve, 10)) }
-        throw new Error('Formation smoke timed out at ' + phase + ': ' + JSON.stringify(stage.formationStatus))
-      }
-      await until(() => settings.loaded, 'settings')
-      const defaultOff = !stage.formationStatus.enabled && !settings.config.memory.formationEnabled
-        && window.aislingDesktop.reflectionStorage.read().value === null
-      let finish, ordinaryCalls = 0, backgroundCalls = 0, request, ordinaryRequest
-      settings.activeChatProvider = { id: 'formation-smoke', complete: async input => {
-        if (input.messages[0].content.startsWith('You form append-only')) {
-          backgroundCalls++; request = input
-          return new Promise(resolve => { finish = resolve })
-        }
-        ordinaryCalls++; ordinaryRequest = input; return { text: '这是已经交付的回复。' }
-      } }
-      await settings.setMemoryFormationEnabled(true)
-      await until(() => stage.formationStatus.lastEvent === 'ready', 'formation-init')
-      for (const text of ['纸舟实验版已发布。', '纸舟还有识别错误。', '纸舟识别错误已修复。']) {
-        stage.send(text); await until(() => !stage.sending, 'chat')
-      }
-      await until(() => backgroundCalls === 1, 'batch')
-      const chatDidNotWait = stage.sending === false
-      finish({ text: JSON.stringify({ reflections: [{ content: '用户报告纸舟实验版已发布。', kind: 'project-state', basis: 'direct', tags: ['纸舟'], sources: ['E1'], related: [] }] }) })
-      await until(() => stage.formation.inspect().reflections.length === 1, 'commit')
-      const state = stage.formation.inspect(), reflection = state.reflections[0], source = reflection.sourceRefs[0]
-      const stored = JSON.parse(window.aislingDesktop.storage.getItem('aisling.conversations.v1')).sessions
-        .find(session => session.id === source.sessionId).messages[source.messageIndex]
-      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(stored)))
-      const actual = Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2, '0')).join('')
-      await settings.setMemoryFormationEnabled(false)
-      stage.newConversation()
-      stage.send('纸舟实验版目前已经撤回发布。'); await until(() => !stage.sending, 'reflection-recall')
-      const reflectionBlock = ordinaryRequest.messages.find(m => m.content.startsWith('[Historical Aisling reflections]'))
-      const recallBlock = ordinaryRequest.messages.find(m => m.content.startsWith('[Cross-session recall evidence]'))
-      return { defaultOff, chatDidNotWait, ordinaryCalls, backgroundCalls,
-        reflectionRecalled: !!reflectionBlock && reflectionBlock.content.includes(reflection.content),
-        bothMemories: !!reflectionBlock && !!recallBlock,
-        reflectionIdsIsolated: !!reflectionBlock && !reflectionBlock.content.includes(reflection.id) && !reflectionBlock.content.includes(source.sessionId),
-        currentInputPreserved: ordinaryRequest.messages.at(-1).content === '纸舟实验版目前已经撤回发布。',
-        sourceResolves: stored.role === 'user' && stored.content === '纸舟实验版已发布。' && actual === source.digest,
-        memoryEnabled: settings.config.memory.enabled === true,
-        idsIsolated: !JSON.stringify(request).includes(stage.activeSessionId) && !JSON.stringify(request).includes('messageIndex'),
-        batchComplete: state.batches[0].status === 'completed' && state.batches[0].sourceRefs.length === 6 }
-    })()`)
-    for (const key of ['defaultOff', 'chatDidNotWait', 'sourceResolves', 'memoryEnabled', 'idsIsolated', 'batchComplete',
-      'reflectionRecalled', 'bothMemories', 'reflectionIdsIsolated', 'currentInputPreserved']) assert.equal(report[key], true, key)
-    assert.equal(report.ordinaryCalls, 4); assert.equal(report.backgroundCalls, 1)
-    const file = path.join(app.getPath('userData'), 'aisling-reflections.v1.json')
-    assert.equal(existsSync(file), true)
-    assert.equal(JSON.parse(readFileSync(file, 'utf8')).reflections.length, 1)
-    assert.equal(JSON.parse(readFileSync(path.join(app.getPath('userData'), 'aisling-store.json'), 'utf8')).reflections, undefined)
-    await new Promise(resolve => { contents.once('did-finish-load', resolve); contents.reload() })
-    const recovered = await contents.executeJavaScript(`(async () => {
-      for (let n = 0; n < 200; n++) {
-        const pinia = document.querySelector('#app')?.__vue_app__?.config.globalProperties.$pinia
-        const stage = pinia?._s.get('stage'), settings = pinia?._s.get('settings')
-        if (settings?.loaded && stage && !stage.formationStatus.enabled) {
-          const state = stage.formation.inspect()
-          let request
-          settings.activeChatProvider = { id: 'reflection-restart-smoke', complete: async input => { request = input; return { text: 'ok' } } }
-          stage.send('纸舟实验版发布情况？')
-          for (let i = 0; i < 200 && stage.sending; i++) await new Promise(resolve => setTimeout(resolve, 10))
-          return state.reflections.length === 1 && state.batches[0].status === 'completed' && stage.formationStatus.calls === 0
-            && request?.messages.some(m => m.content.startsWith('[Historical Aisling reflections]'))
-        }
-        await new Promise(resolve => setTimeout(resolve, 10))
-      }
-      return false
-    })()`)
-    assert.equal(recovered, true)
-    console.log(JSON.stringify({ formationSmoke: 'passed', modelResponses: 'mocked', separateFile: true, restartDeduplicated: recovered, ...report }))
-    clearTimeout(timeout)
-    if (memoryDatabaseFailure) app.quit()
-    else { win.destroy(); app.exit(0) }
-    return
-  }
-
   if (process.env.AISLING_MEMORY_SMOKE === '1') {
     contents.setBackgroundThrottling(false)
     // Hidden windows can stall route-leave animations; load the settings route directly.
@@ -295,6 +214,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         throw new Error('Memory consent did not persist')
       }
       async function setFormation(enabled) {
+        if (!window.aislingDesktop.noteFormation) { await settings.setMemoryFormationEnabled(enabled); return }
         for (let n = 0; n < 100 && !memorySwitch('Formation'); n++)
           await new Promise(resolve => setTimeout(resolve, 10))
         const formation = memorySwitch('Formation')
@@ -303,15 +223,16 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
         formation.dispatchEvent(new Event('change', { bubbles: true }))
         for (let n = 0; n < 100; n++) {
           const config = JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1') || '{}')
-          if (config.memory?.formationEnabled === enabled && stage.formationStatus.enabled === enabled) return
+          if (config.memory?.formationEnabled === enabled) return
           await new Promise(resolve => setTimeout(resolve, 10))
         }
         throw new Error('Formation switch did not persist')
       }
       await setFormation(true)
       const noteToggle = memorySwitch('Recall')
-      if (!noteToggle || noteToggle.checked) throw new Error('Note Recall must start off')
+      if (window.aislingDesktop.noteRecall && (!noteToggle || noteToggle.checked)) throw new Error('Note Recall must start off')
       function enableNoteRecall() {
+        if (!window.aislingDesktop.noteRecall) return
         const input = memorySwitch('Recall')
         if (!input) throw new Error('Note Recall switch did not mount')
         input.checked = true
@@ -323,10 +244,10 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
       await setMemory(false)
       await new Promise(resolve => setTimeout(resolve, 0))
       const collapsedWhenOff = document.querySelectorAll('.settings-module input[role="switch"]').length === 1
-        && settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
+        && settings.config.memory.formationEnabled === false
         && settings.config.memory.noteRecallEnabled !== true
       await setMemory(true)
-      const formationNotReenabled = settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
+      const formationNotReenabled = settings.config.memory.formationEnabled === false
       const oldId = stage.activeSessionId
       reply = '萤桥发布：我猜它稳定了。'
       stage.send('萤桥发布：2026-03-01 是实验版。'); await settled()
@@ -393,7 +314,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
             const switches = [...document.querySelectorAll('.settings-module input[role="switch"]')]
             const checked = label => switches.some(input => input.closest('label')?.textContent.trim() === label && input.checked)
             const restored = settings.config.memory.enabled && stage.memoryRecallEnabled && toggle?.checked === true
-              && settings.config.memory.formationEnabled && stage.formationStatus.enabled
+              && settings.config.memory.formationEnabled
               && settings.config.memory.noteRecallEnabled === true && checked('Formation') && checked('Recall')
             if (toggle?.checked) {
               toggle.checked = false
@@ -401,7 +322,7 @@ const timeout = setTimeout(() => { console.error('Desktop prod smoke timed out')
             }
             await new Promise(resolve => setTimeout(resolve, 0))
             return { restored, disabled: settings.config.memory.enabled === false && stage.memoryRecallEnabled === false
-              && settings.config.memory.formationEnabled === false && stage.formationStatus.enabled === false
+              && settings.config.memory.formationEnabled === false
               && JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).memory.formationEnabled === false
               && JSON.parse(window.aislingDesktop.storage.getItem('aisling.config.v1')).memory.enabled === false
               && settings.config.memory.noteRecallEnabled !== true

@@ -14,7 +14,7 @@ const {
   registerStageProtocol,
 } = require('./desktop-protocol.cjs')
 const { registerStorageIpc, readStoredConfig, readStoredLanguage, readDesktopData,
-  readRawReflections,writeRawReflections,writeDesktopData,configureMemoryLifecycle } = require('./desktop-store.cjs')
+  writeDesktopData,configureMemoryLifecycle } = require('./desktop-store.cjs')
 
 // Must run before app.whenReady(): this makes `aisling://` a standard, secure
 // origin so the built renderer keeps working localStorage + history routing.
@@ -22,7 +22,6 @@ registerStageScheme()
 
 const DEFAULT_STAGE_URL = 'http://localhost:5174'
 const DEV_STAGE_ORIGINS = new Set([DEFAULT_STAGE_URL, 'http://127.0.0.1:5174'])
-const DEV_RESTART_EXIT = 75
 const desktopObserver = createDesktopObserver()
 const semanticJudge = createTypeSafeJudge()
 const desktopDiagnosticsEnabled = process.env.AISLING_DESKTOP_DIAGNOSTICS === '1'
@@ -63,8 +62,7 @@ function writeDesktopDiagnostic(record) {
         'batchCount', 'observationCount', 'contextChars', 'round', 'aCalls', 'aCallsAtStart', 'aCallsDuringTurn', 'httpStatus',
         'firstReceivedAt', 'lastReceivedAt', 'scheduledAt', 'queueDelayMs', 'snapshotToCommitMs', 'latestSnapshotToCommitMs',
         'contentChars', 'reasoningChars', 'contentDeltaCount', 'reasoningDeltaCount', 'streamEventCount',
-        'historyTokens', 'requiredTokens', 'selectedMessages', 'omittedMessages', 'basisCount',
-        'reflectionCount', 'reflectionChars', 'reflectionTokens', 'reflectionRetrievalMs']) {
+        'historyTokens', 'requiredTokens', 'selectedMessages', 'omittedMessages', 'basisCount']) {
         if (Number.isFinite(record[key]) && record[key] >= 0) safe[key] = record[key]
       }
       for (const key of ['committed', 'usable', 'executorReturned', 'settled', 'injected', 'delivered', 'statePresent', 'abortRequested',
@@ -72,18 +70,6 @@ function writeDesktopDiagnostic(record) {
         if (typeof record[key] === 'boolean') safe[key] = record[key]
       }
       if (typeof record.scopeMatched === 'boolean' || record.scopeMatched === 'unknown') safe.scopeMatched = record.scopeMatched
-      if (['injected', 'context-budget', 'disabled', 'conversation-error', 'unsafe-query', 'storage-error', 'empty',
-        'no-match', 'invalid-source', 'candidate-budget', 'context-error', 'unavailable'].includes(record.reflectionReason)) safe.reflectionReason = record.reflectionReason
-      if (Array.isArray(record.reflectionSelection)) safe.reflectionSelection = record.reflectionSelection.slice(0, 6).flatMap(item => {
-        if (!item || typeof item.label !== 'string' || !/^R[1-6]$/.test(item.label) || !['event', 'fact', 'pattern', 'preference', 'project-state', 'open-question'].includes(item.kind)
-          || !['relevance', 'invalid-source', 'selected', 'candidate-budget', 'context-budget', 'combination-value'].includes(item.reason)
-          || !Number.isFinite(item.score) || item.score < 0 || !Number.isSafeInteger(item.matched) || item.matched < 0
-          || typeof item.eligible !== 'boolean') return []
-        const row = { label: item.label, kind: item.kind, score: item.score, matched: item.matched, eligible: item.eligible, reason: item.reason }
-        if (typeof item.topical === 'boolean') row.topical = item.topical
-        for (const key of ['chars', 'bytes', 'order']) if (Number.isSafeInteger(item[key]) && item[key] >= 0) row[key] = item[key]
-        return [row]
-      })
       if (['stop', 'length', 'tool_calls', 'function_call', 'content_filter', 'other', 'unknown'].includes(record.finishReason)) safe.finishReason = record.finishReason
       if (['empty-content', 'whitespace-only', 'markdown-fence', 'non-json-prefix', 'json-syntax', 'non-syntax-error'].includes(record.jsonParseFailure)) safe.jsonParseFailure = record.jsonParseFailure
       if (['provider-enter', 'fetch-start', 'headers-received', 'response-json-start', 'response-json-end', 'response-json-failed',
@@ -467,7 +453,7 @@ function stopDesktopAwareness() {
 /**
  * Creates the real Stage window. `show: false` exists only for smoke callers;
  * the executable main entry always passes `show: true`.
- * @param {{ show?: boolean, diagnostics?: boolean, stageUrl?: string, noteV2?: boolean, migration?: boolean }} [options]
+ * @param {{ show?: boolean, diagnostics?: boolean, stageUrl?: string, noteV2?: boolean }} [options]
  */
 async function createWindow(options = {}) {
   const show = options.show ?? true
@@ -496,8 +482,7 @@ async function createWindow(options = {}) {
   stageView = new WebContentsView({ webPreferences: {
     preload: preloadPath, contextIsolation: true, nodeIntegration: false,
     sandbox: true, backgroundThrottling: false,
-    additionalArguments: [...desktopDiagnosticArguments(), ...(options.noteV2 ? ['--aisling-note-v2'] : []),
-      ...(options.migration ? ['--aisling-memory-migration'] : [])],
+    additionalArguments: [...desktopDiagnosticArguments(), ...(options.noteV2 ? ['--aisling-note-v2'] : [])],
   } })
   stageView.setBackgroundColor(stageBackground())
   window.contentView.addChildView(stageView)
@@ -592,8 +577,6 @@ async function createWindow(options = {}) {
 
 /** @type {ReturnType<typeof import('./memory-database/host.cjs').attachMemoryDatabase> | undefined} */
 let memoryDatabase
-let organization
-let migration
 /** @type {ReturnType<typeof import('./note-formation.cjs').createNoteFormationService> | undefined} */
 let noteFormation
 let noteDocument = 0
@@ -618,20 +601,17 @@ async function startDesktop(options = {}) {
   const diagnostics = options.diagnostics ?? true
   const target = resolveStageTarget(options.stageUrl)
   if (options.noteOnlyForNewProfiles) configureDevProfile()
+  if (fs.existsSync(path.join(app.getPath('userData'), 'memory-maintenance.v1.json'))) throw new Error('memory-maintenance-active')
   const { assertMemoryAuthority, canStartNoteV2, readMigration } = require('./memory-authority.cjs')
-  if ((options.noteOnlyForNewProfiles || options.noteV2) && !app.requestSingleInstanceLock())
+  if (!app.requestSingleInstanceLock())
     throw new Error('Memory requires exclusive profile access')
   const { readUnifiedProfile, retiredFile } = require('./desktop-profile.cjs')
   if (fs.existsSync(path.join(app.getPath('userData'), retiredFile))) throw new Error('retired-memory-profile')
   const unified = readUnifiedProfile(app.getPath('userData'))
   if (options.requireUnifiedProfile && !unified) throw new Error('unified-memory-profile-not-prepared')
   const p0Experiment = !!options.onMemoryDatabase && process.env.AISLING_MEMORY_DB_P0 === '1'
-  const useNoteV2 = options.noteOnlyForNewProfiles
-    ? !p0Experiment && canStartNoteV2(app.getPath('userData'))
-    : Boolean(options.noteV2)
-  if (useNoteV2 && p0Experiment)
-    throw new Error('Note v2 and legacy database experiment are mutually exclusive')
-  if (!useNoteV2) assertMemoryAuthority(app.getPath('userData'), false)
+  const useNoteV2 = !p0Experiment
+  if (useNoteV2 && !canStartNoteV2(app.getPath('userData'))) throw new Error('legacy-memory-profile-cannot-use-v2')
   if (p0Experiment && !memoryDatabase)
     memoryDatabase = require('./memory-database/host.cjs').attachMemoryDatabase(app, options.memoryDatabaseDiagnostic)
   options.onMemoryDatabase?.(memoryDatabase?.store, memoryDatabase?.ready)
@@ -639,13 +619,11 @@ async function startDesktop(options = {}) {
   const profile = app.getPath('userData')
   const resources = app.isPackaged ? path.join(process.resourcesPath, 'memory-database') : require('./memory-database/client.cjs').localWorkerResources
   const migrationState = readMigration(profile)
-  const frozen = () => migration?.frozen() === true
   if (useNoteV2) {
     const v2Resources = options.noteV2?.resources ?? resources
     const { createNoteFormationService } = require('./note-formation.cjs')
     const archive = unified ? require('./memory-archive.cjs').unifiedArchive(profile, v2Resources)
-      : migrationState && require('./memory-archive.cjs').legacyArchive({ profile, resources: v2Resources, readData: readDesktopData,
-        writeData: writeDesktopData, readReflections: readRawReflections, writeReflections: writeRawReflections })
+      : migrationState && require('./memory-archive.cjs').profileArchive(profile, v2Resources)
     noteFormation = createNoteFormationService({
       autonomous: true,
       profile, resources: v2Resources, archive,
@@ -675,23 +653,6 @@ async function startDesktop(options = {}) {
     else void noteFormation.recover().catch(error => console.error('[note-v2] recovery pending', error.code ?? error.name))
     void noteFormation.configureMirror(require('./obsidian-control.cjs').mirrorConfig(readStoredConfig()))
       .catch(() => console.error('[obsidian-mirror] configuration unavailable'))
-  } else {
-    assertMemoryAuthority(profile, false)
-    const legacyResources = options.noteV2?.resources ?? (app.isPackaged ? resources : process.env.AISLING_MEMORY_DB_P0_RESOURCES || resources)
-    organization ||= require('./memory-organization.cjs').createMemoryOrganization({
-      profile, resources: legacyResources,
-      readData:readDesktopData, readReflections:readRawReflections,writeData:writeDesktopData,writeReflections:writeRawReflections,
-      report:state=>{if(stageView&&!stageView.webContents.isDestroyed())stageView.webContents.send('aisling:organization:status',state)},
-      consent:()=>{const config=readStoredConfig();const memory=/** @type {any} */(config?.memory);return !frozen()&&memory?.enabled===true&&memory?.organizationEnabled===true},
-      recallConsent:()=>{const memory=/** @type {any} */(readStoredConfig()?.memory);return !frozen()&&memory?.enabled===true&&memory?.noteRecallEnabled===true},
-    })
-    if (options.noteOnlyForNewProfiles && !p0Experiment) {
-      migration = require('./memory-migration.cjs').createMemoryMigration({ profile, resources: legacyResources, readData: readDesktopData,
-        readReflections: readRawReflections, legacy: organization, freeze: () => organization.freeze() })
-    }
-    if (migrationState && !migration) throw new Error('memory-migration-requires-standard-main')
-    configureMemoryLifecycle(organization.privacy)
-    if (!frozen()) void organization.recoverSources().catch(()=>{})
   }
   diagnostic(diagnostics, 'app ready')
   if (!tray) {
@@ -708,7 +669,6 @@ async function startDesktop(options = {}) {
       void service.close().catch(() => {}).finally(() => app.quit())
       return true
     }
-    if(organization){const service=organization;organization=undefined;event.preventDefault();void service.close().finally(()=>app.quit());return true}
     return false
   })
   screen.on('display-metrics-changed', () => {
@@ -728,7 +688,7 @@ async function startDesktop(options = {}) {
       && event.senderFrame
       && event.senderFrame === stageView.webContents.mainFrame
       && stageOriginOf(event.senderFrame.url) === allowedOrigin)
-    registerStorageIpc(trusted, !noteFormation, frozen)
+    registerStorageIpc(trusted)
     if (noteFormation) {
       ipcMain.handle('aisling:note-recall:snapshot', event => {
         if (!trusted(event) || !noteFormation) throw new Error('Untrusted Note Recall request')
@@ -820,90 +780,6 @@ async function startDesktop(options = {}) {
           }
         })
       }
-    }
-    if (migration) {
-      let confirming = false
-      let preview, checking = false
-      ipcMain.handle('aisling:memory-migration:status', event => {
-        if (!trusted(event)) throw new Error('Untrusted migration request')
-        return migration.status()
-      })
-      ipcMain.handle('aisling:memory-migration:preflight', async event => {
-        if (!trusted(event) || confirming || checking) throw new Error('Untrusted migration request')
-        preview = undefined
-        checking = true
-        try { return preview = await migration.preflight() }
-        finally { checking = false }
-      })
-      ipcMain.handle('aisling:memory-migration:exclude', async (event, key, version) => {
-        if (!trusted(event) || confirming || checking) throw new Error('Untrusted migration request')
-        confirming = true
-        try {
-          const item = await migration.dispositionChoice(key, version)
-          if (item.excluded) return 'excluded'
-          const chinese = readStoredLanguage() === 'zh-CN'
-          const confirmed = await dialog.showMessageBox({
-            type: 'question', message: chinese ? '将这条记忆留在历史中？' : 'Keep this memory in history only?',
-            detail: (chinese ? '这条记忆不会进入升级后的召回。来源删除仍会清理它。'
-              : 'This memory stays out of upgraded recall and is still cleared when its source is deleted.') + '\n\n' + item.label,
-            buttons: chinese ? ['取消', '仅保留历史'] : ['Cancel', 'Keep in history'], defaultId: 0, cancelId: 0, noLink: true,
-          })
-          if (confirmed.response !== 1 || !trusted(event)) return 'cancelled'
-          const result = await migration.exclude(key, version)
-          preview = undefined
-          return result
-        } finally { confirming = false }
-      })
-      ipcMain.handle('aisling:memory-migration:execute', async event => {
-        if (!trusted(event) || confirming || checking) throw new Error('Untrusted migration request')
-        const state = migration.status()
-        if (!preview?.canMigrate && !(state.total !== undefined && state.phase !== 'committed')) return state
-        confirming = true
-        try {
-          const chinese = readStoredLanguage() === 'zh-CN'
-          const confirmed = await dialog.showMessageBox({
-            type: 'question', message: chinese ? '升级此资料的记忆？' : 'Upgrade this profile’s memory?',
-            detail: chinese ? '应用会暂时停止写入，核对后切换记忆格式并重启。历史记录继续受来源删除约束。'
-              : 'The app pauses writes, verifies the upgrade, and restarts. Historical records remain subject to source deletion.',
-            buttons: chinese ? ['取消', '升级'] : ['Cancel', 'Upgrade'], defaultId: 0, cancelId: 0, noLink: true,
-          })
-          if (confirmed.response !== 1 || !trusted(event)) return migration.status()
-          try {
-            const result = await migration.execute()
-            if (target.mode === 'dev' && process.env.AISLING_DEV === '1')
-              app.once('will-quit', () => app.exit(DEV_RESTART_EXIT))
-            else
-              app.relaunch()
-            setTimeout(() => app.quit(), 100)
-            return result
-          } catch (error) {
-            console.error('[memory-migration]', error.code ?? error.name)
-            return migration.status()
-          } finally { preview = undefined }
-        } finally { confirming = false }
-      })
-    }
-    if (organization) {
-      ipcMain.handle('aisling:organization:enabled',(event,enabled)=>{
-        if(!trusted(event)||typeof enabled!=='boolean')throw new Error('Untrusted organization request')
-        if (frozen()) return { ready: false, autoWrite: false, reason: 'migration-frozen' }
-        return organization?.setEnabled(enabled) ?? {ready:false,autoWrite:false,reason:'disabled'}
-      })
-      ipcMain.handle('aisling:organization:candidates',event=>{
-        if(!trusted(event))throw new Error('Untrusted organization request')
-        if (frozen()) throw new Error('memory-migration-frozen')
-        return organization.candidates()
-      })
-      ipcMain.handle('aisling:memory:recall-heads', event => {
-        if (!trusted(event)) throw new Error('Untrusted Note Recall request')
-        if (frozen()) return { notes: [], reason: 'unavailable', excluded: 0 }
-        return organization.recallHeads()
-      })
-      ipcMain.handle('aisling:organization:settle',(event,batchId,index)=>{
-        if(!trusted(event)||typeof batchId!=='string'||!/^[\w-]{1,128}$/.test(batchId)||!Number.isInteger(index)||index<0||index>=3)throw new Error('Untrusted organization proposal')
-        if (frozen()) throw new Error('memory-migration-frozen')
-        return organization.settle(batchId,index)
-      })
     }
     ipcMain.on('aisling:desktop-awareness:diagnostic', (event, record) => {
       if (desktopDiagnosticsEnabled && trusted(event)) writeDesktopDiagnostic(record)
@@ -1026,7 +902,7 @@ async function startDesktop(options = {}) {
       }
     })
   }
-  return createWindow({ ...options, stageUrl: target.url, noteV2: !!noteFormation, migration: !!migration })
+  return createWindow({ ...options, stageUrl: target.url, noteV2: !!noteFormation })
 }
 
 module.exports = { DEFAULT_STAGE_URL, createWindow, startDesktop, enterDesktopMode, returnToStage, writeDesktopDiagnostic, desktopDiagnosticArguments }

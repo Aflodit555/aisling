@@ -20,15 +20,15 @@ async function fixture() {
 }
 
 describe('Stage history under storage failure', () => {
-  it('exposes page refs when legacy memory is unavailable', async () => {
+  it('exposes page refs without Desktop memory services', async () => {
     await fixture()
     const stage = useStageStore()
     const refs = storeToRefs(stage)
     expect(refs.activeSessionId.value).toBe(stage.activeSessionId)
     expect(refs.messages.value).toEqual([])
     expect(refs.sending.value).toBe(false)
-    expect(stage.formation).toBeUndefined()
-    expect(stage.noteRecallTrace).toBeUndefined()
+    expect('formation' in stage).toBe(false)
+    expect('noteRecallTrace' in stage).toBe(false)
     stage.$dispose()
   })
 

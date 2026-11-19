@@ -39,7 +39,6 @@ export function createAislingRuntime(deps: {
   history?: ConversationMessage[]
   getSituationContext?: (stimulus: Stimulus, turnId?: string) => string | undefined
   getRecallEvidence?: import('@aisling/core').CharacterRuntimeOptions['getRecallEvidence']
-  getHistoryAddon?: import('@aisling/core').CharacterRuntimeOptions['getHistoryAddon']
   getNoteContext?: import('@aisling/core').CharacterRuntimeOptions['getNoteContext']
   getUserTextEnableThinking?: import('@aisling/core').CharacterRuntimeOptions['getUserTextEnableThinking']
   diagnostic?: (record: ChatRuntimeDiagnostic) => void
@@ -51,7 +50,6 @@ export function createAislingRuntime(deps: {
     history: deps.history,
     getSituationContext: deps.getSituationContext,
     getRecallEvidence: deps.getRecallEvidence,
-    getHistoryAddon: deps.getHistoryAddon,
     getNoteContext: deps.getNoteContext,
     getUserTextEnableThinking: deps.getUserTextEnableThinking,
     diagnostic: deps.diagnostic,

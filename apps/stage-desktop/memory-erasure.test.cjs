@@ -11,16 +11,24 @@ const ref=(s,i=0)=>({sessionId:s,messageIndex:i,digest:'a'.repeat(64)})
 const origin=id=>({reflectionId:id})
 const operation=(content,refs,origins=[origin(randomUUID())])=>({action:'ADD',id:randomUUID(),operationId:randomUUID(),reason:'synthetic '+content,meaning:{content,subject:'synthetic',eventTime:null,basis:'direct'},sources:{origins,evidence:refs}})
 const scope=(evidence=[],sessionIds=[],originIds=[])=>({operationId:randomUUID(),evidence,sessionIds,originIds})
-test('Main speaker qualification never grants a new project identity or upgrades promises/plans to external facts',()=>{
- const {speakerQualification}=require('./memory-write-policy.cjs')
- const user={role:'user',content:'我计划明天维修风扇，尚未执行。'},speech={content:'用户陈述：'+user.content,subject:'profile-user',eventTime:null,basis:'direct'}
- assert.equal(speakerQualification({draft:speech},{content:speech.content,basis:'direct',kind:'event'},[user]),null)
- assert.equal(speakerQualification({draft:{...speech,subject:'新风扇'}},{content:speech.content,basis:'direct',kind:'event'},[user]),'subject-needs-review')
- assert.equal(speakerQualification({draft:speech},{content:speech.content,basis:'direct',kind:'fact'},[user]),'source-category-review')
- assert.equal(speakerQualification({draft:{...speech,eventTime:{kind:'date',date:'2026-01-01'}}},{content:speech.content,basis:'direct',kind:'event'},[user]),'time-or-inference-review')
- const assistant={role:'assistant',content:'我答应寄送，但尚未寄送。'},a={...speech,subject:'aisling',content:'Aisling 发言：'+assistant.content}
- assert.equal(speakerQualification({draft:a},{content:a.content,basis:'direct',kind:'event'},[assistant]),null)
- assert.equal(speakerQualification({draft:a},{content:a.content,basis:'direct',kind:'fact'},[assistant]),'source-category-review')
+test('current Main authorization never invents subject identity or promotes plans and promises to fulfilled facts',()=>{
+ const {parseNoteProposals}=require('./note-formation-contract.mjs'),{authorizeOrganization}=require('./note-organization-v2.mjs'),speakers=require('./memory-subjects.json')
+ const message={role:'user',content:'我计划明天维修风扇，尚未执行。'},evidence={sessionId:'synthetic',messageIndex:0,digest:'a'.repeat(64)}
+ const context={notes:[],speakers,evidence:[{ref:evidence,message,scope:'current'}]}
+ const wire={action:'ADD',target:null,reason:'Synthetic evidence',draft:{subject:'S1',kind:'fact',basis:'direct',eventTime:null,tags:['维修'],content:'用户计划明天维修风扇，尚未执行。',sources:[{label:'E1',quote:message.content}]},
+  semantic:{relation:'independent',target:null,scope:'维修计划',sources:[{label:'E1',quote:message.content}],targetSources:[]}}
+ const parse=(item,ctx=context)=>parseNoteProposals(JSON.stringify({items:[item]}),ctx)[0]
+ const allowed=item=>authorizeOrganization(parse(item),{heads:[],complete:true,lookup:()=>message})
+ assert.equal(allowed(wire),true)
+ assert.equal(allowed({...wire,draft:{...wire.draft,content:'用户已经完成风扇维修。'}}),false)
+ assert.throws(()=>parse({...wire,draft:{...wire.draft,subject:'新风扇'}}),/draft-subject/)
+ assert.throws(()=>parse({...wire,draft:{...wire.draft,eventTime:{kind:'date',date:'2026-01-01'}}}),/draft-date-not-in-quote/)
+ const speech={role:'assistant',content:'我答应寄送，但尚未寄送。'},ctx={...context,evidence:[{ref:evidence,message:speech,scope:'current'}]}
+ const event={...wire,semantic:undefined,draft:{...wire.draft,subject:'S2',kind:'event',content:speakers.assistant.prefix+speech.content,sources:[{label:'E1',quote:speech.content}]}}
+ delete event.semantic
+ assert.equal(parse(event,ctx).draft.meaning.content,speakers.assistant.prefix+speech.content)
+ assert.throws(()=>parse({...event,draft:{...event.draft,kind:'fact'}},ctx),/draft-assistant-scope/)
+ assert.throws(()=>parse({...event,draft:{...event.draft,content:'助手已经寄送。'}},ctx),/draft-assistant-scope/)
 })
 async function fixture(){
  const root=path.resolve(__dirname,'../../artifacts/memory-organization-p17');fs.mkdirSync(root,{recursive:true})
@@ -91,7 +99,8 @@ test('durable intent blocks reads immediately and completes source/JSON/DB clean
  assert.equal(state.reflections.length,0);assert.equal(state.batches.length,0)
  assert.equal(await store.getNoteV1(add.id),null)
  await assert.rejects(store.applyNoteOperation(add),{code:'erased'})
- assert.throws(()=>recovered.validateWrite({version:1,progress:[],reflections:[],batches:[{id:'batch',sourceRefs:[r],reflectionIds:[]}]}),/erased-generation/)
+ const late=require('./memory-lifecycle.cjs').pruneReflections({version:1,progress:[],reflections:[],batches:[{id:'batch',sourceRefs:[r],reflectionIds:[]}]},recovered.sanitizedData(data),recovered.readJournal().blocked)
+ assert.equal(late.state.batches.length,0)
  await store.close()
 })
 test('real Worker death inside erasure rolls back; restart replays the stable erase request and then rejects old operations',{skip:!resources,timeout:45000},async()=>{
@@ -149,7 +158,7 @@ test('failed cleanup stays unreadable and resumes the same persistent request wi
  const requestId=privacy.readJournal().pending[0].steps[0].operationId,original=store.eraseSources;let attempts=0
  store.eraseSources=async()=>{attempts++;throw new Error('synthetic-worker-unavailable')}
  await assert.rejects(privacy.recover(),/synthetic-worker-unavailable/)
- assert.equal(attempts,1);assert(privacy.pending());assert.throws(()=>privacy.guardedReflections(),/erasure-pending/)
+ assert.equal(attempts,1);assert(privacy.pending());assert.throws(()=>privacy.assertReadable(),/erasure-pending/)
  store.eraseSources=original
  const restart=createMemoryLifecycle(options);assert.equal(restart.readJournal().pending[0].steps[0].operationId,requestId);await restart.recover()
  assert(!restart.pending());assert.equal(await store.getNoteV1(op.id),null);await store.close()
@@ -172,7 +181,7 @@ test('deleting a Reflection Origin erases its saved draft batch and Note even wh
  let data={'aisling.conversations.v1':JSON.stringify({sessions:[{id:r.sessionId,messages:[m]}]})},state={version:1,progress:[],reflections:[{id:'gone-origin',content:m.content,sourceRefs:[r],relatedReflectionIds:[]}],batches:[{id:'saved-private-draft',sourceRefs:[r],reflectionIds:['gone-origin'],organization:{items:[{reflectionId:'gone-origin',draft:op.meaning,operation:op}]}}]}
  const privacy=createMemoryLifecycle({profile:directory,store,readData:()=>data,writeData:v=>{data=v},readReflections:()=>state,writeReflections:v=>{state=v}})
  const next=structuredClone(state);next.reflections=[];next.batches[0].reflectionIds=[]
- privacy.beforeReflectionsChange(state,next);state=next;await privacy.recover()
+ state=next;await privacy.recover()
  assert.equal(state.batches.length,0);assert(!JSON.stringify(state).includes(m.content));assert.equal(await store.getNoteV1(op.id),null);assert.equal(await store.getOperationReceipt(op.operationId),null)
  assert.equal(JSON.parse(data['aisling.conversations.v1']).sessions[0].messages[0].content,m.content)
  await assert.rejects(store.applyNoteOperation(op),{code:'erased'});await store.close()

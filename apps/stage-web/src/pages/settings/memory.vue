@@ -2,11 +2,9 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { t } from '../../i18n'
 import ModuleToggle from '../../components/settings/ModuleToggle.vue'
-import MemoryMigration from '../../components/settings/MemoryMigration.vue'
 import EmbeddingForm from '../../components/settings/EmbeddingForm.vue'
 import ObsidianMirror from '../../components/settings/ObsidianMirror.vue'
 import FormationStatus from '../../components/settings/FormationStatus.vue'
-import LegacyMemoryControls from '../../components/settings/LegacyMemoryControls.vue'
 import { useSettingsStore } from '../../stores/settings'
 import { useStageStore } from '../../stores/stage'
 import { formationFailure } from '../../../../stage-desktop/note-formation-errors.mjs'
@@ -15,9 +13,6 @@ const settings = useSettingsStore()
 const stage = useStageStore()
 const bridge = window.aislingDesktop?.noteReview
 const mirror = window.aislingDesktop?.obsidianMirror
-const legacy = !!window.aislingDesktop?.memoryOrganization
-const migration = window.aislingDesktop?.memoryMigration
-const migrationFrozen = ref(false)
 type Status = Awaited<ReturnType<NonNullable<typeof bridge>['list']>>
 const state = ref<Status>()
 const busy = ref(false)
@@ -99,9 +94,6 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
     <p class="page-sub">{{ t('Memory includes relevant excerpts from earlier conversations.') }}</p>
     <ModuleToggle label="Memory" :enabled="memory.enabled" @change="settings.setMemoryEnabled($event)" />
     <ObsidianMirror v-if="mirror" />
-    <MemoryMigration v-if="migration" :bridge="migration" @frozen="migrationFrozen = $event" />
-    <p v-else-if="legacy" class="memory-state" role="status">{{ t('This profile uses the previous memory format.') }}</p>
-    <LegacyMemoryControls v-if="legacy && !migrationFrozen" />
     <template v-if="memory.enabled">
       <template v-if="bridge">
         <p v-if="!state?.ready" class="memory-state" role="status">{{ t(database) }}</p>
@@ -141,7 +133,7 @@ const bases: Record<string, string> = { direct: 'Direct evidence', inferred: 'In
           </article>
         </section>
       </template>
-      <p v-else-if="!legacy" class="memory-state">{{ t('Desktop database required.') }}</p>
+      <p v-else class="memory-state">{{ t('Desktop database required.') }}</p>
     </template>
   </div>
 </template>

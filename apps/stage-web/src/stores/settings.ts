@@ -26,7 +26,7 @@ import {
 } from '../runtime/provider-factory'
 
 export const useSettingsStore = defineStore('settings', () => {
-  const configStore = createLocalStorageConfigStore(resolvePersistentStorage(), !window.aislingDesktop?.memoryOrganization)
+  const configStore = createLocalStorageConfigStore(resolvePersistentStorage())
 
   const config = ref<PlatformConfig>(createDefaultPlatformConfig())
   const loaded = ref(false)
@@ -146,10 +146,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   async function setMemoryEnabled(enabled: boolean): Promise<void> {
     config.value = { ...config.value, memory: { ...config.value.memory, enabled: enabled === true,
-      formationEnabled: enabled === true && config.value.memory.enabled && config.value.memory.formationEnabled === true,
-      ...(window.aislingDesktop?.memoryOrganization && {
-        organizationEnabled: enabled === true && config.value.memory.enabled && config.value.memory.organizationEnabled === true,
-      }) } }
+      formationEnabled: enabled === true && config.value.memory.enabled && config.value.memory.formationEnabled === true } }
     if (!enabled) delete config.value.memory.noteRecallEnabled
     await persist()
   }
@@ -159,14 +156,9 @@ export const useSettingsStore = defineStore('settings', () => {
     config.value = { ...config.value, memory: { ...config.value.memory, formationEnabled: config.value.memory.enabled && enabled === true } }
     await persist()
   }
-  async function setMemoryOrganizationEnabled(enabled: boolean): Promise<void> {
-    if (!window.aislingDesktop?.memoryOrganization || (enabled && !activeChatProvider.value)) return
-    config.value = { ...config.value, memory: { ...config.value.memory, organizationEnabled:config.value.memory.enabled && enabled===true } }
-    await persist()
-  }
   async function setNoteRecallEnabled(enabled: boolean): Promise<void> {
     const memory = { ...config.value.memory }
-    if (enabled && memory.enabled && (window.aislingDesktop?.noteRecall || window.aislingDesktop?.memoryOrganization?.recallHeads)) memory.noteRecallEnabled = true
+    if (enabled && memory.enabled && window.aislingDesktop?.noteRecall) memory.noteRecallEnabled = true
     else delete memory.noteRecallEnabled
     config.value = { ...config.value, memory }
     await persist()
@@ -206,7 +198,6 @@ export const useSettingsStore = defineStore('settings', () => {
     setMemoryEnabled,
     setMemoryFormationEnabled,
     setNoteRecallEnabled,
-    setMemoryOrganizationEnabled,
     speechReady,
     visionReady,
     webSearchReady,

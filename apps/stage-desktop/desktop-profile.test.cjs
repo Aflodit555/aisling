@@ -1,7 +1,7 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')
 const { test } = require('node:test')
 const { randomUUID } = require('node:crypto')
-const { configureDefaultProfile, readUnifiedProfile, receiptFile, retiredFile, archiveName } = require('./desktop-profile.cjs')
+const { configureDefaultProfile, readUnifiedProfile, receiptFile, retiredFile, archiveName, maintenanceFile } = require('./desktop-profile.cjs')
 const transfer = require('../../scripts/unify-memory-profile.cjs')
 const root = path.resolve(__dirname, '../../artifacts/memory-v0.4.0-p2/tests')
 fs.mkdirSync(root, { recursive: true })
@@ -43,9 +43,43 @@ test('normal aliases share Main and mode-independent selection; explicit isolati
     const paths = { userData: base }
     assert.equal(configureDefaultProfile({ getPath: name => paths[name], setPath: (name, value) => { paths[name] = value } }), false)
     assert.equal(paths.userData, isolated)
+    write(isolated, maintenanceFile, { kind: 'synthetic maintenance' })
+    assert.throws(() => configureDefaultProfile({ getPath: () => base, setPath() {} }), /memory-maintenance-active/)
+    fs.unlinkSync(path.join(isolated, maintenanceFile))
     write(isolated, retiredFile, {})
     assert.throws(() => configureDefaultProfile({ getPath: () => base, setPath() {} }), /retired/)
   } finally { if (saved === undefined) delete process.env.AISLING_DEV_PROFILE; else process.env.AISLING_DEV_PROFILE = saved }
+})
+
+test('normal Profile validation never reads Reflection contents as runtime input', () => {
+  const args = setup(), plan = transfer.backup(args); certify(plan); transfer.publish(plan)
+  const originalRead = fs.readFileSync
+  fs.readFileSync = function (file, ...rest) {
+    if (String(file).endsWith('aisling-reflections.v1.json')) throw Error('Archive content must be privacy/offline only')
+    return originalRead.call(this, file, ...rest)
+  }
+  try { assert.equal(readUnifiedProfile(args.target).id, plan.id) }
+  finally { fs.readFileSync = originalRead }
+})
+
+test('unified archives keep original Note v2 erasure barriers and reject ambiguous dual journals', async () => {
+  const args = setup(), barrier = require('./memory-database/erasure.cjs').hash('already-deleted')
+  write(args.source, 'note-formation-jobs.v1.json', { version: 1, progress: {}, batches: [] })
+  write(args.source, 'memory-erasure.v1.json', { version: 2, pending: [], blocked: { sources: [], sessions: [barrier] } })
+  const plan = transfer.backup(args); certify(plan); transfer.publish(plan)
+  const { unifiedArchive } = require('./memory-archive.cjs'), { createNoteFormationService } = require('./note-formation.cjs')
+  const worker = path.join(root, 'not-opened'), readData = () => JSON.parse(fs.readFileSync(path.join(args.target, 'aisling-store.json')))
+  const options = { profile: args.target, resources: worker, readData, writeData: value => write(args.target, 'aisling-store.json', value),
+    archive: unifiedArchive(args.target, worker), consent: () => false }
+  const service = createNoteFormationService(options)
+  try {
+    assert.deepEqual(service.privacy.readJournal().blocked.sessions, [barrier])
+    const data = { ...readData(), 'aisling.conversations.v1': JSON.stringify({ sessions: [session, { id: 'already-deleted', messages: [] }] }) }
+    assert.deepEqual(JSON.parse(service.privacy.sanitizedData(data)['aisling.conversations.v1']).sessions.map(s => s.id), [session.id])
+    assert(!fs.existsSync(path.join(args.target, 'memory-erasure.v2.json')))
+  } finally { await service.close() }
+  write(args.target, 'memory-erasure.v2.json', { version: 2, pending: [], blocked: { sources: [], sessions: [] } })
+  assert.throws(() => createNoteFormationService(options), /unified-erasure-journals-require-reconciliation/)
 })
 
 test('exact transfer resumes every publication boundary, preserves config/jobs/archive, and is idempotent', () => {

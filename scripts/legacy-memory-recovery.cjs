@@ -1,15 +1,17 @@
+// Offline recovery for pre-Note-v2 profiles; never imported by the application Runtime.
+const { durable } = require('../apps/stage-desktop/memory-files.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const { randomUUID } = require('node:crypto')
 const { isDeepStrictEqual } = require('node:util')
-const { createMemoryDatabaseStore, createNoteV2Store } = require('./memory-database/store.cjs')
+const { createMemoryDatabaseStore, createNoteV2Store } = require('../apps/stage-desktop/memory-database/store.cjs')
 const { authority, stateName, dispositionName, migratedJournal, v1Path, databasePath: targetPath, exists,
-  readMigration: readState, workerConfig } = require('./memory-authority.cjs')
-const { uuid, validRuntimeOperation, needsMultipleSources, MAX_CONTEXT_EVIDENCE, operationFingerprint } = require('./memory-database/note-v1.cjs')
-const { hash, sourceKey } = require('./memory-database/erasure.cjs')
-const { readConversationSessions, sourceMessageLookup } = require('./memory-evidence.cjs')
-const { safeText } = require('./memory-text.mjs')
-const speakers = require('./memory-subjects.json')
+  readMigration: readState, workerConfig } = require('../apps/stage-desktop/memory-authority.cjs')
+const { uuid, validRuntimeOperation, needsMultipleSources, MAX_CONTEXT_EVIDENCE, operationFingerprint } = require('../apps/stage-desktop/memory-database/note-v1.cjs')
+const { hash, sourceKey } = require('../apps/stage-desktop/memory-database/erasure.cjs')
+const { readConversationSessions, sourceMessageLookup } = require('../apps/stage-desktop/memory-evidence.cjs')
+const { safeText } = require('../apps/stage-desktop/memory-text.mjs')
+const speakers = require('../apps/stage-desktop/memory-subjects.json')
 
 const confirmed = subject => Object.values(speakers).some(speaker => speaker.subject === subject)
 const kinds = ['event', 'fact', 'pattern', 'preference', 'project-state', 'open-question']
@@ -25,13 +27,6 @@ const asUuid = digest => [digest.slice(0, 8), digest.slice(8, 12), '4' + digest.
   '8' + digest.slice(17, 20), digest.slice(20, 32)].join('-')
 
 
-
-function durable(file, text) {
-  const temp = file + '.tmp'
-  if (exists(temp)) fs.unlinkSync(temp)
-  fs.writeFileSync(temp, text, { flag: 'wx', flush: true })
-  fs.renameSync(temp, file)
-}
 
 function readDispositions(file) {
   if (!exists(file)) return {}

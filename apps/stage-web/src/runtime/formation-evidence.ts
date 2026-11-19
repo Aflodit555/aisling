@@ -69,6 +69,6 @@ export async function withRelatedHistory(sessionId: string, current: FormationEv
   return selected
 }
 
-/** Note-only context; legacy Reflection retains its narrower experience gate. */
+/** Current Note context; the narrower selector remains for frozen P3 comparisons. */
 export const withNoteHistory = (sessionId: string, current: FormationEvidence[], getSessions: () => ConversationSession[],
   fits: (evidence: FormationEvidence[]) => void) => withRelatedHistory(sessionId, current, getSessions, fits, true)

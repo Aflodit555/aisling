@@ -5,7 +5,6 @@ import { createTextOutput } from './output'
 import type { ChatMessage, ChatProvider } from './provider'
 import type { AutonomousStimulus, Stimulus, UserTextStimulus, VisualStimulus } from './stimulus'
 import type { Tool } from './tool'
-import type { LegacyRecallDiagnostic } from './legacy-recall'
 import { assembleContext, estimateTokens, estimateMessageTokens, INPUT_TOKEN_LIMIT, type ConversationMessage } from './context'
 
 /**
@@ -74,8 +73,6 @@ export interface CharacterRuntimeOptions {
   getSituationContext?: (stimulus: Stimulus, turnId?: string) => string | undefined
   /** Optional untrusted evidence; called only for a user-text turn, never visual/autonomous. */
   getRecallEvidence?: (stimulus: UserTextStimulus) => string | undefined
-  /** Optional compatibility packing, evaluated once per ordinary turn. */
-  getHistoryAddon?: (stimulus: UserTextStimulus) => HistoryRecallAddon | Promise<HistoryRecallAddon>
   getNoteContext?: (stimulus: UserTextStimulus) => Promise<NoteRecallContext | undefined>
   /** Route-specific ordinary chat policy, captured once per turn. */
   getUserTextEnableThinking?: () => false | undefined
@@ -88,10 +85,7 @@ export interface NoteRecallContext {
   select: (rawEvidence: string | null, fits: (items: readonly string[]) => boolean) => readonly string[]
 }
 
-export type HistoryRecallAddon = (spare: number, fitRaw: (budget: number, repack: boolean) => ChatMessage | undefined,
-  hasRaw: boolean) => { recall?: ChatMessage; memory?: ChatMessage; diagnostic?: LegacyRecallDiagnostic }
-
-export interface ChatRuntimeDiagnostic extends LegacyRecallDiagnostic {
+export interface ChatRuntimeDiagnostic {
   type: 'p2-b-context' | 'p2-b-request-start' | 'p2-b-request-end' | 'context-assembled'
   at: number
   turnId: string
@@ -204,7 +198,7 @@ export function createCharacterRuntime(options: CharacterRuntimeOptions): Charac
 
   /** Runs the chat/tool loop for one turn and returns the final text output. */
   async function runChat(turnId: string, seed: { prefix: ChatMessage[]; suffix: ChatMessage[]; includeHistory: boolean;
-    recall?: ChatMessage; addon?: HistoryRecallAddon; notes?: NoteRecallContext }, source: Stimulus['kind']): Promise<TextOutput> {
+    recall?: ChatMessage; notes?: NoteRecallContext }, source: Stimulus['kind']): Promise<TextOutput> {
     const enableThinking = source === 'user-text' ? options.getUserTextEnableThinking?.() : undefined
     const provider = resolveChatProvider()
     if (!provider)
@@ -227,14 +221,8 @@ export function createCharacterRuntime(options: CharacterRuntimeOptions): Charac
       // Both memories use spare space only, after selecting the unchanged session window.
       const spare = INPUT_TOKEN_LIMIT - context.requiredTokens - context.historyTokens
       const fitRaw = (budget: number, repack: boolean) => fitRecall(seed.recall, budget, repack)
-      let compatible: ReturnType<HistoryRecallAddon> | undefined
-      try {
-        const packed = seed.addon?.(spare, fitRaw, !!seed.recall)
-        if (packed && [packed.recall, packed.memory].reduce((total, message) =>
-          total + (message ? estimateMessageTokens(message) : 0), 0) <= spare) compatible = packed
-      } catch { /* A compatibility add-on cannot block chat. */ }
       const rawBudget = seed.notes && round === 0 ? Math.max(Math.floor(spare * .75), spare - 850) : spare
-      let recall = compatible ? compatible.recall : fitRaw(rawBudget, !!seed.notes)
+      let recall = fitRaw(rawBudget, !!seed.notes)
       if (options.getNoteContext && round > 0)
         recall = frozenRaw && estimateMessageTokens(frozenRaw) <= spare ? frozenRaw : undefined
       let recallTokens = recall ? estimateMessageTokens(recall) : 0
@@ -262,16 +250,14 @@ export function createCharacterRuntime(options: CharacterRuntimeOptions): Charac
         }
         frozenRaw = recall
       }
-      const legacyTokens = compatible?.memory ? estimateMessageTokens(compatible.memory) : 0
-      const memories = [recall, compatible?.memory, ...(noteMemory ? [NOTE_EVIDENCE_POLICY, noteMemory] : [])]
+      const memories = [recall, ...(noteMemory ? [NOTE_EVIDENCE_POLICY, noteMemory] : [])]
         .filter((message): message is ChatMessage => !!message)
       context.messages.splice(context.messages.length - seed.suffix.length - additions.length, 0, ...memories)
-      context.requiredTokens += recallTokens + legacyTokens + (noteMemory ? estimateMessageTokens(noteMemory) + NOTE_POLICY_TOKENS : 0)
+      context.requiredTokens += recallTokens + (noteMemory ? estimateMessageTokens(noteMemory) + NOTE_POLICY_TOKENS : 0)
       diagnose({ type: 'context-assembled', turnId, source, round,
         historyTokens: context.historyTokens, requiredTokens: context.requiredTokens,
         selectedMessages: context.selectedMessages, omittedMessages: context.omittedMessages,
         basisCount: context.basisCount, recallIncluded: !!recall,
-        ...compatible?.diagnostic,
         reason: seed.includeHistory ? 'session-window' : 'candidate-only' })
       const request = {
         messages: context.messages,
@@ -363,7 +349,7 @@ export function createCharacterRuntime(options: CharacterRuntimeOptions): Charac
 
   async function handleUserText(turnId: string, stimulus: UserTextStimulus): Promise<TextOutput> {
     const user: ChatMessage = { role: 'user', content: stimulus.text }
-    const seed: ReturnType<typeof promptMessages> & { recall?: ChatMessage; addon?: HistoryRecallAddon; notes?: NoteRecallContext }
+    const seed: ReturnType<typeof promptMessages> & { recall?: ChatMessage; notes?: NoteRecallContext }
       = promptMessages(user, USER_RESPONSE_POLICY, undefined, true, stimulus, turnId)
     try {
       const evidence = options.getRecallEvidence?.(stimulus)
@@ -374,12 +360,6 @@ export function createCharacterRuntime(options: CharacterRuntimeOptions): Charac
     catch { /* Optional recall failure must preserve the baseline user turn. */ }
     try { if (options.getNoteContext) seed.notes = await options.getNoteContext(stimulus) }
     catch { /* Optional Note Recall must preserve the baseline user turn. */ }
-    try {
-      if (!options.getNoteContext) {
-        const addon = options.getHistoryAddon?.(stimulus)
-        seed.addon = addon && 'then' in addon ? await addon : addon
-      }
-    } catch { /* Optional compatibility data must preserve the baseline user turn. */ }
     return runChat(turnId, seed, stimulus.kind).then((output) => {
       appendHistory(user)
       if (output.text.trim()) appendHistory({ role: 'assistant', content: output.text })

@@ -1,7 +1,6 @@
 const { app, ipcMain } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
-const { Buffer } = require('node:buffer')
 
 /**
  * Thin Desktop persistence bridge. The renderer keeps its existing
@@ -80,23 +79,14 @@ function readStoredLanguage() {
 }
 
 function readDesktopData() { return readStore(true) }
-const reflectionsFile = () => path.join(app.getPath('userData'), 'aisling-reflections.v1.json')
 let memoryLifecycle
 function configureMemoryLifecycle(value){memoryLifecycle=value}
-function readRawReflections() {
-  const state = /** @type {any} */ (readStore(true, reflectionsFile()))
-  if(!Object.keys(state).length)return {version:1,reflections:[],batches:[],progress:[]}
-  if(state.version!==1||!Array.isArray(state.batches)||!Array.isArray(state.reflections))throw new Error('Invalid reflection storage')
-  return state
-}
-function writeRawReflections(state){writeStore(state,reflectionsFile(),true)}
 function writeDesktopData(data){writeStore(data, storeFilePath(), true)}
-function readReflections(){return memoryLifecycle?memoryLifecycle.guardedReflections():readRawReflections()}
 
 let registered = false
 
 /** @param {(event: Electron.IpcMainEvent) => boolean} trusted */
-function registerStorageIpc(trusted, reflection = true, frozen = () => false) {
+function registerStorageIpc(trusted) {
   if (registered)
     return
   registered = true
@@ -120,7 +110,6 @@ function registerStorageIpc(trusted, reflection = true, frozen = () => false) {
     }
     try {
       const data = readStore(true)
-      if (key === 'aisling.conversations.v1' && frozen()) throw new Error('memory-migration-frozen')
       if(key==='aisling.conversations.v1'&&memoryLifecycle)memoryLifecycle.beforeConversationChange(data,{...data,[key]:value})
       data[key] = value
       if(key==='aisling.conversations.v1'&&memoryLifecycle)Object.assign(data,memoryLifecycle.sanitizedData(data))
@@ -132,28 +121,6 @@ function registerStorageIpc(trusted, reflection = true, frozen = () => false) {
     }
   })
 
-  if (!reflection) return
-  ipcMain.on('aisling:reflections:read', event => {
-    if (!trusted(event) || frozen()) { event.returnValue = { ok: false }; return }
-    try { fs.readFileSync(reflectionsFile(),'utf8'); event.returnValue = { ok: true, value: JSON.stringify(readReflections()) } }
-    catch (error) { event.returnValue = error.code === 'ENOENT' ? { ok: true, value: null } : { ok: false } }
-  })
-  ipcMain.on('aisling:reflections:write', (event, value) => {
-    if (!trusted(event) || frozen()) { event.returnValue = false; return }
-    if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > 2_000_000) { event.returnValue = false; return }
-    try {
-      const data = JSON.parse(value)
-      if (!data || data.version !== 1 || !Array.isArray(data.reflections) || !Array.isArray(data.batches) || !Array.isArray(data.progress)) { event.returnValue = false; return }
-      const previous = readStore(true, reflectionsFile())
-      if (Object.keys(previous).length && previous.version !== 1) { event.returnValue = false; return }
-      memoryLifecycle?.validateWrite(data)
-      memoryLifecycle?.beforeReflectionsChange(previous.version===1?previous:{reflections:[],batches:[]},data)
-      writeStore(data, reflectionsFile())
-      event.returnValue = true
-    }
-    catch { event.returnValue = false }
-  })
 }
 
-module.exports = { CHANNELS, registerStorageIpc, readStoredConfig, readStoredLanguage, readDesktopData, readReflections,
-  readRawReflections,writeRawReflections,writeDesktopData,configureMemoryLifecycle }
+module.exports = { CHANNELS, registerStorageIpc, readStoredConfig, readStoredLanguage, readDesktopData, writeDesktopData,configureMemoryLifecycle }

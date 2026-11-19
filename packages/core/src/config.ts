@@ -64,8 +64,8 @@ export interface PlatformConfig {
   speech: SpeechConfig
   vision: VisionConfig
   webSearch: WebSearchConfig
-  /** Memory controls recall; reflection formation requires a separate opt-in. */
-  memory: { enabled: boolean; formationEnabled?: boolean; organizationEnabled?: boolean; noteRecallEnabled?: boolean;
+  /** Memory controls recall; Note formation requires a separate opt-in. */
+  memory: { enabled: boolean; formationEnabled?: boolean; noteRecallEnabled?: boolean;
     obsidianMirror?: { enabled: boolean; vault: string };
     embedding?: { endpoint?: string; model?: string; credentialSource?: 'reuse' | 'dedicated'; apiKey?: string } }
 }

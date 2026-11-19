@@ -43,23 +43,21 @@ async function until(predicate, description) {
     await assert.rejects(startDesktop({ stageUrl: 'https://example.invalid', noteOnlyForNewProfiles: true }), /untrusted-stage-origin/)
   }
   // Client-route transitions need animation frames, which hidden windows may suspend.
-  const win = await startDesktop({ show: phase === 'write' || phase === 'associative', diagnostics: false, stageUrl: dev ? undefined : 'aisling://stage/',
+  const win = await startDesktop({ show: false, diagnostics: false, stageUrl: dev ? undefined : 'aisling://stage/',
     noteOnlyForNewProfiles: phase !== 'default', noteV2: fixture && { ...fixture, onService: value => { service = value },
       ...(phase === 'associative' && { embeddingConfig: () => ({modelId:'mock/embedding',model:'mock',apiKey:'synthetic',endpoint:'https://mock.invalid'}),
         embeddingRequest: async (_config,texts,type) => { embeddingCalls.push(type); return texts.map(()=>[1,...Array(1023).fill(0)]) } }) } })
   const web = win.contentView.children[0].webContents
-  if (phase === 'reliability') {
-    // Hidden windows can suspend animation frames; drive only this fixture's route transitions with timers.
-    await web.insertCSS('* { animation-duration: 0s !important; transition-duration: 0s !important; }')
-    await web.executeJavaScript('window.requestAnimationFrame = callback => setTimeout(() => callback(performance.now()), 16); window.cancelAnimationFrame = clearTimeout; void 0')
-  }
+  // Hidden windows can suspend animation frames; drive only this fixture's route transitions with timers.
+  await web.insertCSS('* { animation-duration: 0s !important; transition-duration: 0s !important; }')
+  await web.executeJavaScript('window.requestAnimationFrame = callback => setTimeout(() => callback(performance.now()), 16); window.cancelAnimationFrame = clearTimeout; void 0')
   if (dev) web.on('console-message', details => {
     if (details.level === 'error') console.error(details.message)
   })
   if (phase === 'default') {
-    assert.equal(await web.executeJavaScript('Boolean(window.aislingDesktop?.noteFormation)'), false)
-    assert(!fs.existsSync(path.join(profile, 'memory-authority')))
-    assert(!fs.existsSync(path.join(profile, 'memory-note-v2')))
+    assert.equal(await web.executeJavaScript('Boolean(window.aislingDesktop?.noteFormation && !window.aislingDesktop.reflectionStorage && !window.aislingDesktop.memoryOrganization)'), true)
+    assert(fs.existsSync(path.join(profile, 'memory-authority')))
+    assert(fs.existsSync(path.join(profile, 'memory-note-v2')))
     console.log(JSON.stringify({ phase, result: 'note-formation-passed', pid: process.pid }))
     clearTimeout(timeout)
     app.quit()

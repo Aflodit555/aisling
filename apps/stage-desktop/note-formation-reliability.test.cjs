@@ -256,7 +256,9 @@ test('old v1 failures are read without bulk migration, retained alongside later 
   } finally { await service.close() }
 })
 
-test('database error after commit is recovered by the original Receipt; fail/duplicate retry never regenerate or duplicate the Note', native, async () => {
+test('database error after commit is recovered by the original Receipt; fail/duplicate retry never regenerate or duplicate the Note', native, async t => {
+  // Keep the background organizer from settling the injected fault before the explicit retry assertions.
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   const f = fixture(), copied = path.join(f.profile, 'resources'), marker = path.join(f.profile, 'committed')
   fs.cpSync(resources, copied, { recursive: true })
   fs.renameSync(path.join(copied, 'worker.cjs'), path.join(copied, 'worker-real.cjs'))

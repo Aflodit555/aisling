@@ -1,12 +1,5 @@
 /// <reference types="vite/client" />
 
-interface MemoryMigrationStatus {
-  phase: 'legacy' | 'migrating' | 'validating' | 'validated' | 'committed' | 'blocked'
-  busy: boolean
-  done?: number
-  total?: number
-}
-
 interface Window {
   Live2DCubismCore?: unknown
   aislingDesktop?: {
@@ -14,16 +7,6 @@ interface Window {
       configure(): Promise<{running: boolean; error: string}>
       status(): Promise<{running: boolean; error: string}>
       open(): Promise<{error: string}>
-    }
-    memoryMigration?: {
-      status(): Promise<MemoryMigrationStatus>
-      preflight(): Promise<{
-        notes: number; reflections: number; duplicates: number; review: number; unavailable: number; historyIssues: number; history: number;
-        revisions: number; receipts: number; excluded: number; version: string; canMigrate: boolean; reasons: Array<{ code: string; count: number }>
-        choices: Array<{ key: string; label: string; code: string }>
-      }>
-      execute(): Promise<MemoryMigrationStatus>
-      exclude(key: string, version: string): Promise<'excluded' | 'cancelled'>
     }
     noteFormation?: import('./runtime/note-formation').NoteFormationBridge
     noteRecall?: import('./runtime/note-v2-recall').NoteV2RecallBridge
@@ -38,7 +21,6 @@ interface Window {
       decide(key: string, approved: boolean): Promise<string>
       retry(id: string, attempt: number): Promise<string>
     }
-    memoryOrganization?: import('./runtime/note-organization').OrganizationBridge
     getMode(): Promise<'stage' | 'desktop'>
     setLanguage?(language: 'en' | 'zh-CN'): void
     openDesktopMenu(): void
@@ -56,8 +38,6 @@ interface Window {
     judgeEmotion?(conversation: import('./stores/emotion').EmotionTurn[]): Promise<{ emotion: string; confidence: number; intensity: number } | null>
     /** Minimal `localStorage`-shaped bridge backed by Electron userData. */
     storage?: Pick<Storage, 'getItem' | 'setItem'>
-    /** Dedicated Reflection and processing state, separate from conversations. */
-    reflectionStorage?: import('./runtime/reflection-store').ReflectionStorage
   }
 }
 

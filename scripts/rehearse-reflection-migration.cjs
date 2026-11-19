@@ -5,7 +5,7 @@ const { createNoteV2Store } = require('../apps/stage-desktop/memory-database/sto
 const { sourceMessageLookup } = require('../apps/stage-desktop/memory-evidence.cjs')
 const { validRuntimeOperation, operationFingerprint, uuid } = require('../apps/stage-desktop/memory-database/note-v1.cjs')
 const { sameRecognition } = require('../apps/stage-desktop/note-organization-v2.mjs')
-const { durable } = require('../apps/stage-desktop/memory-migration.cjs')
+const { durable } = require('../apps/stage-desktop/memory-files.cjs')
 const { inventory } = require('./unify-memory-profile.cjs')
 const root = path.resolve(__dirname, '../artifacts/memory-v0.4.0-p4a')
 const json = file => JSON.parse(fs.readFileSync(file, 'utf8'))

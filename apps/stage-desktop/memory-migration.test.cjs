@@ -7,11 +7,10 @@ const { createRequire } = require('node:module')
 const { pathToFileURL } = require('node:url')
 const { promisify } = require('node:util')
 const test = process.env.AISLING_MIGRATION_CHILD === '1' ? () => {} : require('node:test').test
-const { createMemoryMigration } = require('./memory-migration.cjs')
+const { createMemoryMigration } = require('../../scripts/legacy-memory-recovery.cjs')
 const { legacyArchive } = require('./memory-archive.cjs')
 const { dispositionName, migratedJournal, stateName, readMigration: readState, assertMemoryAuthority, canStartNoteV2 } = require('./memory-authority.cjs')
 const { createMemoryLifecycle } = require('./memory-lifecycle.cjs')
-const { createMemoryOrganization } = require('./memory-organization.cjs')
 const { createNoteFormationService } = require('./note-formation.cjs')
 const { messageDigest } = require('./memory-evidence.cjs')
 const { hash } = require('./memory-database/erasure.cjs')
@@ -50,7 +49,7 @@ function fixture(sessions, reflections = [], batches = []) {
 }
 
 function migration(f, checkpoint) {
-  const legacy = createMemoryOrganization(f)
+  const legacy = legacyArchive(f)
   return createMemoryMigration({ ...f, legacy, freeze: () => legacy.freeze(), checkpoint })
 }
 
@@ -354,11 +353,10 @@ test('target transactions roll back and a lost successful ADD reply reuses the m
   assert.deepEqual(await inspect(), [committed])
 })
 
-function desktopProfiles() {
+async function desktopProfiles() {
   const s = session('a', '用户报告纸舟第一版已发布。')
   const original = row('migration-entry', s.messages[0].content, [ref(s)])
-  const ambiguous = row('migration-ambiguous', '有个项目可能发布了。', [ref(s)])
-  const records = [original, ambiguous]
+  const records = [original]
   const f = fixture([s], records, records.map(record => batch(record, { sessionId: s.id, units: 1, attempts: 1 })))
   const fresh = fs.realpathSync(fs.mkdtempSync(path.join(root, 'profile-')))
   const unmarked = fixture([s]).profile
@@ -368,14 +366,18 @@ function desktopProfiles() {
   }))
   for (const profile of [f.profile, fresh, unmarked, blocked]) fs.writeFileSync(path.join(profile, '.migration-fixture'), 'aisling-p4-synthetic\n')
   f.writeData({ ...f.readData(), 'aisling.config.v1': JSON.stringify({ memory: { enabled: true, noteRecallEnabled: true } }) })
-  return [['legacy', f.profile], ['v2', f.profile], ['fresh', fresh], ['unmarked', unmarked], ['blocked', blocked]]
+  const v2=fixture([s],records,records.map(record=>batch(record,{sessionId:s.id,units:1,attempts:1})))
+  fs.writeFileSync(path.join(v2.profile,'.migration-fixture'),'aisling-p4-synthetic\n')
+  v2.writeData({...v2.readData(),'aisling.config.v1':JSON.stringify({memory:{enabled:true,noteRecallEnabled:true}}),'aisling.language.v1':'zh-CN'})
+  const offline=migration(v2);assert.equal((await offline.preflight()).canMigrate,true);await offline.execute()
+  return [['legacy',f.profile],['v2',v2.profile],['fresh',fresh],['unmarked',unmarked],['blocked',blocked]]
 }
 
 const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AISLING_|ELECTRON_RUN_AS_NODE$|TYPESAFE_API_KEY$)/i.test(name)))
 
-test('standard Electron entry checks and confirms an upgrade, excludes an old writer, then restarts in v2', native, () => {
+test('standard Electron rejects retired formats and opens only prepared or fresh Note v2 profiles', native, async () => {
   const electron = require('electron')
-  for (const [phase, profile] of desktopProfiles()) {
+  for (const [phase, profile] of await desktopProfiles()) {
     const child = spawnSync(electron, [path.join(__dirname, 'memory-migration-smoke.cjs'), phase, profile, resources], {
       windowsHide: true, encoding: 'utf8', timeout: 55_000,
       env: { ...cleanEnv(), ...(phase === 'fresh' && { AISLING_MEMORY_DB_P0: '1' }) },
@@ -411,14 +413,13 @@ test('real Vite and Electron use the same authority, review, Recall, erasure and
   const launch = promisify(execFile)
   try {
     await server.listen()
-    for (const [phase, profile] of desktopProfiles()) {
+    for (const [phase, profile] of await desktopProfiles()) {
       const result = await launch(electron, [path.join(__dirname, 'memory-migration-smoke.cjs'), phase, profile, resources], {
         windowsHide: true, timeout: 50_000, env: { ...cleanEnv(), AISLING_DEV: '1', AISLING_DEV_PROFILE: profile },
       }).catch(error => {
         if (phase === 'legacy' && error.code === 75) return error
         throw new Error(phase + '\n' + error.stdout + '\n' + error.stderr, { cause: error })
       })
-      if (phase === 'legacy') assert.equal(result.code, 75)
       assert.match(result.stdout, new RegExp('p4-smoke:' + phase), result.stderr)
     }
     const fixtureRoot = path.resolve(__dirname, '../../artifacts/memory-note-only-p1')

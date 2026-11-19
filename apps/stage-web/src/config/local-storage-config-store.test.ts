@@ -38,13 +38,12 @@ it('restores Formation only with Memory on and persists cleanup of legacy indepe
   }
 })
 
-it('drops the old organization flag only under Note-only authority and does not translate it into consent', async () => {
+it('drops the retired organization flag in every runtime and does not translate it into consent', async () => {
   let raw = JSON.stringify({ ...createDefaultPlatformConfig(), memory: {
     enabled: true, formationEnabled: false, organizationEnabled: true, noteRecallEnabled: true,
   } })
   const storage = { getItem: () => raw, setItem: (_key: string, text: string) => { raw = text } }
-  expect((await createLocalStorageConfigStore(storage).get()).memory.organizationEnabled).toBe(true)
-  const updated = await createLocalStorageConfigStore(storage, true).get()
+  const updated = await createLocalStorageConfigStore(storage).get()
   expect(updated.memory).toEqual({ enabled: true, formationEnabled: false, noteRecallEnabled: true })
   expect(JSON.parse(raw).memory).toEqual(updated.memory)
 })
@@ -77,7 +76,7 @@ it('discards saved Hearing credentials while preserving other settings', async (
   const defaults = createDefaultPlatformConfig()
   let raw = JSON.stringify({ ...defaults, hearing: { providerType: 'alibaba', apiKey: 'old-secret' } })
   const store = createLocalStorageConfigStore({ getItem: () => raw, setItem: (_key, value) => { raw = value } })
-  const expected = { ...defaults, memory: { ...defaults.memory, organizationEnabled: false } }
+  const expected = defaults
   expect(await store.get()).toEqual(expected)
   expect(JSON.parse(raw)).toEqual(expected)
   expect(raw).not.toContain('old-secret')

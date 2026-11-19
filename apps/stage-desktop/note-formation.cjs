@@ -39,6 +39,19 @@ function check(value, code) {
 
 
 
+function registerNotes(next, notes) {
+  const jobs = next.organization.tasks
+  for (const note of notes) if (!jobs.some(task => task.id === note.id && task.version === note.version))
+    jobs.push({ id: note.id, version: note.version, status: 'pending', attempts: 0 })
+  const latest = new Map()
+  for (const task of jobs.filter(task => task.status !== 'pending')) {
+    if (!latest.has(task.id) || latest.get(task.id).version <= task.version) latest.set(task.id, task)
+  }
+  const finished = [...latest.values()].slice(-2048)
+  next.organization.tasks = [...jobs.filter(task => task.status === 'pending'), ...finished]
+}
+
+
 /** Main owns authorization; model and Renderer cannot grant it. */
 function createNoteFormationService({ profile, resources, readData: readRawData, writeData, consent,
   autonomous = false, authorize = (proposal, _command, context) => autonomous && authorizeOrganization(proposal, context),
@@ -172,9 +185,21 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
     return result
   }
 
+  // P2 copied an already-v2 profile: attaching its archive must not switch away from its existing barriers.
+  let privacyJournal
+  if (archive && (readMigration(profile) || fs.existsSync(path.join(profile, migratedJournal)))) {
+    privacyJournal = migratedJournal
+    const original = path.join(profile, 'memory-erasure.v1.json')
+    if (!readMigration(profile) && fs.existsSync(original)) {
+      const old = JSON.parse(fs.readFileSync(original, 'utf8')), active = JSON.parse(fs.readFileSync(path.join(profile, migratedJournal), 'utf8'))
+      check(old.version === 2 && active.version === 2 && old.pending?.length === 0
+        && ['sources', 'sessions'].every(key => old.blocked?.[key]?.every(id => active.blocked?.[key]?.includes(id))),
+      'unified-erasure-journals-require-reconciliation')
+    }
+  }
   const privacy = createMemoryLifecycle({
     profile, store, readData: readRawData, writeData, hasDatabase: () => fs.existsSync(dbFile),
-    ...(archive && { archive, journalName: migratedJournal }),
+    ...(archive && { archive }), ...(privacyJournal && { journalName: privacyJournal }),
     pruneJobs(data, erasedIds) {
       const lookup = sourceMessageLookup(data)
       const erased = new Set(erasedIds)
@@ -315,18 +340,6 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
       entry.settlementFailures ??= []
       if (!entry.settlementFailures.some(failure => failure.code === row.failure.code)) entry.settlementFailures.push(row.failure)
     })
-  }
-
-  function registerNotes(next, notes) {
-    const jobs = next.organization.tasks
-    for (const note of notes) if (!jobs.some(task => task.id === note.id && task.version === note.version))
-      jobs.push({ id: note.id, version: note.version, status: 'pending', attempts: 0 })
-    const latest = new Map()
-    for (const task of jobs.filter(task => task.status !== 'pending')) {
-      if (!latest.has(task.id) || latest.get(task.id).version <= task.version) latest.set(task.id, task)
-    }
-    const finished = [...latest.values()].slice(-2048)
-    next.organization.tasks = [...jobs.filter(task => task.status === 'pending'), ...finished]
   }
 
   function scheduleNotes(notes) {
@@ -1190,4 +1203,4 @@ function createNoteFormationService({ profile, resources, readData: readRawData,
   }
 }
 
-module.exports = { createNoteFormationService }
+module.exports = { createNoteFormationService, registerNotes }

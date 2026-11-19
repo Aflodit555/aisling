@@ -100,8 +100,7 @@ export function createIdleLife(options: IdleLifeOptions): ParameterSource {
   }
 
   function moveEyes(gaze: { x: number; y: number }, dtMs: number, followingPointer: boolean): void {
-    // The older Aisling focus used bounded speed and acceleration, so a reversal
-    // slows before turning instead of snapping to each new cursor position.
+    // Bound speed and acceleration so gaze slows before reversing instead of snapping.
     const dx = gaze.x - eye.x
     const dy = gaze.y - eye.y
     const distance = Math.hypot(dx, dy)

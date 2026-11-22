@@ -85,8 +85,7 @@ export function createMouthSignal(config: Partial<MouthSignalConfig> = {}): Mout
 
     const envelope = clamp01(rawLevel / referenceSafe)
 
-    const voiced = envelope >= silenceFloor
-    if (voiced)
+    if (envelope >= silenceFloor)
       lastActiveAtMs = nowMs
 
     const longSilent = nowMs - lastActiveAtMs > holdMs

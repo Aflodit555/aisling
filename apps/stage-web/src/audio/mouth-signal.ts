@@ -91,8 +91,7 @@ export function createMouthSignal(config: Partial<MouthSignalConfig> = {}): Mout
     const longSilent = nowMs - lastActiveAtMs > holdMs
     const target = (!speaking || longSilent) ? 0 : Math.max(envelope, outputFloor)
 
-    // Time-based asymmetric smoothing: the exact frame size drops out, so a
-    // 32 ms step matches two 16 ms steps.
+    // Time-based smoothing avoids frame-size dependence while the target and rate stay constant.
     const rate = target > level ? attackRatePerSec : releaseRatePerSec
     const alpha = 1 - Math.exp(-rate * (dt / 1000))
     level += (target - level) * alpha

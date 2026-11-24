@@ -26,7 +26,7 @@ export interface EmotionLook {
   expression: string
   /** Additive gaze / posture offsets at full weight. */
   pose: Readonly<Record<string, number>>
-  /** Gesture motion (file name) played once when the emotion is entered strongly. */
+  /** Gesture motion key (file name before the first dot), played once on strong emotion entry. */
   gesture?: string
 }
 

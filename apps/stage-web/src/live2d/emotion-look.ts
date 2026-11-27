@@ -91,6 +91,7 @@ export function createEmotionLayer(options: {
       previousJoyWeight = joyWeight
       if (layers.every(layer => weights[layer.emotion] * ownership < SILENT))
         return undefined
+      const ownedJoyEyeWeight = joyEyeWeight * ownership
       const claims = new Map<string, number>()
       const read = (id: string) => claims.get(id) ?? readBase(id)
       for (const layer of layers) {
@@ -99,7 +100,7 @@ export function createEmotionLayer(options: {
           continue
         for (const parameter of layer.expression) {
           const eyeWeight = layer.emotion === 'joy' && JOY_EYE_PARAMETER.test(parameter.id)
-            ? joyEyeWeight * ownership
+            ? ownedJoyEyeWeight
             : weight
           claims.set(parameter.id, blendExpression(read(parameter.id), parameter, eyeWeight))
         }
